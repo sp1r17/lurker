@@ -110,6 +110,12 @@ App :: struct {
 	// From the last draw: the display scale, and the mouse in pixels.
 	scale:           f32,
 	mouse:           [2]f32,
+	// Dragging the borderless window (see window.odin).
+	wayland_drag:    Wayland_Drag,
+	wayland_drag_ok: bool,
+	// A press on a drag area that becomes a drag if the mouse moves far enough.
+	drag_armed:      bool,
+	drag_from:       [2]f32,
 	client_id:       string,
 	auth:            Auth,
 	signed_in:       bool,
@@ -127,7 +133,7 @@ run :: proc(channels: []string, config: Config) -> bool {
 	sdl.GL_SetAttribute(.CONTEXT_MINOR_VERSION, 3)
 	sdl.GL_SetAttribute(.CONTEXT_PROFILE_MASK, i32(transmute(u32)sdl.GL_CONTEXT_PROFILE_CORE))
 
-	window := sdl.CreateWindow("twitch-app", 1280 + CHAT_WIDTH, 720, {.OPENGL, .RESIZABLE, .HIGH_PIXEL_DENSITY})
+	window := sdl.CreateWindow("twitch-app", 1280 + CHAT_WIDTH, 720, {.OPENGL, .RESIZABLE, .HIGH_PIXEL_DENSITY, .BORDERLESS})
 	if window == nil {
 		log.errorf("can't create window: %s", sdl.GetError())
 		return false
@@ -145,6 +151,15 @@ run :: proc(channels: []string, config: Config) -> bool {
 
 	app: App
 	app.window = window
+	// Without a border, the window moves by dragging the video and resizes from its
+	// edges.
+	app.wayland_drag_ok = wayland_drag_init(&app.wayland_drag, window)
+	defer if app.wayland_drag_ok {
+		wayland_drag_destroy(&app.wayland_drag)
+	}
+	if !sdl.SetWindowHitTest(window, window_hit_test, &app) {
+		log.warnf("can't make the window draggable: %s", sdl.GetError())
+	}
 	app.client_id = config.client_id
 	app.browse.hovered = -1
 	a := &app.assets
@@ -219,6 +234,7 @@ run :: proc(channels: []string, config: Config) -> bool {
 			return false
 		}
 
+		wayland_drag_update(&app.wayland_drag)
 		// Handle everything that's queued before drawing once.
 		for {
 			if !handle_event(&app, e, &redraw) {
@@ -265,8 +281,7 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 				}
 				break
 			}
-			fullscreen := .FULLSCREEN in sdl.GetWindowFlags(app.window)
-			sdl.SetWindowFullscreen(app.window, !fullscreen)
+			toggle_fullscreen(app)
 		case:
 			switch app.screen {
 			case .Watch:
@@ -292,6 +307,11 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 		}
 	case e.type == .MOUSE_MOTION:
 		app.mouse = {e.motion.x * density, e.motion.y * density}
+		if .LEFT in e.motion.state {
+			window_drag_motion(app, app.mouse.x, app.mouse.y)
+		} else {
+			app.drag_armed = false
+		}
 		if app.screen == .Browse {
 			hovered := browse_card_at(&app.browse, app.mouse.x, app.mouse.y)
 			if hovered != app.browse.hovered {
@@ -319,11 +339,15 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 			app.browse.hovered = browse_card_at(&app.browse, x, y)
 			redraw^ = true
 		}
+	case e.type == .MOUSE_BUTTON_UP:
+		app.drag_armed = false
 	case e.type == .MOUSE_BUTTON_DOWN:
 		if e.button.button != sdl.BUTTON_LEFT {
 			return true
 		}
 		x, y := e.button.x * density, e.button.y * density
+		window_press(app, x, y, e.button.clicks)
+		redraw^ = true
 		switch app.screen {
 		case .Watch:
 			watch_click(app, x, y)
