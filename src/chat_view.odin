@@ -1,7 +1,7 @@
 package app
 
-import "core:unicode/utf8"
 import "core:strings"
+import "core:unicode/utf8"
 
 CHAT_MAX_MESSAGES :: 1000
 // Sizes in logical pixels, scaled by the display scale.
@@ -11,11 +11,27 @@ CHAT_PADDING :: 8
 CHAT_MESSAGE_GAP :: 3
 CHAT_SCROLL_STEP :: 60
 CHAT_MORE_BAR_HEIGHT :: 28
+// Twitch's emotes are 28 px tall at 1x; used until an emote's real size is known.
+EMOTE_PLACEHOLDER_SIZE :: 28
+BADGE_PLACEHOLDER_SIZE :: 18
+BADGE_GAP :: 3
 
 CHAT_BACKGROUND :: Color{0x18, 0x18, 0x1b, 255}
 CHAT_TEXT :: Color{0xde, 0xde, 0xe3, 255}
 CHAT_SYSTEM_TEXT :: Color{0x9a, 0x9a, 0xa3, 255}
 CHAT_MORE_BAR :: Color{0x2a, 0x2a, 0x30, 235}
+
+// What the chat view draws with.
+Assets :: struct {
+	renderer:      Renderer,
+	images:        Images,
+	jobs:          Jobs,
+	emotes:        Emotes,
+	// Milliseconds since startup, for animations.
+	now_ms:        int,
+	// Set while drawing: ms until an animated image on screen changes frame, or -1.
+	next_frame_ms: int,
+}
 
 // The scrolling list of chat messages. `scroll` is how far the view is above the
 // newest message, in pixels; 0 follows new messages as they arrive.
@@ -35,14 +51,16 @@ chat_view_destroy :: proc(v: ^Chat_View) {
 	delete(v.messages)
 }
 
-// Adds messages that have just arrived. When the view is scrolled up, it's moved by
-// the new messages' height so the messages being read stay put.
-chat_view_add :: proc(v: ^Chat_View, r: ^Renderer, scale, width: f32, new_messages: []Chat_Message) {
+// Adds messages that have just arrived, taking ownership. When the view is scrolled
+// up, it moves by the new messages' height so the messages being read stay put.
+chat_view_add :: proc(v: ^Chat_View, a: ^Assets, scale, width: f32, new_messages: []Chat_Message) {
 	for m in new_messages {
-		if v.scroll > 0 {
-			v.scroll += message_height(r, m, scale, width) + CHAT_MESSAGE_GAP * scale
-		}
 		append(&v.messages, m)
+		added := &v.messages[len(v.messages) - 1]
+		apply_third_party_emotes(added, &a.emotes)
+		if v.scroll > 0 {
+			v.scroll += message_layout(a, added, scale, width).height + CHAT_MESSAGE_GAP * scale
+		}
 	}
 	if over := len(v.messages) - CHAT_MAX_MESSAGES; over > 0 {
 		for m in v.messages[:over] {
@@ -58,15 +76,15 @@ chat_view_scroll :: proc(v: ^Chat_View, wheel_y, scale: f32) {
 
 // Handles a click at (x, y) in pixels. Returns true if it changed the view.
 chat_view_click :: proc(v: ^Chat_View, x, y: f32) -> bool {
-	b := v.more_bar
-	if b.w > 0 && x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + b.h {
+	if v.more_bar.w > 0 && in_rect(v.more_bar, x, y) {
 		v.scroll = 0
 		return true
 	}
 	return false
 }
 
-draw_chat_view :: proc(r: ^Renderer, v: ^Chat_View, rect: Rect, scale: f32) {
+draw_chat_view :: proc(a: ^Assets, v: ^Chat_View, rect: Rect, scale: f32) {
+	r := &a.renderer
 	draw_rect(r, rect, CHAT_BACKGROUND)
 	pad := CHAT_PADDING * scale
 	gap := CHAT_MESSAGE_GAP * scale
@@ -79,13 +97,12 @@ draw_chat_view :: proc(r: ^Renderer, v: ^Chat_View, rect: Rect, scale: f32) {
 	total: f32
 	all_measured := true
 	for i := len(v.messages) - 1; i >= 0; i -= 1 {
-		m := v.messages[i]
-		h := message_height(r, m, scale, content_w)
-		top := bottom - h
+		layout := message_layout(a, &v.messages[i], scale, content_w)
+		top := bottom - layout.height
 		if top < rect.y + rect.h {
-			layout_message(r, m, scale, rect.x + pad, top, content_w, draw = true)
+			draw_message(a, layout, rect.x + pad, top)
 		}
-		total += h + gap
+		total += layout.height + gap
 		bottom = top - gap
 		if bottom < rect.y {
 			// Everything older is off screen, so the full height isn't known.
@@ -109,114 +126,238 @@ draw_chat_view :: proc(r: ^Renderer, v: ^Chat_View, rect: Rect, scale: f32) {
 		size := CHAT_FONT_SIZE * scale
 		lw := text_width(r, .Regular, size, label)
 		lh := line_height(r, .Regular, size)
-		draw_text(
-			r,
-			.Regular,
-			size,
-			v.more_bar.x + (v.more_bar.w - lw) / 2,
-			v.more_bar.y + (bar_h - lh) / 2,
-			label,
-			CHAT_TEXT,
-		)
+		draw_text(r, .Regular, size, v.more_bar.x + (v.more_bar.w - lw) / 2, v.more_bar.y + (bar_h - lh) / 2, label, CHAT_TEXT)
 	}
 	clip_end(r)
 }
 
 @(private = "file")
-message_height :: proc(r: ^Renderer, m: Chat_Message, scale, width: f32) -> f32 {
-	return layout_message(r, m, scale, 0, 0, width, draw = false)
+draw_message :: proc(a: ^Assets, layout: ^Message_Layout, x, y: f32) {
+	size := CHAT_FONT_SIZE * layout.scale
+	for item in layout.items {
+		rect := Rect{x + item.rect.x, y + item.rect.y, item.rect.w, item.rect.h}
+		switch item.kind {
+		case .Text:
+			draw_text(&a.renderer, item.font, size, rect.x, rect.y, item.text, item.color)
+		case .Image:
+			if item.image.state != .Ready {
+				continue
+			}
+			texture, next := image_frame(item.image, a.now_ms)
+			draw_image(&a.renderer, texture, rect)
+			if next >= 0 && (a.next_frame_ms < 0 || next < a.next_frame_ms) {
+				a.next_frame_ms = next
+			}
+		}
+	}
 }
 
-// Word-wraps a message into `width`, drawing it if `draw` is set. Returns its height.
-// "Name: text" for chat, "Name text" in the name's colour for /me, grey for system.
-@(private = "file")
-layout_message :: proc(r: ^Renderer, m: Chat_Message, scale, x, y, width: f32, draw: bool) -> f32 {
-	pen := Pen {
-		r      = r,
-		size   = CHAT_FONT_SIZE * scale,
-		left   = x,
-		x      = x,
-		y      = y,
-		width  = width,
-		draw   = draw,
+Layout_Item_Kind :: enum {
+	Text,
+	Image,
+}
+
+// A word or image placed relative to the message's top left, in pixels.
+Layout_Item :: struct {
+	kind:  Layout_Item_Kind,
+	rect:  Rect,
+	font:  Font,
+	color: Color,
+	// Points into the message's own strings.
+	text:  string,
+	image: ^Image,
+}
+
+// A message laid out for one width and scale. Images that finish loading can change
+// sizes, so it's also redone whenever Images.version moves on.
+Message_Layout :: struct {
+	width:          f32,
+	scale:          f32,
+	images_version: int,
+	height:         f32,
+	items:          [dynamic]Layout_Item,
+}
+
+// Lays the message out, unless its cached layout still fits.
+// "Badges Name: text" for chat, "Badges Name text" in the name's colour for /me,
+// grey text for system messages.
+message_layout :: proc(a: ^Assets, m: ^Chat_Message, scale, width: f32) -> ^Message_Layout {
+	l := &m.layout
+	if l.height > 0 && l.width == width && l.scale == scale && l.images_version == a.images.version {
+		return l
 	}
-	pen.line_h = line_height(r, .Regular, pen.size)
+	clear(&l.items)
+	l.width = width
+	l.scale = scale
+	l.images_version = a.images.version
+
+	b := Builder {
+		a     = a,
+		l     = l,
+		scale = scale,
+		size  = CHAT_FONT_SIZE * scale,
+		width = width,
+	}
+	b.text_h = line_height(&a.renderer, .Regular, b.size)
+	b.line_h = b.text_h
+	pixel_scale: f32 = 2 if scale > 1 else 1
+
+	for key in m.badges {
+		badge, found := a.emotes.badges[key]
+		if !found {
+			continue
+		}
+		image := image_get(&a.images, &a.jobs, badge.url_2x if pixel_scale > 1 && badge.url_2x != "" else badge.url_1x, pixel_scale)
+		if image.state == .Failed {
+			continue
+		}
+		put_image(&b, image, BADGE_PLACEHOLDER_SIZE)
+		b.x += BADGE_GAP * scale
+	}
 
 	text_color := CHAT_TEXT
 	switch m.kind {
 	case .Chat:
-		put_words(&pen, .Bold, m.color, m.name)
-		put_text(&pen, .Bold, m.color, ":")
+		put_words(&b, .Bold, m.color, m.name)
+		put_text(&b, .Bold, m.color, ":")
 	case .Action:
-		put_words(&pen, .Bold, m.color, m.name)
+		put_words(&b, .Bold, m.color, m.name)
 		text_color = m.color
 	case .System:
 		text_color = CHAT_SYSTEM_TEXT
 	}
-	put_words(&pen, .Regular, text_color, m.text)
-	return pen.y + pen.line_h - y
+
+	for f in m.fragments {
+		switch f.kind {
+		case .Text:
+			put_words(&b, .Regular, text_color, f.text)
+		case .Emote:
+			image := image_get(&a.images, &a.jobs, f.url_2x if pixel_scale > 1 && f.url_2x != "" else f.url_1x, pixel_scale)
+			if image.state == .Failed {
+				put_words(&b, .Regular, text_color, f.text)
+			} else if f.zero_width && overlay_last(&b, image) {
+				// Drawn over the previous emote.
+			} else {
+				space(&b, .Regular)
+				put_image(&b, image, EMOTE_PLACEHOLDER_SIZE)
+			}
+		}
+	}
+	end_line(&b)
+	l.height = b.line_y
+	return l
 }
 
 @(private = "file")
-Pen :: struct {
-	r:      ^Renderer,
-	size:   f32,
-	left:   f32,
-	x, y:   f32,
-	width:  f32,
-	line_h: f32,
-	draw:   bool,
+Builder :: struct {
+	a:          ^Assets,
+	l:          ^Message_Layout,
+	scale:      f32,
+	size:       f32,
+	width:      f32,
+	text_h:     f32,
+	// The pen, and the current line's top, height and first item.
+	x:          f32,
+	line_y:     f32,
+	line_h:     f32,
+	line_start: int,
+}
+
+// Finishes the current line: centres its items vertically on the tallest one.
+@(private = "file")
+end_line :: proc(b: ^Builder) {
+	for &item in b.l.items[b.line_start:] {
+		item.rect.y = b.line_y + (b.line_h - item.rect.h) / 2
+	}
+	b.line_y += b.line_h
+	b.line_h = b.text_h
+	b.x = 0
+	b.line_start = len(b.l.items)
+}
+
+// Appends an item `w` wide, wrapping first if it doesn't fit (unless it's first on
+// its line).
+@(private = "file")
+place :: proc(b: ^Builder, item: Layout_Item, w, h: f32) {
+	if b.x > 0 && b.x + w > b.width {
+		end_line(b)
+	}
+	placed := item
+	placed.rect = {b.x, 0, w, h}
+	append(&b.l.items, placed)
+	b.x += w
+	b.line_h = max(b.line_h, h)
 }
 
 @(private = "file")
-new_line :: proc(pen: ^Pen) {
-	pen.x = pen.left
-	pen.y += pen.line_h
+space :: proc(b: ^Builder, font: Font) {
+	if b.x > 0 {
+		b.x += text_width(&b.a.renderer, font, b.size, " ")
+	}
+}
+
+@(private = "file")
+put_image :: proc(b: ^Builder, image: ^Image, placeholder: f32) {
+	size := image.size * b.scale if image.state == .Ready else {placeholder, placeholder} * b.scale
+	place(b, {kind = .Image, image = image}, size.x, size.y)
+}
+
+// Puts a zero-width emote over the previous emote on the line. False if there isn't one.
+@(private = "file")
+overlay_last :: proc(b: ^Builder, image: ^Image) -> bool {
+	if len(b.l.items) == b.line_start {
+		return false
+	}
+	last := b.l.items[len(b.l.items) - 1]
+	if last.kind != .Image {
+		return false
+	}
+	size := image.size * b.scale if image.state == .Ready else [2]f32{last.rect.w, last.rect.h}
+	append(
+		&b.l.items,
+		Layout_Item{kind = .Image, image = image, rect = {last.rect.x + (last.rect.w - size.x) / 2, 0, size.x, size.y}},
+	)
+	b.line_h = max(b.line_h, size.y)
+	return true
 }
 
 // Puts space-separated words, wrapping between words.
 @(private = "file")
-put_words :: proc(pen: ^Pen, font: Font, color: Color, text: string) {
-	space := text_width(pen.r, font, pen.size, " ")
+put_words :: proc(b: ^Builder, font: Font, color: Color, text: string) {
 	rest := text
 	for word in strings.fields_iterator(&rest) {
-		if pen.x > pen.left {
-			pen.x += space
-		}
-		put_word(pen, font, color, word)
+		space(b, font)
+		put_word(b, font, color, word)
 	}
 }
 
 @(private = "file")
-put_word :: proc(pen: ^Pen, font: Font, color: Color, word: string) {
-	w := text_width(pen.r, font, pen.size, word)
-	if pen.x > pen.left && pen.x + w > pen.left + pen.width {
-		new_line(pen)
-	}
-	if w <= pen.width {
-		put_text(pen, font, color, word)
+put_word :: proc(b: ^Builder, font: Font, color: Color, word: string) {
+	r := &b.a.renderer
+	w := text_width(r, font, b.size, word)
+	if w <= b.width {
+		put_text(b, font, color, word)
 		return
 	}
 	// Longer than a whole line: break it between characters.
+	if b.x > 0 {
+		end_line(b)
+	}
 	start := 0
 	for i := 0; i < len(word); {
 		_, n := utf8.decode_rune_in_string(word[i:])
-		if text_width(pen.r, font, pen.size, word[start:i + n]) > pen.left + pen.width - pen.x && i > start {
-			put_text(pen, font, color, word[start:i])
-			new_line(pen)
+		if i > start && text_width(r, font, b.size, word[start:i + n]) > b.width {
+			put_text(b, font, color, word[start:i])
+			end_line(b)
 			start = i
 		}
 		i += n
 	}
-	put_text(pen, font, color, word[start:])
+	put_text(b, font, color, word[start:])
 }
 
 @(private = "file")
-put_text :: proc(pen: ^Pen, font: Font, color: Color, text: string) {
-	// Advancing by the measured width, not the drawn one, keeps drawing and measuring
-	// wrapping identically.
-	if pen.draw {
-		draw_text(pen.r, font, pen.size, pen.x, pen.y, text, color)
-	}
-	pen.x += text_width(pen.r, font, pen.size, text)
+put_text :: proc(b: ^Builder, font: Font, color: Color, text: string) {
+	w := text_width(&b.a.renderer, font, b.size, text)
+	place(b, {kind = .Text, font = font, color = color, text = text}, w, b.text_h)
 }

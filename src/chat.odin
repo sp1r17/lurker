@@ -26,6 +26,8 @@ Chat :: struct {
 	stop:       bool,
 	mutex:      sync.Mutex,
 	incoming:   [dynamic]Chat_Message,
+	// The channel's user ID, from ROOMSTATE; "" until joined. Guarded by mutex.
+	room_id:    string,
 	thread:     ^thread.Thread,
 }
 
@@ -44,6 +46,14 @@ chat_stop :: proc(chat: ^Chat) {
 		destroy_chat_message(m)
 	}
 	delete(chat.incoming)
+	delete(chat.room_id)
+}
+
+// The channel's user ID once the chat has joined, else "". Allocated with the temp
+// allocator.
+chat_room_id :: proc(chat: ^Chat) -> string {
+	sync.guard(&chat.mutex)
+	return strings.clone(chat.room_id, context.temp_allocator)
 }
 
 // Moves the messages that arrived since the last call onto the end of `into`.
@@ -174,6 +184,13 @@ handle_payload :: proc(chat: ^Chat, h: ^curl.CURL, payload: string) -> bool {
 			return false
 		case "ROOMSTATE":
 			// Sent once after joining, then again whenever a room setting changes.
+			// Stored before the post below, so the main thread sees it when that wakes it.
+			if id, has_id := irc_tag(msg, "room-id"); has_id {
+				sync.guard(&chat.mutex)
+				if chat.room_id == "" {
+					chat.room_id = strings.clone(id)
+				}
+			}
 			if _, has_slow := irc_tag(msg, "slow"); has_slow {
 				chat_post(chat, system_message(fmt.tprintf("Joined #%s", chat.channel)))
 			}

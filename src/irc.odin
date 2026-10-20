@@ -1,8 +1,11 @@
 package app
 
+import "core:fmt"
 import "core:hash"
+import "core:slice"
 import "core:strconv"
 import "core:strings"
+import "core:unicode/utf8"
 
 // One IRC line, with Twitch's IRCv3 tags. All strings point into the line.
 Irc_Message :: struct {
@@ -117,21 +120,58 @@ Chat_Message_Kind :: enum {
 	System,
 }
 
+Fragment_Kind :: enum {
+	Text,
+	Emote,
+}
+
+// A run of text, or one emote. Strings are owned by the message.
+Fragment :: struct {
+	kind:       Fragment_Kind,
+	// The text, or the emote's name (shown if its image fails to load).
+	text:       string,
+	url_1x:     string,
+	url_2x:     string,
+	zero_width: bool,
+}
+
 // A message for the chat view. Strings are owned; free with destroy_chat_message.
 Chat_Message :: struct {
-	kind:  Chat_Message_Kind,
-	name:  string,
-	color: Color,
-	text:  string,
+	kind:      Chat_Message_Kind,
+	name:      string,
+	color:     Color,
+	// "set/version" badge keys, e.g. "subscriber/12".
+	badges:    [dynamic]string,
+	fragments: [dynamic]Fragment,
+	// Cached by the chat view.
+	layout:    Message_Layout,
 }
 
 destroy_chat_message :: proc(m: Chat_Message) {
 	delete(m.name)
-	delete(m.text)
+	for b in m.badges {
+		delete(b)
+	}
+	delete(m.badges)
+	destroy_fragments(m.fragments[:])
+	delete(m.fragments)
+	delete(m.layout.items)
+}
+
+destroy_fragments :: proc(fragments: []Fragment) {
+	for f in fragments {
+		delete(f.text)
+		delete(f.url_1x)
+		delete(f.url_2x)
+	}
 }
 
 system_message :: proc(text: string) -> Chat_Message {
-	return {kind = .System, text = strings.clone(text)}
+	m := Chat_Message {
+		kind = .System,
+	}
+	append(&m.fragments, Fragment{kind = .Text, text = strings.clone(text)})
+	return m
 }
 
 // Builds a chat message from a PRIVMSG, or the user's part of a USERNOTICE.
@@ -162,7 +202,130 @@ privmsg_to_chat :: proc(msg: Irc_Message) -> Chat_Message {
 	if !color_ok {
 		color = default_name_color(login)
 	}
-	return {kind = kind, name = strings.clone(name), color = readable_on_dark(color), text = strings.clone(text)}
+
+	m := Chat_Message {
+		kind  = kind,
+		name  = strings.clone(name),
+		color = readable_on_dark(color),
+	}
+	badges, _ := irc_tag(msg, "badges")
+	for badge in strings.split_iterator(&badges, ",") {
+		if badge != "" {
+			append(&m.badges, strings.clone(badge))
+		}
+	}
+	emotes_tag, _ := irc_tag(msg, "emotes")
+	twitch_emote_fragments(text, emotes_tag, &m.fragments)
+	return m
+}
+
+TWITCH_EMOTE_URL :: "https://static-cdn.jtvnw.net/emoticons/v2/%s/default/dark/%s"
+
+// Splits `text` into text and emote fragments using the emotes tag, which looks like
+// "25:0-4,12-16/1902:6-10": emote IDs with the inclusive character (not byte) ranges
+// where they appear. Ranges that don't fit the text are ignored.
+twitch_emote_fragments :: proc(text, emotes_tag: string, out: ^[dynamic]Fragment) {
+	Placement :: struct {
+		id:         string,
+		start, end: int, // character indices, end exclusive
+	}
+	placements := make([dynamic]Placement, context.temp_allocator)
+	rest := emotes_tag
+	for entry in strings.split_iterator(&rest, "/") {
+		id, _, ranges := strings.partition(entry, ":")
+		for r in strings.split_iterator(&ranges, ",") {
+			a, _, b := strings.partition(r, "-")
+			start, ok_a := strconv.parse_int(a, 10)
+			end, ok_b := strconv.parse_int(b, 10)
+			if ok_a && ok_b && start <= end {
+				append(&placements, Placement{id, start, end + 1})
+			}
+		}
+	}
+	slice.sort_by(placements[:], proc(x, y: Placement) -> bool {return x.start < y.start})
+
+	// Character index -> byte offset, with one extra entry for the end.
+	offsets := make([dynamic]int, context.temp_allocator)
+	for i in 0 ..< len(text) {
+		if !utf8.rune_start(text[i]) {
+			continue
+		}
+		append(&offsets, i)
+	}
+	append(&offsets, len(text))
+	char_count := len(offsets) - 1
+
+	byte_pos := 0
+	char_pos := 0
+	for p in placements {
+		if p.start < char_pos || p.end > char_count {
+			continue
+		}
+		if p.start > char_pos {
+			append(out, Fragment{kind = .Text, text = strings.clone(text[byte_pos:offsets[p.start]])})
+		}
+		name := text[offsets[p.start]:offsets[p.end]]
+		append(
+			out,
+			Fragment {
+				kind = .Emote,
+				text = strings.clone(name),
+				url_1x = fmt.aprintf(TWITCH_EMOTE_URL, p.id, "1.0"),
+				url_2x = fmt.aprintf(TWITCH_EMOTE_URL, p.id, "2.0"),
+			},
+		)
+		byte_pos = offsets[p.end]
+		char_pos = p.end
+	}
+	if byte_pos < len(text) {
+		append(out, Fragment{kind = .Text, text = strings.clone(text[byte_pos:])})
+	}
+}
+
+// Replaces words in the message's text fragments that name a third-party emote.
+apply_third_party_emotes :: proc(m: ^Chat_Message, emotes: ^Emotes) {
+	if m.kind == .System {
+		return
+	}
+	old := m.fragments
+	m.fragments = make([dynamic]Fragment)
+	pending := strings.builder_make(context.temp_allocator)
+	flush :: proc(pending: ^strings.Builder, out: ^[dynamic]Fragment) {
+		if strings.builder_len(pending^) > 0 {
+			append(out, Fragment{kind = .Text, text = strings.clone(strings.to_string(pending^))})
+			strings.builder_reset(pending)
+		}
+	}
+	for f in old {
+		if f.kind != .Text {
+			append(&m.fragments, f)
+			continue
+		}
+		rest := f.text
+		for word in strings.fields_iterator(&rest) {
+			if emote, found := emote_lookup(emotes, word); found {
+				flush(&pending, &m.fragments)
+				append(
+					&m.fragments,
+					Fragment {
+						kind = .Emote,
+						text = strings.clone(word),
+						url_1x = strings.clone(emote.url_1x),
+						url_2x = strings.clone(emote.url_2x),
+						zero_width = emote.zero_width,
+					},
+				)
+			} else {
+				if strings.builder_len(pending) > 0 {
+					strings.write_byte(&pending, ' ')
+				}
+				strings.write_string(&pending, word)
+			}
+		}
+		flush(&pending, &m.fragments)
+		delete(f.text)
+	}
+	delete(old)
 }
 
 parse_hex_color :: proc(s: string) -> (color: Color, ok: bool) {

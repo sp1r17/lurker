@@ -1,0 +1,122 @@
+package app
+
+import "core:strings"
+import "core:testing"
+
+@(private = "file")
+destroy_named :: proc(list: [dynamic]Named_Emote) {
+	for e in list {
+		delete(e.name)
+		delete(e.emote.url_1x)
+		delete(e.emote.url_2x)
+	}
+	delete(list)
+}
+
+@(test)
+twitch_emotes_split_text :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	fragments: [dynamic]Fragment
+	defer {
+		destroy_fragments(fragments[:])
+		delete(fragments)
+	}
+	// Ranges count characters: "é" is two bytes but one character.
+	twitch_emote_fragments("é Kappa hi Kappa", "25:2-6,11-15", &fragments)
+	testing.expect_value(t, len(fragments), 4)
+	testing.expect_value(t, fragments[0].kind, Fragment_Kind.Text)
+	testing.expect_value(t, fragments[0].text, "é ")
+	testing.expect_value(t, fragments[1].kind, Fragment_Kind.Emote)
+	testing.expect_value(t, fragments[1].text, "Kappa")
+	testing.expect_value(t, fragments[1].url_1x, "https://static-cdn.jtvnw.net/emoticons/v2/25/default/dark/1.0")
+	testing.expect_value(t, fragments[2].text, " hi ")
+	testing.expect_value(t, fragments[3].kind, Fragment_Kind.Emote)
+}
+
+@(test)
+twitch_emote_ranges_past_the_end_are_ignored :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	fragments: [dynamic]Fragment
+	defer {
+		destroy_fragments(fragments[:])
+		delete(fragments)
+	}
+	twitch_emote_fragments("hi", "25:0-9", &fragments)
+	testing.expect_value(t, len(fragments), 1)
+	testing.expect_value(t, fragments[0].text, "hi")
+}
+
+@(test)
+third_party_emotes_replace_words :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	emotes: Emotes
+	defer emotes_destroy(&emotes)
+	list: [dynamic]Named_Emote
+	defer delete(list)
+	testing.expect(t, parse_emote_set(.Global_BTTV, transmute([]byte)string(`[{"id":"abc","code":"catJAM"}]`), &list))
+	job := Emote_Set_Job {
+		source = .Global_BTTV,
+		emotes = list,
+	}
+	finish_emote_set_job(&emotes, &job)
+
+	m := system_message("x")
+	defer destroy_chat_message(m)
+	m.kind = .Chat
+	destroy_fragments(m.fragments[:])
+	clear(&m.fragments)
+	append(&m.fragments, Fragment{kind = .Text, text = strings.clone("so catJAM good")})
+	apply_third_party_emotes(&m, &emotes)
+	testing.expect_value(t, len(m.fragments), 3)
+	testing.expect_value(t, m.fragments[0].text, "so")
+	testing.expect_value(t, m.fragments[1].kind, Fragment_Kind.Emote)
+	testing.expect_value(t, m.fragments[1].url_2x, "https://cdn.betterttv.net/emote/abc/2x")
+	testing.expect_value(t, m.fragments[2].text, "good")
+}
+
+@(test)
+seventv_sets_parse :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	list: [dynamic]Named_Emote
+	defer destroy_named(list)
+	body := `{"emote_set":{"emotes":[{"name":"PETPET","flags":1,"data":{"host":{"url":"//cdn.7tv.app/emote/X"}}}]}}`
+	testing.expect(t, parse_emote_set(.Channel_7TV, transmute([]byte)body, &list))
+	testing.expect_value(t, len(list), 1)
+	testing.expect_value(t, list[0].name, "PETPET")
+	testing.expect(t, list[0].emote.zero_width)
+	testing.expect_value(t, list[0].emote.url_1x, "https://cdn.7tv.app/emote/X/1x.webp")
+}
+
+@(test)
+bttv_channel_and_ffz_sets_parse :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	list: [dynamic]Named_Emote
+	defer destroy_named(list)
+	bttv := `{"channelEmotes":[{"id":"a","code":"A"}],"sharedEmotes":[{"id":"b","code":"B"}]}`
+	testing.expect(t, parse_emote_set(.Channel_BTTV, transmute([]byte)bttv, &list))
+	ffz := `[{"code":"F","images":{"1x":"https://x/1","2x":"https://x/2","4x":null}}]`
+	testing.expect(t, parse_emote_set(.Global_FFZ, transmute([]byte)ffz, &list))
+	testing.expect_value(t, len(list), 3)
+	testing.expect_value(t, list[1].name, "B")
+	testing.expect_value(t, list[2].emote.url_2x, "https://x/2")
+	testing.expect(t, !parse_emote_set(.Global_FFZ, transmute([]byte)string(`{"error":1}`), &list))
+}
+
+@(test)
+badges_parse :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	list: [dynamic]Named_Badge
+	defer {
+		for b in list {
+			delete(b.key)
+			delete(b.badge.url_1x)
+			delete(b.badge.url_2x)
+		}
+		delete(list)
+	}
+	body := `{"data":[{"set_id":"subscriber","versions":[{"id":"12","image_url_1x":"u1","image_url_2x":"u2"}]}]}`
+	testing.expect(t, parse_badges(transmute([]byte)body, &list))
+	testing.expect_value(t, len(list), 1)
+	testing.expect_value(t, list[0].key, "subscriber/12")
+	testing.expect_value(t, list[0].badge.url_2x, "u2")
+}

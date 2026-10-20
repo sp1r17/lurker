@@ -47,7 +47,8 @@ privmsg_becomes_chat_message :: proc(t: ^testing.T) {
 	testing.expect_value(t, m.kind, Chat_Message_Kind.Chat)
 	testing.expect_value(t, m.name, "FooBar")
 	testing.expect_value(t, m.color, Color{0, 255, 0, 255})
-	testing.expect_value(t, m.text, "hi")
+	testing.expect_value(t, len(m.fragments), 1)
+	testing.expect_value(t, m.fragments[0].text, "hi")
 }
 
 @(test)
@@ -58,7 +59,7 @@ action_and_localized_names :: proc(t: ^testing.T) {
 	defer destroy_chat_message(m)
 	testing.expect_value(t, m.kind, Chat_Message_Kind.Action)
 	testing.expect_value(t, m.name, "이름 (someone)")
-	testing.expect_value(t, m.text, "waves")
+	testing.expect_value(t, m.fragments[0].text, "waves")
 	// No colour tag: a default colour, the same every time for this login.
 	testing.expect_value(t, m.color, readable_on_dark(default_name_color("someone")))
 }
@@ -70,7 +71,7 @@ usernotice_sender_comes_from_login_tag :: proc(t: ^testing.T) {
 	m := privmsg_to_chat(msg)
 	defer destroy_chat_message(m)
 	testing.expect_value(t, m.name, "Subber")
-	testing.expect_value(t, m.text, "great stream")
+	testing.expect_value(t, m.fragments[0].text, "great stream")
 }
 
 @(test)
