@@ -1,0 +1,141 @@
+package app
+
+import "core:log"
+import "core:strings"
+import "mpv"
+import sdl "vendor:sdl3"
+
+// Embedded mpv, drawing into the window's OpenGL context through libmpv's render API.
+// mpv calls back from its own threads; the callbacks only push SDL events, and the
+// main thread does the work when they arrive.
+Player :: struct {
+	handle:        ^mpv.Handle,
+	render:        ^mpv.Render_Context,
+	// SDL event types pushed when mpv has events waiting or a new frame to draw.
+	events_event:  u32,
+	redraw_event:  u32,
+}
+
+Player_Error :: enum {
+	None,
+	Create_Failed,
+	Init_Failed,
+	Render_Init_Failed,
+}
+
+// Must be called with the window's OpenGL context current.
+player_init :: proc(p: ^Player) -> Player_Error {
+	first := sdl.RegisterEvents(2)
+	p.events_event = first
+	p.redraw_event = first + 1
+
+	p.handle = mpv.create()
+	if p.handle == nil {
+		return .Create_Failed
+	}
+	mpv.set_option_string(p.handle, "vo", "libmpv")
+	mpv.set_option_string(p.handle, "hwdec", "auto-safe")
+	// "warn" includes a harmless ffmpeg warning for every Twitch segment.
+	mpv.request_log_messages(p.handle, "error")
+	if err := mpv.initialize(p.handle); err < 0 {
+		log.errorf("mpv init failed: %s", mpv.error_string(err))
+		mpv.terminate_destroy(p.handle)
+		return .Init_Failed
+	}
+
+	gl_init := mpv.Opengl_Init_Params {
+		get_proc_address = proc "c" (_: rawptr, name: cstring) -> rawptr {
+			return rawptr(sdl.GL_GetProcAddress(name))
+		},
+	}
+	api_type: cstring = mpv.RENDER_API_TYPE_OPENGL
+	params := [?]mpv.Render_Param {
+		{.Api_Type, rawptr(api_type)},
+		{.Opengl_Init_Params, &gl_init},
+		{},
+	}
+	if err := mpv.render_context_create(&p.render, p.handle, raw_data(params[:])); err < 0 {
+		log.errorf("mpv render init failed: %s", mpv.error_string(err))
+		mpv.terminate_destroy(p.handle)
+		return .Render_Init_Failed
+	}
+
+	mpv.set_wakeup_callback(p.handle, push_event, rawptr(uintptr(p.events_event)))
+	mpv.render_context_set_update_callback(p.render, push_event, rawptr(uintptr(p.redraw_event)))
+	return .None
+}
+
+@(private = "file")
+push_event :: proc "c" (event_type: rawptr) {
+	e: sdl.Event
+	e.type = sdl.EventType(u32(uintptr(event_type)))
+	// Fails only when SDL's event queue is full; mpv calls again with its next event.
+	_ = sdl.PushEvent(&e)
+}
+
+// Must be called with the window's OpenGL context current.
+player_destroy :: proc(p: ^Player) {
+	// The render context goes first: it holds GL objects and keeps the core alive.
+	mpv.render_context_free(p.render)
+	mpv.terminate_destroy(p.handle)
+}
+
+player_load :: proc(p: ^Player, url: string) {
+	curl := strings.clone_to_cstring(url, context.temp_allocator)
+	player_command(p, {"loadfile", curl})
+}
+
+player_command :: proc(p: ^Player, args: []cstring) {
+	argv := make([]cstring, len(args) + 1, context.temp_allocator)
+	copy(argv, args)
+	if err := mpv.command_async(p.handle, 0, raw_data(argv)); err < 0 {
+		log.warnf("mpv command %v failed: %s", args, mpv.error_string(err))
+	}
+}
+
+// Handles mpv's waiting events. Returns false when mpv has shut down.
+player_handle_events :: proc(p: ^Player) -> bool {
+	for {
+		e := mpv.wait_event(p.handle, 0)
+		#partial switch e.event_id {
+		case .None:
+			return true
+		case .Shutdown:
+			return false
+		case .Log_Message:
+			m := (^mpv.Event_Log_Message)(e.data)
+			log.warnf("mpv %s: %s", m.prefix, strings.trim_right_space(string(m.text)))
+		case .End_File:
+			end := (^mpv.Event_End_File)(e.data)
+			if end.reason == .Error {
+				log.errorf("playback failed: %s", mpv.error_string(end.error))
+			} else if end.reason == .EOF {
+				log.info("stream ended")
+			}
+		case .Command_Reply:
+			if e.error < 0 {
+				log.warnf("mpv command failed: %s", mpv.error_string(e.error))
+			}
+		}
+	}
+}
+
+// Whether mpv has a new frame since the last draw.
+player_wants_redraw :: proc(p: ^Player) -> bool {
+	return .Frame in mpv.render_context_update(p.render)
+}
+
+// Draws the current frame into the default framebuffer.
+player_draw :: proc(p: ^Player, width, height: i32) {
+	fbo := mpv.Opengl_Fbo {
+		w = width,
+		h = height,
+	}
+	flip_y: i32 = 1
+	params := [?]mpv.Render_Param{{.Opengl_Fbo, &fbo}, {.Flip_Y, &flip_y}, {}}
+	mpv.render_context_render(p.render, raw_data(params[:]))
+}
+
+player_report_swap :: proc(p: ^Player) {
+	mpv.render_context_report_swap(p.render)
+}
