@@ -215,7 +215,7 @@ run :: proc(channels: []string, config: Config) -> bool {
 		// Wake up for the next animation frame, browse refresh or sign-in poll,
 		// whichever is due first.
 		wait := a.next_frame_ms if a.next_frame_ms >= 0 else -1
-		dues := []int{-1, -1, volume_osd_wait(&app), controls_wait(&app)}
+		dues := []int{-1, -1, volume_osd_wait(&app), controls_wait(&app), stream_info_tick(&app)}
 		if app.screen == .Browse {
 			dues[0], dues[1] = browse_tick(&app), sign_in_tick(&app)
 		}
@@ -361,7 +361,7 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 			if sign_in_click(app, x, y) {
 				redraw^ = true
 			} else if i := browse_card_at(&app.browse, x, y); i >= 0 {
-				watch_start(app, app.browse.streams[i].user_login)
+				watch_start(app, app.browse.streams[i].user_login, info = &app.browse.streams[i])
 				redraw^ = true
 			}
 		}
@@ -415,6 +415,8 @@ finish_jobs :: proc(app: ^App) {
 			finish_device_poll_job(app, &p)
 		case User_Job:
 			finish_user_job(app, &p)
+		case Stream_Info_Job:
+			finish_stream_info_job(app, &p)
 		}
 		destroy_job(job)
 	}

@@ -24,6 +24,8 @@ VOLUME_OSD_MS :: 1500
 VOLUME_BAR_WIDTH :: 160
 // The video's controls (the quality button) show this long after the mouse moves.
 CONTROLS_MS :: 2000
+// And this long when a stream starts, to show what's playing.
+CONTROLS_START_MS :: 3000
 MENU_ITEM_HEIGHT :: 34
 MENU_WIDTH :: 160
 MENU_HOVER :: Color{0x3a, 0x3a, 0x44, 255}
@@ -57,6 +59,12 @@ Watch :: struct {
 	card:            User_Card,
 	// When recent messages were sent (Assets.now_ms), for the rate limit.
 	sent_at:         [dynamic]int,
+	// The stream's title, game, viewers and start time, if known; when they were
+	// last looked up (Assets.now_ms, 0 for never), and whether a lookup is running.
+	info:             Stream,
+	has_info:         bool,
+	info_at:          int,
+	info_pending:     bool,
 	// Until when (Assets.now_ms) the volume bar shows.
 	volume_osd_until: int,
 	// Until when the video's controls show; the quality menu is open.
@@ -74,9 +82,10 @@ Watch :: struct {
 }
 
 // Starts watching `channel`, with the splits last open with it unless not
-// `restore`. Each watch is a new session: jobs started for an earlier one are
-// ignored when they finish.
-watch_start :: proc(app: ^App, channel: string, restore := true) {
+// `restore`. `info`, if known (from the browse screen), shows right away. Each
+// watch is a new session: jobs started for an earlier one are ignored when they
+// finish.
+watch_start :: proc(app: ^App, channel: string, restore := true, info: ^Stream = nil) {
 	if app.screen == .Watch {
 		watch_stop(app)
 	}
@@ -86,6 +95,11 @@ watch_start :: proc(app: ^App, channel: string, restore := true) {
 		channel   = strings.clone(channel),
 		status    = .Starting,
 		show_chat = true,
+	}
+	if info != nil {
+		watch_set_info(app, info^)
+		// Just fetched by the browse screen: the next lookup can wait.
+		w.info_at = max(app.assets.now_ms, 1)
 	}
 	start_stream(app, signed = app.signed_in)
 	p := pane_new(app)
@@ -122,6 +136,9 @@ watch_stop :: proc(app: ^App) {
 	}
 	delete(w.panes)
 	delete(w.sent_at)
+	if w.has_info {
+		destroy_stream(w.info)
+	}
 	delete(w.channel)
 	w^ = {}
 	app.session += 1
@@ -292,14 +309,14 @@ draw_controls :: proc(app: ^App) {
 	w.quality_button = {}
 	w.quality_items = {}
 	w.latency_item = {}
-	if app.assets.now_ms >= w.controls_until && !w.quality_menu {
+	if !controls_visible(app) {
 		return
 	}
 	r := &app.assets.renderer
 	scale := app.scale
 	size := BROWSE_CARD_TEXT_SIZE * scale
 	pad := 12 * scale
-	label := strings.concatenate({QUALITY_LABELS[app.layout.quality], " ▾"}, context.temp_allocator)
+	label := strings.concatenate({QUALITY_LABELS[app.layout.quality], " ▼"}, context.temp_allocator)
 	bw := text_width(r, .Bold, size, label) + 2 * pad
 	bh := line_height(r, .Bold, size) + pad
 	v := w.video_rect
@@ -353,6 +370,7 @@ watch_player_events :: proc(app: ^App, events: Player_Events) {
 	}
 	if .File_Loaded in events {
 		w.status = .Playing
+		w.controls_until = app.assets.now_ms + CONTROLS_START_MS
 	}
 	if .Ended in events {
 		switch streamlink_outcome(&w.streamlink) {
@@ -460,7 +478,9 @@ draw_volume :: proc(app: ^App) {
 	lh := line_height(r, .Bold, size)
 	label := "Muted" if app.layout.muted else fmt.tprintf("Volume %d%%", app.layout.volume)
 	bar_w := VOLUME_BAR_WIDTH * scale
-	panel := Rect{w.video_rect.x + 16 * scale, w.video_rect.y + 16 * scale, bar_w + 2 * pad, lh + 14 * scale + 2 * pad}
+	// Below the stream info bar while that's showing.
+	top := w.video_rect.y + (stream_info_height(app) if controls_visible(app) else 0)
+	panel := Rect{w.video_rect.x + 16 * scale, top + 16 * scale, bar_w + 2 * pad, lh + 14 * scale + 2 * pad}
 	draw_rect(r, panel, CHAT_TOGGLE_BACKGROUND)
 	draw_text(r, .Bold, size, panel.x + pad, panel.y + pad, label, BROWSE_TEXT)
 	// The bar spans 0 to MAX_VOLUME, with a tick at 100% and the boost above it in
@@ -597,6 +617,7 @@ draw_watch :: proc(app: ^App) {
 	}
 	r := &a.renderer
 	scale := app.scale
+	draw_stream_info(app)
 	draw_volume(app)
 	draw_controls(app)
 	w.hide_button = {}
