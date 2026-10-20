@@ -45,9 +45,10 @@ Watch :: struct {
 	video_rect:      Rect,
 }
 
-// Starts watching `channel`. Each watch is a new session: jobs started for an
-// earlier one are ignored when they finish.
-watch_start :: proc(app: ^App, channel: string) {
+// Starts watching `channel`, with the splits last open with it unless not
+// `restore`. Each watch is a new session: jobs started for an earlier one are
+// ignored when they finish.
+watch_start :: proc(app: ^App, channel: string, restore := true) {
 	if app.screen == .Watch {
 		watch_stop(app)
 	}
@@ -62,8 +63,20 @@ watch_start :: proc(app: ^App, channel: string) {
 	p := pane_new(app)
 	pane_join(app, p, w.channel)
 	append(&w.panes, p)
+	if restore {
+		for split in layout_splits(app, w.channel) {
+			watch_add_split(app, split)
+		}
+	}
 	set_title(app, w.channel)
 	app.screen = .Watch
+}
+
+// Opens `channel`'s chat as a split.
+watch_add_split :: proc(app: ^App, channel: string) {
+	p := pane_new(app)
+	pane_join(app, p, channel)
+	append(&app.watch.panes, p)
 }
 
 // Stops the video and chats and goes back to browsing.
@@ -108,9 +121,13 @@ watch_close_pane :: proc(app: ^App, p: ^Chat_Pane) {
 		if w.card.open && w.card.pane == p.id {
 			user_card_close(app)
 		}
+		had_channel := p.channel != ""
 		pane_destroy(app, p)
 		ordered_remove(&w.panes, i)
 		w.focus = min(w.focus, len(w.panes) - 1)
+		if had_channel {
+			layout_remember(app)
+		}
 		return
 	}
 }

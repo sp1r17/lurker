@@ -387,6 +387,7 @@ pane_submit_channel :: proc(app: ^App, p: ^Chat_Pane) {
 	input_clear(&p.boxes[.Chat])
 	box_unfocus(app)
 	pane_join(app, p, name)
+	layout_remember(app)
 }
 
 @(private = "file")

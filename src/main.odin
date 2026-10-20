@@ -105,6 +105,7 @@ App :: struct {
 	session:         int,
 	// For Chat_Pane.id.
 	next_pane_id:    int,
+	layout:          Layout,
 	chat_wake_event: u32,
 	// From the last draw: the display scale, and the mouse in pixels.
 	scale:           f32,
@@ -173,6 +174,8 @@ run :: proc(channels: []string, config: Config) -> bool {
 		destroy_auth(app.auth)
 	}
 
+	app.layout = layout_load()
+	defer layout_destroy(&app.layout)
 	app.chat_wake_event = sdl.RegisterEvents(1)
 	defer browse_destroy(&app.browse)
 	defer sign_in_destroy(&app.sign_in)
@@ -180,11 +183,13 @@ run :: proc(channels: []string, config: Config) -> bool {
 		watch_stop(&app)
 	}
 	if len(channels) > 0 {
-		watch_start(&app, channels[0])
+		// Splits named on the command line replace the saved ones.
+		watch_start(&app, channels[0], restore = len(channels) == 1)
 		for split in channels[1:] {
-			p := pane_new(&app)
-			pane_join(&app, p, split)
-			append(&app.watch.panes, p)
+			watch_add_split(&app, split)
+		}
+		if len(channels) > 1 {
+			layout_remember(&app)
 		}
 	}
 
