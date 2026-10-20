@@ -135,11 +135,35 @@ Fragment :: struct {
 	zero_width: bool,
 }
 
+// What a moderation message does to earlier messages.
+Clear_Kind :: enum {
+	None,
+	// One message, by ID (CLEARMSG).
+	Message,
+	// Everything a user said (CLEARCHAT with a user: a timeout or ban).
+	User,
+	// The whole chat (CLEARCHAT without a user).
+	All,
+}
+
 // A message for the chat view. Strings are owned; free with destroy_chat_message.
 Chat_Message :: struct {
 	kind:      Chat_Message_Kind,
 	name:      string,
 	color:     Color,
+	// Twitch's message ID, and the sender's login and user ID; empty for system
+	// messages and our own.
+	id:        string,
+	login:     string,
+	user_id:   string,
+	// Removed by a moderator: drawn faded.
+	deleted:   bool,
+	// Mentions the signed-in user.
+	mention:   bool,
+	// For moderation messages: what to clear when this arrives, and whose
+	// (a message ID or a login).
+	clear:     Clear_Kind,
+	clear_target: string,
 	// "set/version" badge keys, e.g. "subscriber/12".
 	badges:    [dynamic]string,
 	fragments: [dynamic]Fragment,
@@ -149,6 +173,10 @@ Chat_Message :: struct {
 
 destroy_chat_message :: proc(m: Chat_Message) {
 	delete(m.name)
+	delete(m.id)
+	delete(m.login)
+	delete(m.user_id)
+	delete(m.clear_target)
 	for b in m.badges {
 		delete(b)
 	}
@@ -203,10 +231,15 @@ privmsg_to_chat :: proc(msg: Irc_Message) -> Chat_Message {
 		color = default_name_color(login)
 	}
 
+	id, _ := irc_tag(msg, "id")
+	user_id, _ := irc_tag(msg, "user-id")
 	m := Chat_Message {
-		kind  = kind,
-		name  = strings.clone(name),
-		color = readable_on_dark(color),
+		kind    = kind,
+		name    = strings.clone(name),
+		color   = readable_on_dark(color),
+		id      = strings.clone(id),
+		login   = strings.clone(login),
+		user_id = strings.clone(user_id),
 	}
 	badges, _ := irc_tag(msg, "badges")
 	for badge in strings.split_iterator(&badges, ",") {
@@ -217,6 +250,74 @@ privmsg_to_chat :: proc(msg: Irc_Message) -> Chat_Message {
 	emotes_tag, _ := irc_tag(msg, "emotes")
 	twitch_emote_fragments(text, emotes_tag, &m.fragments)
 	return m
+}
+
+// A CLEARCHAT or CLEARMSG as a message: the moderation to apply, and for timeouts
+// and bans, a line saying so.
+moderation_message :: proc(msg: Irc_Message) -> (m: Chat_Message, ok: bool) {
+	switch msg.command {
+	case "CLEARMSG":
+		target, has_target := irc_tag(msg, "target-msg-id")
+		if !has_target {
+			return {}, false
+		}
+		return {kind = .System, clear = .Message, clear_target = strings.clone(target)}, true
+	case "CLEARCHAT":
+		if len(msg.params) < 2 {
+			m = system_message("Chat was cleared by a moderator.")
+			m.clear = .All
+			return m, true
+		}
+		login := irc_trailing(msg)
+		if seconds, has_duration := irc_tag(msg, "ban-duration"); has_duration {
+			n, _ := strconv.parse_int(seconds, 10)
+			m = system_message(fmt.tprintf("%s has been timed out for %s.", login, format_duration(n)))
+		} else {
+			m = system_message(fmt.tprintf("%s has been permanently banned.", login))
+		}
+		m.clear = .User
+		m.clear_target = strings.clone(login)
+		return m, true
+	}
+	return {}, false
+}
+
+// "45s", "10m", "1h 30m", "7d": how Chatterino words timeouts.
+format_duration :: proc(seconds: int) -> string {
+	switch {
+	case seconds < 60:
+		return fmt.tprintf("%ds", seconds)
+	case seconds < 3600:
+		return fmt.tprintf("%dm", seconds / 60)
+	case seconds < 86400:
+		if seconds % 3600 / 60 == 0 {
+			return fmt.tprintf("%dh", seconds / 3600)
+		}
+		return fmt.tprintf("%dh %dm", seconds / 3600, seconds % 3600 / 60)
+	case:
+		return fmt.tprintf("%dd", seconds / 86400)
+	}
+}
+
+// Whether the message's text mentions `login`, as a word ("@login", "login,").
+mentions :: proc(m: ^Chat_Message, login: string) -> bool {
+	if login == "" || m.kind == .System || m.login == login {
+		return false
+	}
+	for f in m.fragments {
+		if f.kind != .Text {
+			continue
+		}
+		rest := f.text
+		for word in strings.fields_iterator(&rest) {
+			w := strings.trim_left(word, "@")
+			w = strings.trim_right(w, ",.!?:;")
+			if strings.equal_fold(w, login) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 TWITCH_EMOTE_URL :: "https://static-cdn.jtvnw.net/emoticons/v2/%s/default/dark/%s"

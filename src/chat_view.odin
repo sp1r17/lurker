@@ -26,6 +26,10 @@ CHAT_BACKGROUND :: Color{0x18, 0x18, 0x1b, 255}
 CHAT_TEXT :: Color{0xde, 0xde, 0xe3, 255}
 CHAT_SYSTEM_TEXT :: Color{0x9a, 0x9a, 0xa3, 255}
 CHAT_MORE_BAR :: Color{0x2a, 0x2a, 0x30, 235}
+// Chatterino's colour for messages that mention you.
+CHAT_MENTION_BACKGROUND :: Color{0x7f, 0x3f, 0x49, 110}
+// How opaque messages removed by a moderator are drawn.
+CHAT_DELETED_ALPHA :: 90
 
 // What the chat view draws with.
 Assets :: struct {
@@ -44,10 +48,17 @@ Assets :: struct {
 Chat_View :: struct {
 	messages:   [dynamic]Chat_Message,
 	scroll:     f32,
-	// Set while drawing: the furthest the view can scroll, and where the "more
-	// messages below" bar is (zero size when hidden).
+	// Set while drawing: the furthest the view can scroll, where the "more
+	// messages below" bar is (zero size when hidden), and where names are.
 	max_scroll: f32,
 	more_bar:   Rect,
+	name_hits:  [dynamic]Name_Hit,
+}
+
+Name_Hit :: struct {
+	rect:  Rect,
+	// Points into the message, valid until the next draw.
+	login: string,
 }
 
 chat_view_destroy :: proc(v: ^Chat_View) {
@@ -55,15 +66,27 @@ chat_view_destroy :: proc(v: ^Chat_View) {
 		destroy_chat_message(m)
 	}
 	delete(v.messages)
+	delete(v.name_hits)
 }
 
-// Adds messages that have just arrived, taking ownership. When the view is scrolled
-// up, it moves by the new messages' height so the messages being read stay put.
-chat_view_add :: proc(v: ^Chat_View, a: ^Assets, scale, width: f32, new_messages: []Chat_Message) {
+// Adds messages that have just arrived, taking ownership. Moderation messages fade
+// what they remove; messages mentioning `self_login` are highlighted. When the view
+// is scrolled up, it moves by the new messages' height so the messages being read
+// stay put.
+chat_view_add :: proc(v: ^Chat_View, a: ^Assets, scale, width: f32, new_messages: []Chat_Message, self_login := "") {
 	for m in new_messages {
+		if m.clear != .None {
+			apply_clear(v, m)
+			// A deleted message leaves no line of its own.
+			if len(m.fragments) == 0 {
+				destroy_chat_message(m)
+				continue
+			}
+		}
 		append(&v.messages, m)
 		added := &v.messages[len(v.messages) - 1]
 		apply_third_party_emotes(added, &a.emotes)
+		added.mention = mentions(added, self_login)
 		if v.scroll > 0 {
 			v.scroll += message_layout(a, added, scale, width).height + CHAT_MESSAGE_GAP * scale
 		}
@@ -74,6 +97,31 @@ chat_view_add :: proc(v: ^Chat_View, a: ^Assets, scale, width: f32, new_messages
 		}
 		remove_range(&v.messages, 0, over)
 	}
+}
+
+@(private = "file")
+apply_clear :: proc(v: ^Chat_View, m: Chat_Message) {
+	for &old in v.messages {
+		switch m.clear {
+		case .None:
+		case .Message:
+			old.deleted ||= old.id == m.clear_target
+		case .User:
+			old.deleted ||= old.login == m.clear_target
+		case .All:
+			old.deleted ||= old.kind != .System
+		}
+	}
+}
+
+// The login of the name at (x, y), if a name is drawn there.
+chat_view_name_at :: proc(v: ^Chat_View, x, y: f32) -> (login: string, found: bool) {
+	for hit in v.name_hits {
+		if in_rect(hit.rect, x, y) {
+			return hit.login, true
+		}
+	}
+	return "", false
 }
 
 chat_view_scroll :: proc(v: ^Chat_View, wheel_y, scale: f32) {
@@ -96,6 +144,7 @@ draw_chat_view :: proc(a: ^Assets, v: ^Chat_View, rect: Rect, scale: f32) {
 	gap := CHAT_MESSAGE_GAP * scale
 	content_w := rect.w - 2 * pad
 
+	clear(&v.name_hits)
 	clip_begin(r, rect)
 	// Messages are laid out from the newest upwards; `bottom` is the next one's
 	// bottom edge.
@@ -103,10 +152,14 @@ draw_chat_view :: proc(a: ^Assets, v: ^Chat_View, rect: Rect, scale: f32) {
 	total: f32
 	all_measured := true
 	for i := len(v.messages) - 1; i >= 0; i -= 1 {
-		layout := message_layout(a, &v.messages[i], scale, content_w)
+		m := &v.messages[i]
+		layout := message_layout(a, m, scale, content_w)
 		top := bottom - layout.height
 		if top < rect.y + rect.h {
-			draw_message(a, layout, rect.x + pad, top)
+			if m.mention {
+				draw_rect(r, {rect.x, top - gap / 2, rect.w, layout.height + gap}, CHAT_MENTION_BACKGROUND)
+			}
+			draw_message(a, v, m, layout, rect.x + pad, top)
 		}
 		total += layout.height + gap
 		bottom = top - gap
@@ -138,19 +191,25 @@ draw_chat_view :: proc(a: ^Assets, v: ^Chat_View, rect: Rect, scale: f32) {
 }
 
 @(private = "file")
-draw_message :: proc(a: ^Assets, layout: ^Message_Layout, x, y: f32) {
+draw_message :: proc(a: ^Assets, v: ^Chat_View, m: ^Chat_Message, layout: ^Message_Layout, x, y: f32) {
 	size := CHAT_FONT_SIZE * layout.scale
+	alpha: u8 = CHAT_DELETED_ALPHA if m.deleted else 255
 	for item in layout.items {
 		rect := Rect{x + item.rect.x, y + item.rect.y, item.rect.w, item.rect.h}
+		if item.is_name {
+			append(&v.name_hits, Name_Hit{rect, m.login})
+		}
 		switch item.kind {
 		case .Text:
-			draw_text(&a.renderer, item.font, size, rect.x, rect.y, item.text, item.color)
+			color := item.color
+			color.a = u8(u32(color.a) * u32(alpha) / 255)
+			draw_text(&a.renderer, item.font, size, rect.x, rect.y, item.text, color)
 		case .Image:
 			if item.image.state != .Ready {
 				continue
 			}
 			texture, next := image_frame(item.image, a.now_ms)
-			draw_image(&a.renderer, texture, rect)
+			draw_image(&a.renderer, texture, rect, {255, 255, 255, alpha})
 			if next >= 0 && (a.next_frame_ms < 0 || next < a.next_frame_ms) {
 				a.next_frame_ms = next
 			}
@@ -170,8 +229,10 @@ Layout_Item :: struct {
 	font:  Font,
 	color: Color,
 	// Points into the message's own strings.
-	text:  string,
-	image: ^Image,
+	text:    string,
+	image:   ^Image,
+	// Part of the sender's name: clicking it opens their user card.
+	is_name: bool,
 }
 
 // A message laid out for one width and scale. Images that finish loading can change
@@ -224,10 +285,14 @@ message_layout :: proc(a: ^Assets, m: ^Chat_Message, scale, width: f32) -> ^Mess
 	text_color := CHAT_TEXT
 	switch m.kind {
 	case .Chat:
+		b.in_name = m.login != ""
 		put_words(&b, .Bold, m.color, m.name)
+		b.in_name = false
 		put_text(&b, .Bold, m.color, ":")
 	case .Action:
+		b.in_name = m.login != ""
 		put_words(&b, .Bold, m.color, m.name)
+		b.in_name = false
 		text_color = m.color
 	case .System:
 		text_color = CHAT_SYSTEM_TEXT
@@ -267,6 +332,8 @@ Builder :: struct {
 	line_y:     f32,
 	line_h:     f32,
 	line_start: int,
+	// Words put now are the sender's name.
+	in_name:    bool,
 }
 
 // Finishes the current line: centres its items vertically on the tallest one.
@@ -377,5 +444,5 @@ put_word :: proc(b: ^Builder, font: Font, color: Color, word: string) {
 @(private = "file")
 put_text :: proc(b: ^Builder, font: Font, color: Color, text: string) {
 	w := text_width(&b.a.renderer, font, b.size, text)
-	place(b, {kind = .Text, font = font, color = color, text = text}, w, b.text_h)
+	place(b, {kind = .Text, font = font, color = color, text = text, is_name = b.in_name}, w, b.text_h)
 }

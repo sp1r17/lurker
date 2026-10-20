@@ -22,6 +22,7 @@ Job_Payload :: union {
 	Followed_Job,
 	Device_Start_Job,
 	Device_Poll_Job,
+	User_Job,
 }
 
 Jobs :: struct {
@@ -123,6 +124,8 @@ destroy_job :: proc(job: ^Job) {
 		destroy_device_start_job(&p)
 	case Device_Poll_Job:
 		destroy_device_poll_job(&p)
+	case User_Job:
+		destroy_user_job(&p)
 	}
 	free(job)
 }

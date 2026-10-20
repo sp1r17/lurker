@@ -30,6 +30,7 @@ Watch :: struct {
 	room_id:         string,
 	new_video_frame: bool,
 	input:           Text_Input,
+	card:            User_Card,
 	// How far the chat box's text is scrolled to keep the cursor in view, in pixels.
 	input_scroll:    f32,
 	// When recent messages were sent (Assets.now_ms), for the rate limit.
@@ -74,6 +75,7 @@ watch_stop :: proc(app: ^App) {
 	player_render(&app.player)
 	chat_stop(w.chat)
 	free(w.chat)
+	user_card_close(app)
 	chat_view_destroy(&w.chat_view)
 	input_unfocus(app)
 	input_destroy(&w.input)
@@ -117,7 +119,14 @@ watch_chat_arrived :: proc(app: ^App) {
 	}
 	arrived := make([dynamic]Chat_Message, context.temp_allocator)
 	chat_take(w.chat, &arrived)
-	chat_view_add(&w.chat_view, &app.assets, app.scale, w.chat_rect.w - 2 * CHAT_PADDING * app.scale, arrived[:])
+	chat_view_add(
+		&w.chat_view,
+		&app.assets,
+		app.scale,
+		w.chat_rect.w - 2 * CHAT_PADDING * app.scale,
+		arrived[:],
+		app.auth.login if app.signed_in else "",
+	)
 
 	if w.room_id != "" {
 		return
@@ -139,7 +148,11 @@ watch_chat_arrived :: proc(app: ^App) {
 watch_key :: proc(app: ^App, key: sdl.Keycode) -> bool {
 	switch key {
 	case sdl.K_ESCAPE:
-		watch_stop(app)
+		if app.watch.card.open {
+			user_card_close(app)
+		} else {
+			watch_stop(app)
+		}
 	case sdl.K_SPACE:
 		player_command(&app.player, {"cycle", "pause"})
 	case sdl.K_M:
@@ -150,6 +163,7 @@ watch_key :: proc(app: ^App, key: sdl.Keycode) -> bool {
 		player_command(&app.player, {"add", "volume", "-" + VOLUME_STEP})
 	case sdl.K_C:
 		app.watch.show_chat = !app.watch.show_chat
+		user_card_close(app)
 	case sdl.K_RETURN, sdl.K_KP_ENTER:
 		input_focus(app)
 	case:
@@ -199,6 +213,7 @@ draw_watch :: proc(app: ^App) {
 		draw_rect(&a.renderer, w.chat_rect, CHAT_BACKGROUND)
 		draw_chat_view(a, &w.chat_view, w.messages_rect, app.scale)
 		draw_input(app)
+		draw_user_card(app)
 	}
 }
 
@@ -261,11 +276,19 @@ input_unfocus :: proc(app: ^App) {
 
 watch_click :: proc(app: ^App, x, y: f32) {
 	w := &app.watch
+	if w.card.open && in_rect(w.card.rect, x, y) {
+		return
+	}
 	if w.show_chat && in_rect(w.input_rect, x, y) {
 		input_focus(app)
 		return
 	}
 	input_unfocus(app)
+	if login, found := chat_view_name_at(&w.chat_view, x, y); found {
+		user_card_open(app, login, y)
+		return
+	}
+	user_card_close(app)
 	chat_view_click(&w.chat_view, x, y)
 }
 

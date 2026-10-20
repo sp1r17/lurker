@@ -250,6 +250,10 @@ handle_payload :: proc(chat: ^Chat, h: ^curl.CURL, payload: string) -> bool {
 			}
 		case "NOTICE":
 			chat_post(chat, system_message(irc_trailing(msg)))
+		case "CLEARCHAT", "CLEARMSG":
+			if m, is_mod := moderation_message(msg); is_mod {
+				chat_post(chat, m)
+			}
 		}
 	}
 	return true

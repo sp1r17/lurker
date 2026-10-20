@@ -353,6 +353,8 @@ finish_jobs :: proc(app: ^App) {
 			finish_device_start_job(app, &p)
 		case Device_Poll_Job:
 			finish_device_poll_job(app, &p)
+		case User_Job:
+			finish_user_job(app, &p)
 		}
 		destroy_job(job)
 	}
