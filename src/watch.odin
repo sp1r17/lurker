@@ -13,10 +13,11 @@ INPUT_BACKGROUND :: Color{0x26, 0x26, 0x2c, 255}
 SELECTION_BACKGROUND :: Color{0x91, 0x47, 0xff, 110}
 
 Stream_Status :: enum {
-	// Asking streamlink for the stream's URL.
-	Resolving,
+	// Streamlink is starting, or waiting out pre-roll ads.
+	Starting,
 	Playing,
 	Offline,
+	Ended,
 	Failed,
 }
 
@@ -24,6 +25,7 @@ Stream_Status :: enum {
 Watch :: struct {
 	channel:         string,
 	status:          Stream_Status,
+	streamlink:      Streamlink,
 	chat:            ^Chat,
 	chat_view:       Chat_View,
 	show_chat:       bool,
@@ -56,10 +58,15 @@ watch_start :: proc(app: ^App, channel: string) {
 	w := &app.watch
 	w^ = {
 		channel   = strings.clone(channel),
-		status    = .Resolving,
+		status    = .Starting,
 		show_chat = true,
 	}
-	request_stream_url(&app.assets.jobs, w.channel, app.session)
+	if s, ok := streamlink_start(w.channel); ok {
+		w.streamlink = s
+		player_load(&app.player, streamlink_url(&w.streamlink))
+	} else {
+		w.status = .Failed
+	}
 	w.chat = new(Chat)
 	if app.signed_in {
 		chat_start(w.chat, w.channel, app.chat_wake_event, app.auth.login, app.auth.access_token)
@@ -74,6 +81,7 @@ watch_start :: proc(app: ^App, channel: string) {
 watch_stop :: proc(app: ^App) {
 	w := &app.watch
 	player_command(&app.player, {"stop"})
+	streamlink_stop(&w.streamlink)
 	// Clears the video texture to black, so the next channel doesn't start on
 	// this one's last frame.
 	player_render(&app.player)
@@ -100,19 +108,24 @@ set_title :: proc(app: ^App, channel: string) {
 	sdl.SetWindowTitle(app.window, strings.clone_to_cstring(title, context.temp_allocator))
 }
 
-// On the main thread, when the stream URL lookup finishes.
-finish_resolve_job :: proc(app: ^App, p: ^Resolve_Job) {
-	if app.screen != .Watch || p.session != app.session {
+// Acts on what mpv reports: the stream showing, or ending.
+watch_player_events :: proc(app: ^App, events: Player_Events) {
+	w := &app.watch
+	if app.screen != .Watch {
 		return
 	}
-	switch p.err {
-	case .None:
-		player_load(&app.player, p.url)
-		app.watch.status = .Playing
-	case .Offline:
-		app.watch.status = .Offline
-	case .Streamlink_Failed:
-		app.watch.status = .Failed
+	if .File_Loaded in events {
+		w.status = .Playing
+	}
+	if .Ended in events {
+		switch streamlink_outcome(&w.streamlink) {
+		case .None, .Ended:
+			w.status = .Ended
+		case .Offline:
+			w.status = .Offline
+		case .Streamlink_Failed:
+			w.status = .Failed
+		}
 	}
 }
 
@@ -213,8 +226,10 @@ draw_watch :: proc(app: ^App) {
 	switch w.status {
 	case .Playing:
 		draw_image(&a.renderer, app.player.texture, video)
-	case .Resolving:
+	case .Starting:
 		draw_centered(&a.renderer, .Regular, text_size, video, fmt.tprintf("Loading %s...", w.channel), BROWSE_DIM_TEXT)
+	case .Ended:
+		draw_centered(&a.renderer, .Regular, text_size, video, "The stream has ended. Esc to go back.", BROWSE_DIM_TEXT)
 	case .Offline:
 		draw_centered(&a.renderer, .Regular, text_size, video, fmt.tprintf("%s is offline. Esc to go back.", w.channel), BROWSE_DIM_TEXT)
 	case .Failed:

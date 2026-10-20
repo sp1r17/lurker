@@ -18,7 +18,6 @@ Job_Payload :: union {
 	Image_Job,
 	Emote_Set_Job,
 	Badges_Job,
-	Resolve_Job,
 	Followed_Job,
 	Device_Start_Job,
 	Device_Poll_Job,
@@ -117,8 +116,6 @@ destroy_job :: proc(job: ^Job) {
 		destroy_emote_set_job(&p)
 	case Badges_Job:
 		destroy_badges_job(&p)
-	case Resolve_Job:
-		destroy_resolve_job(&p)
 	case Followed_Job:
 		destroy_followed_job(&p)
 	case Device_Start_Job:

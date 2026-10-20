@@ -1,58 +1,121 @@
 package app
 
+import "core:fmt"
 import "core:log"
 import "core:os"
 import "core:strings"
+import "core:sys/posix"
+import "core:time"
+
+// How long streamlink gets to exit after being asked, before it's killed.
+STREAMLINK_EXIT_WAIT :: 2 * time.Second
 
 Stream_Error :: enum {
 	None,
 	Streamlink_Failed,
 	Offline,
+	// Played, then stopped: the broadcast is over.
+	Ended,
 }
 
-// Asks streamlink for the HLS URL of a channel's best quality. The URL is allocated
-// with the context allocator.
-resolve_stream_url :: proc(channel: string) -> (url: string, err: Stream_Error) {
-	page := strings.concatenate({"https://twitch.tv/", channel}, context.temp_allocator)
-	state, stdout, stderr, exec_err := os.process_exec(
-		{command = {"streamlink", "--stream-url", page, "best"}},
-		context.temp_allocator,
+// A streamlink process writing the channel's stream into a pipe that mpv reads.
+// Going through streamlink rather than playing Twitch's URL directly is what skips
+// the ads: streamlink drops ad segments from the stream it passes on.
+Streamlink :: struct {
+	process: os.Process,
+	// The read end of streamlink's stderr, for why it stopped.
+	errors:  ^os.File,
+	// mpv's own copy of the stream pipe's read end; mpv closes it ("fdclose://").
+	mpv_fd:  posix.FD,
+	running: bool,
+}
+
+// Starts streamlink on `channel`. Play streamlink_url(s) in mpv.
+streamlink_start :: proc(channel: string) -> (s: Streamlink, ok: bool) {
+	video_r, video_w, pipe_err := os.pipe()
+	if pipe_err != nil {
+		return {}, false
+	}
+	errors_r, errors_w, errors_err := os.pipe()
+	if errors_err != nil {
+		os.close(video_r)
+		os.close(video_w)
+		return {}, false
+	}
+	process, start_err := os.process_start(
+		{
+			command = {"streamlink", "--stdout", "--loglevel", "error", fmt.tprintf("https://twitch.tv/%s", channel), "best"},
+			stdout = video_w,
+			stderr = errors_w,
+		},
 	)
-	if exec_err != nil {
-		log.errorf("can't run streamlink: %v", exec_err)
-		return "", .Streamlink_Failed
+	// The child has its own copies of the write ends.
+	os.close(video_w)
+	os.close(errors_w)
+	if start_err != nil {
+		log.errorf("can't run streamlink: %v", start_err)
+		os.close(video_r)
+		os.close(errors_r)
+		return {}, false
 	}
-	out := strings.trim_space(string(stdout))
-	if !state.success {
-		// streamlink reports errors on stdout when --stream-url is given.
-		if strings.contains(out, "No playable streams") {
-			return "", .Offline
-		}
-		log.errorf("streamlink failed: %s %s", out, strings.trim_space(string(stderr)))
-		return "", .Streamlink_Failed
+
+	// mpv reads on its own threads and finishes with the pipe after we've moved on,
+	// so it gets a descriptor of its own to close, and ours closes now. Close-on-exec
+	// keeps it out of later child processes.
+	s.mpv_fd = posix.FD(posix.fcntl(posix.FD(os.fd(video_r)), .DUPFD_CLOEXEC, 0))
+	os.close(video_r)
+	s.process = process
+	s.errors = errors_r
+	s.running = true
+	if s.mpv_fd < 0 {
+		streamlink_stop(&s)
+		return {}, false
 	}
-	return strings.clone(out), .None
+	return s, true
 }
 
-Resolve_Job :: struct {
-	channel: string,
-	// The watch session it's for; the caller drops the result if that's over.
-	session: int,
-	url:     string,
-	err:     Stream_Error,
+// What mpv should play.
+streamlink_url :: proc(s: ^Streamlink) -> string {
+	return fmt.tprintf("fdclose://%d", s.mpv_fd)
 }
 
-destroy_resolve_job :: proc(p: ^Resolve_Job) {
-	delete(p.channel)
-	delete(p.url)
+// Stops streamlink: asked first, then killed if it doesn't exit in time.
+streamlink_stop :: proc(s: ^Streamlink) {
+	if !s.running {
+		return
+	}
+	s.running = false
+	_ = os.process_terminate(s.process)
+	if _, err := os.process_wait(s.process, STREAMLINK_EXIT_WAIT); err != nil {
+		_ = os.process_kill(s.process)
+		_, _ = os.process_wait(s.process)
+	}
+	os.close(s.errors)
 }
 
-request_stream_url :: proc(jobs: ^Jobs, channel: string, session: int) {
-	jobs_add(jobs, run_resolve_job, Resolve_Job{channel = strings.clone(channel), session = session})
-}
-
-@(private = "file")
-run_resolve_job :: proc(job: ^Job) {
-	p := &job.payload.(Resolve_Job)
-	p.url, p.err = resolve_stream_url(p.channel)
+// Why the stream stopped, once mpv has reached its end: streamlink's exit code and
+// error output tell an offline channel from an ended broadcast or a failure.
+streamlink_outcome :: proc(s: ^Streamlink) -> Stream_Error {
+	if !s.running {
+		return .Ended
+	}
+	state, err := os.process_wait(s.process, STREAMLINK_EXIT_WAIT)
+	if err != nil {
+		// Still running: mpv gave up on the stream, not streamlink.
+		streamlink_stop(s)
+		return .Streamlink_Failed
+	}
+	s.running = false
+	output, _ := os.read_entire_file(s.errors, context.temp_allocator)
+	os.close(s.errors)
+	text := strings.trim_space(string(output))
+	switch {
+	case strings.contains(text, "No playable streams"):
+		return .Offline
+	case state.exit_code == 0:
+		return .Ended
+	case:
+		log.errorf("streamlink failed: %s", text)
+		return .Streamlink_Failed
+	}
 }

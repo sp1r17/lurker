@@ -323,9 +323,12 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 		finish_jobs(app)
 		redraw^ = true
 	case u32(e.type) == app.player.events_event:
-		if !player_handle_events(&app.player) {
+		events := player_handle_events(&app.player)
+		if .Shutdown in events {
 			return false
 		}
+		watch_player_events(app, events)
+		redraw^ = true
 	case u32(e.type) == app.player.redraw_event:
 		if player_wants_redraw(&app.player) && app.screen == .Watch {
 			app.watch.new_video_frame = true
@@ -352,8 +355,6 @@ finish_jobs :: proc(app: ^App) {
 		case Badges_Job:
 			finish_badges_job(&a.emotes, &p, p.session == app.session)
 			apply_auth_check(app, p.check, p.auth)
-		case Resolve_Job:
-			finish_resolve_job(app, &p)
 		case Followed_Job:
 			apply_auth_check(app, p.check, p.auth)
 			finish_followed_job(app, &p)

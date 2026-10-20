@@ -100,24 +100,39 @@ player_command :: proc(p: ^Player, args: []cstring) {
 	}
 }
 
-// Handles mpv's waiting events. Returns false when mpv has shut down.
-player_handle_events :: proc(p: ^Player) -> bool {
+Player_Event :: enum {
+	Shutdown,
+	// The stream started playing.
+	File_Loaded,
+	// The stream reached its end, or failed (the reason is logged).
+	Ended,
+}
+Player_Events :: bit_set[Player_Event]
+
+// Handles mpv's waiting events, returning the ones the app acts on.
+player_handle_events :: proc(p: ^Player) -> (events: Player_Events) {
 	for {
 		e := mpv.wait_event(p.handle, 0)
 		#partial switch e.event_id {
 		case .None:
-			return true
+			return
 		case .Shutdown:
-			return false
+			events += {.Shutdown}
+			return
+		case .File_Loaded:
+			events += {.File_Loaded}
 		case .Log_Message:
 			m := (^mpv.Event_Log_Message)(e.data)
 			log.warnf("mpv %s: %s", m.prefix, strings.trim_right_space(string(m.text)))
 		case .End_File:
 			end := (^mpv.Event_End_File)(e.data)
-			if end.reason == .Error {
-				log.errorf("playback failed: %s", mpv.error_string(end.error))
-			} else if end.reason == .EOF {
-				log.info("stream ended")
+			// .Stop is us stopping it; not an end to report.
+			#partial switch end.reason {
+			case .Error:
+				log.warnf("playback stopped: %s", mpv.error_string(end.error))
+				events += {.Ended}
+			case .EOF:
+				events += {.Ended}
 			}
 		case .Command_Reply:
 			if e.error < 0 {
