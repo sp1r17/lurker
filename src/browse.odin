@@ -292,7 +292,8 @@ draw_browse :: proc(app: ^App, screen: Rect) {
 		}
 
 		thumb := Rect{card.x, card.y, card.w, thumb_h}
-		image := image_get(&a.images, &a.jobs, b.thumbnails[i], 1)
+		// Thumbnails change every few minutes: not worth keeping on disk.
+		image := image_get(&a.images, &a.jobs, b.thumbnails[i], 1, cache = false)
 		if image.state == .Ready {
 			texture, _ := image_frame(image, a.now_ms)
 			draw_image(r, texture, thumb)

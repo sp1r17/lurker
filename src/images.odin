@@ -78,14 +78,15 @@ image_release :: proc(images: ^Images, url: string) {
 }
 
 // Returns the image for `url`, starting its download the first time it's asked for.
-image_get :: proc(images: ^Images, jobs: ^Jobs, url: string, pixel_scale: f32) -> ^Image {
+// `cache` keeps it on disk for later runs: only for URLs whose image never changes.
+image_get :: proc(images: ^Images, jobs: ^Jobs, url: string, pixel_scale: f32, cache := true) -> ^Image {
 	if image, ok := images.by_url[url]; ok {
 		return image
 	}
 	image := new(Image)
 	image.pixel_scale = pixel_scale
 	images.by_url[strings.clone(url)] = image
-	jobs_add(jobs, run_image_job, Image_Job{url = strings.clone(url), image = image})
+	jobs_add(jobs, run_image_job, Image_Job{url = strings.clone(url), image = image, cache = cache})
 	return image
 }
 
@@ -112,6 +113,7 @@ Decoded_Frame :: struct {
 
 Image_Job :: struct {
 	url:    string,
+	cache:  bool,
 	// Only for the main thread; the worker leaves it alone.
 	image:  ^Image,
 	ok:     bool,
@@ -136,7 +138,13 @@ destroy_image_job :: proc(p: ^Image_Job) {
 @(private = "file")
 run_image_job :: proc(job: ^Job) {
 	p := &job.payload.(Image_Job)
-	res, ok := http_request(p.url, allocator = context.temp_allocator)
+	res: Http_Response
+	from_cache, ok: bool
+	if p.cache {
+		res, from_cache, ok = cached_get(p.url)
+	} else {
+		res, ok = http_request(p.url, allocator = context.temp_allocator)
+	}
 	if !ok {
 		return
 	}
@@ -145,6 +153,14 @@ run_image_job :: proc(job: ^Job) {
 		return
 	}
 	anim := img.LoadAnimation_IO(sdl.IOFromConstMem(raw_data(res.body), uint(len(res.body))), true)
+	if anim == nil && from_cache {
+		// A damaged cached copy: drop it and download again.
+		cache_forget(p.url)
+		res, _, ok = cached_get(p.url)
+		if ok && res.status == 200 {
+			anim = img.LoadAnimation_IO(sdl.IOFromConstMem(raw_data(res.body), uint(len(res.body))), true)
+		}
+	}
 	if anim == nil {
 		log.warnf("image %s: can't decode: %s", p.url, sdl.GetError())
 		return

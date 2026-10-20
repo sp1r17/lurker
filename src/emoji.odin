@@ -203,12 +203,16 @@ emoji_request :: proc(jobs: ^Jobs) {
 @(private = "file")
 run_emoji_job :: proc(job: ^Job) {
 	p := &job.payload.(Emoji_Job)
-	res, ok := http_request(EMOJI_DATA_URL, allocator = context.temp_allocator)
+	// The URL names a version, so a cached copy is as good as a download.
+	res, from_cache, ok := cached_get(EMOJI_DATA_URL)
 	if !ok || res.status != 200 {
 		log.warn("can't load the emoji list; emoji show as text")
 		return
 	}
 	p.ok = parse_emoji_data(res.body, &p.table)
+	if !p.ok && from_cache {
+		cache_forget(EMOJI_DATA_URL)
+	}
 }
 
 finish_emoji_job :: proc(a: ^Assets, p: ^Emoji_Job) {

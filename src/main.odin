@@ -181,6 +181,7 @@ run :: proc(channels: []string, config: Config) -> bool {
 		emotes_request_set(&a.jobs, source)
 	}
 	emoji_request(&a.jobs)
+	cache_request_prune(&a.jobs)
 
 	app.auth, app.signed_in = load_auth()
 	if !app.signed_in {
@@ -421,6 +422,7 @@ finish_jobs :: proc(app: ^App) {
 			finish_stream_info_job(app, &p)
 		case Emoji_Job:
 			finish_emoji_job(a, &p)
+		case Cache_Prune_Job:
 		}
 		destroy_job(job)
 	}
