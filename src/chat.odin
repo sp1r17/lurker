@@ -23,6 +23,8 @@ CHAT_STOP_CHECK_MS :: 100
 // messages to the main thread through `incoming`, pushing `wake_event` so the main
 // loop picks them up.
 Chat :: struct {
+	// CHAT_URL unless a test sets another.
+	url:        string,
 	channel:    string,
 	wake_event: u32,
 	// Empty for anonymous, read-only chat.
@@ -135,11 +137,21 @@ chat_session :: proc(chat: ^Chat) {
 		return
 	}
 	defer curl.easy_cleanup(h)
-	curl.easy_setopt(h, .URL, cstring(CHAT_URL))
+	curl.easy_setopt(h, .URL, strings.clone_to_cstring(chat.url if chat.url != "" else CHAT_URL, context.temp_allocator))
 	// 2 = connect, do the WebSocket upgrade, then hand the socket to ws_send/ws_recv.
 	curl.easy_setopt(h, .CONNECT_ONLY, c.long(2))
 	curl.easy_setopt(h, .CONNECTTIMEOUT, c.long(10))
+	// Connecting can take until that timeout; checking for a stop while it does keeps
+	// leaving a channel from waiting on it.
+	curl.easy_setopt(h, .NOPROGRESS, c.long(0))
+	curl.easy_setopt(h, .XFERINFODATA, chat)
+	curl.easy_setopt(h, .XFERINFOFUNCTION, proc "c" (chat: rawptr, _, _, _, _: curl.off_t) -> c.int {
+		return 1 if sync.atomic_load(&(^Chat)(chat).stop) else 0
+	})
 	if rc := curl.easy_perform(h); rc != .E_OK {
+		if rc == .E_ABORTED_BY_CALLBACK {
+			return
+		}
 		log.warnf("chat: can't connect: %s", curl.easy_strerror(rc))
 		return
 	}

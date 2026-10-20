@@ -71,3 +71,28 @@ own_messages_use_userstate :: proc(t: ^testing.T) {
 	testing.expect_value(t, m.badges[0], "subscriber/12")
 	testing.expect_value(t, m.fragments[0].text, "waves")
 }
+
+@(test)
+selection_replaces_and_deletes :: proc(t: ^testing.T) {
+	ti: Text_Input
+	defer input_destroy(&ti)
+	input_insert(&ti, "hello world")
+	input_select_all(&ti)
+	testing.expect_value(t, input_selected_text(&ti), "hello world")
+	// Typing replaces the selection.
+	input_insert(&ti, "bye")
+	testing.expect_value(t, input_text(&ti), "bye")
+
+	input_insert(&ti, " now")
+	// Shift+Ctrl+Left selects the last word; Backspace removes just it.
+	input_move(&ti, .Word, forward = false, extend = true)
+	testing.expect_value(t, input_selected_text(&ti), "now")
+	input_delete(&ti, .Char)
+	testing.expect_value(t, input_text(&ti), "bye ")
+
+	// Left without Shift collapses a selection to its start.
+	input_select_all(&ti)
+	input_move(&ti, .Char, forward = false)
+	testing.expect_value(t, ti.cursor, 0)
+	testing.expect_value(t, input_selected_text(&ti), "")
+}

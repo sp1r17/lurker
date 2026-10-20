@@ -95,3 +95,20 @@ user_lookup_parses :: proc(t: ^testing.T) {
 	_, empty_ok := parse_user(transmute([]byte)string(`{"data":[]}`))
 	testing.expect(t, !empty_ok)
 }
+
+@(test)
+filters_match_words_and_senders :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	m := chat("@display-name=LIRIK :lirik!lirik@x PRIVMSG #c :Good Morning chat")
+	defer destroy_chat_message(m)
+	testing.expect(t, message_matches(&m, parse_filter("morning")))
+	testing.expect(t, message_matches(&m, parse_filter("GOOD chat")))
+	testing.expect(t, message_matches(&m, parse_filter("from:lir")))
+	testing.expect(t, message_matches(&m, parse_filter("from:@lirik morning")))
+	testing.expect(t, !message_matches(&m, parse_filter("from:someone")))
+	testing.expect(t, !message_matches(&m, parse_filter("evening")))
+	sys := system_message("Joined #c")
+	defer destroy_chat_message(sys)
+	testing.expect(t, message_matches(&sys, parse_filter("joined")))
+	testing.expect(t, !message_matches(&sys, parse_filter("from:lirik")))
+}

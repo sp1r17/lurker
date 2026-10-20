@@ -7,11 +7,12 @@ import "core:unicode/utf8"
 // Twitch drops chat messages longer than this.
 MAX_MESSAGE_BYTES :: 500
 
-// A one-line text field: the chat box. `cursor` is a byte index into `text`, always
-// on a character boundary.
+// A one-line text field. `cursor` and `anchor` are byte indices into `text`, always
+// on character boundaries; the text between them is selected.
 Text_Input :: struct {
 	text:       [dynamic]u8,
 	cursor:     int,
+	anchor:     int,
 	focused:    bool,
 	completion: Completion,
 }
@@ -39,12 +40,43 @@ input_text :: proc(ti: ^Text_Input) -> string {
 input_clear :: proc(ti: ^Text_Input) {
 	clear(&ti.text)
 	ti.cursor = 0
+	ti.anchor = 0
 	reset_completion(ti)
 }
 
-// Inserts at the cursor, up to Twitch's message length.
+// The selected range, lo <= hi; empty when nothing's selected.
+input_selection :: proc(ti: ^Text_Input) -> (lo, hi: int) {
+	return min(ti.cursor, ti.anchor), max(ti.cursor, ti.anchor)
+}
+
+input_selected_text :: proc(ti: ^Text_Input) -> string {
+	lo, hi := input_selection(ti)
+	return string(ti.text[lo:hi])
+}
+
+input_select_all :: proc(ti: ^Text_Input) {
+	reset_completion(ti)
+	ti.anchor = 0
+	ti.cursor = len(ti.text)
+}
+
+// Removes the selection. Returns false if nothing was selected.
+@(private = "file")
+delete_selection :: proc(ti: ^Text_Input) -> bool {
+	lo, hi := input_selection(ti)
+	if lo == hi {
+		return false
+	}
+	remove_range(&ti.text, lo, hi)
+	ti.cursor = lo
+	ti.anchor = lo
+	return true
+}
+
+// Inserts at the cursor, replacing the selection, up to Twitch's message length.
 input_insert :: proc(ti: ^Text_Input, s: string) {
 	reset_completion(ti)
+	delete_selection(ti)
 	room := MAX_MESSAGE_BYTES - len(ti.text)
 	s := s
 	if len(s) > room {
@@ -57,6 +89,7 @@ input_insert :: proc(ti: ^Text_Input, s: string) {
 	}
 	inject_at(&ti.text, ti.cursor, s)
 	ti.cursor += len(s)
+	ti.anchor = ti.cursor
 }
 
 Input_Move :: enum {
@@ -65,18 +98,33 @@ Input_Move :: enum {
 	Line,
 }
 
-// Deletes back from the cursor (Backspace), or forward (Delete) if `forward`.
+// Deletes the selection, or else back from the cursor (Backspace), or forward
+// (Delete) if `forward`.
 input_delete :: proc(ti: ^Text_Input, by: Input_Move, forward := false) {
 	reset_completion(ti)
+	if delete_selection(ti) {
+		return
+	}
 	other := step(ti, by, forward)
 	lo, hi := min(other, ti.cursor), max(other, ti.cursor)
 	remove_range(&ti.text, lo, hi)
 	ti.cursor = lo
+	ti.anchor = lo
 }
 
-input_move :: proc(ti: ^Text_Input, by: Input_Move, forward: bool) {
+// Moves the cursor; with `extend` (Shift) the selection grows or shrinks with it.
+// Without, a selection collapses: one step left or right lands at its edge.
+input_move :: proc(ti: ^Text_Input, by: Input_Move, forward: bool, extend := false) {
 	reset_completion(ti)
-	ti.cursor = step(ti, by, forward)
+	lo, hi := input_selection(ti)
+	if !extend && lo != hi && by == .Char {
+		ti.cursor = hi if forward else lo
+	} else {
+		ti.cursor = step(ti, by, forward)
+	}
+	if !extend {
+		ti.anchor = ti.cursor
+	}
 }
 
 // Where the cursor would go: one character, to the next word edge, or to the end.
@@ -147,6 +195,7 @@ reset_completion :: proc(ti: ^Text_Input) {
 // `backwards`). A word starting with "@" completes user names only, keeping the @.
 input_complete :: proc(ti: ^Text_Input, emote_names, user_names: []string, backwards := false) {
 	c := &ti.completion
+	ti.anchor = ti.cursor
 	if !c.active {
 		text := input_text(ti)
 		start := ti.cursor
@@ -198,4 +247,5 @@ input_complete :: proc(ti: ^Text_Input, emote_names, user_names: []string, backw
 	inject_at(&ti.text, c.start, replacement)
 	c.end = c.start + len(replacement)
 	ti.cursor = c.end
+	ti.anchor = c.end
 }

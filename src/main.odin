@@ -231,8 +231,8 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 			watch_text_input(app, string(e.text.text))
 			redraw^ = true
 		}
-	case e.type == .KEY_DOWN && app.screen == .Watch && app.watch.input.focused:
-		// Typing: every key goes to the chat box.
+	case e.type == .KEY_DOWN && app.screen == .Watch && is_typing(app):
+		// Typing: every key goes to the box.
 		watch_input_key(app, e.key)
 		redraw^ = true
 	case e.type == .KEY_DOWN:
@@ -240,12 +240,20 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 		case sdl.K_Q:
 			return false
 		case sdl.K_F:
+			if e.key.mod & sdl.KMOD_CTRL != {} {
+				// Ctrl+F searches the chat.
+				if app.screen == .Watch {
+					search_open(app)
+					redraw^ = true
+				}
+				break
+			}
 			fullscreen := .FULLSCREEN in sdl.GetWindowFlags(app.window)
 			sdl.SetWindowFullscreen(app.window, !fullscreen)
 		case:
 			switch app.screen {
 			case .Watch:
-				if !watch_key(app, e.key.key) {
+				if !watch_key(app, e.key) {
 					return true
 				}
 			case .Browse:
@@ -376,6 +384,11 @@ apply_auth_check :: proc(app: ^App, check: Auth_Check, job_auth: Auth) {
 		app.auth = {}
 		app.signed_in = false
 	}
+}
+
+is_typing :: proc(app: ^App) -> bool {
+	_, typing := focused_box(app)
+	return typing
 }
 
 in_rect :: proc(r: Rect, x, y: f32) -> bool {

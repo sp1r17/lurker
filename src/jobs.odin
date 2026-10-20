@@ -44,6 +44,7 @@ jobs_start :: proc(jobs: ^Jobs, wake_event: u32) {
 
 // Waits for running jobs to finish. Jobs not taken are freed with `destroy_job`.
 jobs_stop :: proc(jobs: ^Jobs) {
+	cancel_requests()
 	{
 		sync.guard(&jobs.mutex)
 		jobs.stop = true

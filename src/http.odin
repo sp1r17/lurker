@@ -4,9 +4,25 @@ import "base:runtime"
 import "core:c"
 import "core:log"
 import "core:strings"
+import "core:sync"
 import "vendor:curl"
 
 HTTP_TIMEOUT_SECONDS :: 20
+
+// Set when the app is quitting: requests in flight abort instead of making the
+// quit wait for them.
+@(private = "file")
+requests_cancelled: bool
+
+cancel_requests :: proc() {
+	sync.atomic_store(&requests_cancelled, true)
+}
+
+// libcurl calls this often during a transfer, connecting included; non-zero aborts.
+@(private = "file")
+check_cancelled :: proc "c" (_: rawptr, _, _, _, _: curl.off_t) -> c.int {
+	return 1 if sync.atomic_load(&requests_cancelled) else 0
+}
 
 Http_Response :: struct {
 	status: int,
@@ -53,6 +69,8 @@ http_request :: proc(
 	curl.easy_setopt(h, .TIMEOUT, c.long(HTTP_TIMEOUT_SECONDS))
 	// Signals are process-wide; curl must not use them for timeouts on worker threads.
 	curl.easy_setopt(h, .NOSIGNAL, c.long(1))
+	curl.easy_setopt(h, .NOPROGRESS, c.long(0))
+	curl.easy_setopt(h, .XFERINFOFUNCTION, check_cancelled)
 	curl.easy_setopt(h, .USERAGENT, cstring("twitch-app"))
 	// Empty means every encoding curl supports (gzip, brotli...).
 	curl.easy_setopt(h, .ACCEPT_ENCODING, cstring(""))
@@ -70,6 +88,10 @@ http_request :: proc(
 	}
 
 	if rc := curl.easy_perform(h); rc != .E_OK {
+		if rc == .E_ABORTED_BY_CALLBACK {
+			delete(sink.body)
+			return {}, false
+		}
 		log.warnf("%s %s failed: %s", "POST" if post_body != "" else "GET", url, curl.easy_strerror(rc))
 		delete(sink.body)
 		return {}, false

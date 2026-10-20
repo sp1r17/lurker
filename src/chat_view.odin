@@ -53,6 +53,8 @@ Chat_View :: struct {
 	max_scroll: f32,
 	more_bar:   Rect,
 	name_hits:  [dynamic]Name_Hit,
+	// How many messages matched the filter.
+	matches:    int,
 }
 
 Name_Hit :: struct {
@@ -99,6 +101,48 @@ chat_view_add :: proc(v: ^Chat_View, a: ^Assets, scale, width: f32, new_messages
 	}
 }
 
+// A parsed chat filter: words the message must contain, and optionally whose it
+// must be ("from:name"). Lowercase, allocated with the temp allocator.
+Chat_Filter :: struct {
+	words: []string,
+	from:  string,
+}
+
+parse_filter :: proc(filter: string) -> (f: Chat_Filter) {
+	words := make([dynamic]string, context.temp_allocator)
+	rest := strings.to_lower(filter, context.temp_allocator)
+	for word in strings.fields_iterator(&rest) {
+		if strings.has_prefix(word, "from:") {
+			f.from = strings.trim_left(word[len("from:"):], "@")
+		} else {
+			append(&words, word)
+		}
+	}
+	f.words = words[:]
+	return
+}
+
+// Whether the message is from `from` (by login prefix, or display name) and
+// contains every word, in its text or the sender's name, ignoring case.
+message_matches :: proc(m: ^Chat_Message, f: Chat_Filter) -> bool {
+	name := strings.to_lower(m.name, context.temp_allocator)
+	if f.from != "" {
+		if m.kind == .System || (!strings.has_prefix(m.login, f.from) && !strings.has_prefix(name, f.from)) {
+			return false
+		}
+	}
+	if len(f.words) == 0 {
+		return true
+	}
+	text := strings.to_lower(message_plain_text(m), context.temp_allocator)
+	for word in f.words {
+		if !strings.contains(text, word) && !strings.contains(name, word) {
+			return false
+		}
+	}
+	return true
+}
+
 @(private = "file")
 apply_clear :: proc(v: ^Chat_View, m: Chat_Message) {
 	for &old in v.messages {
@@ -137,7 +181,9 @@ chat_view_click :: proc(v: ^Chat_View, x, y: f32) -> bool {
 	return false
 }
 
-draw_chat_view :: proc(a: ^Assets, v: ^Chat_View, rect: Rect, scale: f32) {
+// Draws the messages, or with a `filter` only those matching it (see
+// message_matches).
+draw_chat_view :: proc(a: ^Assets, v: ^Chat_View, rect: Rect, scale: f32, filter := "") {
 	r := &a.renderer
 	draw_rect(r, rect, CHAT_BACKGROUND)
 	pad := CHAT_PADDING * scale
@@ -151,8 +197,16 @@ draw_chat_view :: proc(a: ^Assets, v: ^Chat_View, rect: Rect, scale: f32) {
 	bottom := rect.y + rect.h - pad + v.scroll
 	total: f32
 	all_measured := true
+	query := parse_filter(filter)
+	v.matches = 0
 	for i := len(v.messages) - 1; i >= 0; i -= 1 {
 		m := &v.messages[i]
+		if filter != "" {
+			if !message_matches(m, query) {
+				continue
+			}
+			v.matches += 1
+		}
 		layout := message_layout(a, m, scale, content_w)
 		top := bottom - layout.height
 		if top < rect.y + rect.h {
@@ -168,6 +222,9 @@ draw_chat_view :: proc(a: ^Assets, v: ^Chat_View, rect: Rect, scale: f32) {
 			all_measured = i == 0
 			break
 		}
+	}
+	if filter != "" && v.matches == 0 {
+		draw_centered(r, .Regular, CHAT_FONT_SIZE * scale, rect, "No matching messages", CHAT_SYSTEM_TEXT)
 	}
 	if all_measured {
 		v.max_scroll = max(0, total - (rect.h - 2 * pad))
