@@ -6,14 +6,20 @@ import "core:unicode/utf8"
 CHAT_MAX_MESSAGES :: 1000
 // Sizes in logical pixels, scaled by the display scale.
 CHAT_WIDTH :: 340
-CHAT_FONT_SIZE :: 14
+CHAT_FONT_SIZE :: 15
 CHAT_PADDING :: 8
-CHAT_MESSAGE_GAP :: 3
+// Room for emotes to stick out of their message (EMOTE_OVERHANG) without
+// touching the next one.
+CHAT_MESSAGE_GAP :: 6
 CHAT_SCROLL_STEP :: 60
 CHAT_MORE_BAR_HEIGHT :: 28
-// Twitch's emotes are 28 px tall at 1x; used until an emote's real size is known.
-EMOTE_PLACEHOLDER_SIZE :: 28
-BADGE_PLACEHOLDER_SIZE :: 18
+// Emotes and badges are scaled to these heights, keeping their shape, so emotes
+// from different providers (Twitch 28 px, 7TV 32 px, some taller) line up.
+EMOTE_HEIGHT :: 28
+BADGE_HEIGHT :: 18
+// How far an emote may stick out above and below its line, as on twitch.tv, so
+// lines with emotes are barely taller than lines of text.
+EMOTE_OVERHANG :: 3
 BADGE_GAP :: 3
 
 CHAT_BACKGROUND :: Color{0x18, 0x18, 0x1b, 255}
@@ -211,7 +217,7 @@ message_layout :: proc(a: ^Assets, m: ^Chat_Message, scale, width: f32) -> ^Mess
 		if image.state == .Failed {
 			continue
 		}
-		put_image(&b, image, BADGE_PLACEHOLDER_SIZE)
+		put_image(&b, image, BADGE_HEIGHT, 0)
 		b.x += BADGE_GAP * scale
 	}
 
@@ -239,7 +245,7 @@ message_layout :: proc(a: ^Assets, m: ^Chat_Message, scale, width: f32) -> ^Mess
 				// Drawn over the previous emote.
 			} else {
 				space(&b, .Regular)
-				put_image(&b, image, EMOTE_PLACEHOLDER_SIZE)
+				put_image(&b, image, EMOTE_HEIGHT, EMOTE_OVERHANG)
 			}
 		}
 	}
@@ -275,10 +281,11 @@ end_line :: proc(b: ^Builder) {
 	b.line_start = len(b.l.items)
 }
 
-// Appends an item `w` wide, wrapping first if it doesn't fit (unless it's first on
-// its line).
+// Appends an item `w` by `h`, wrapping first if it doesn't fit (unless it's first
+// on its line). It sticks out `overhang` above and below the line instead of making
+// the line that much taller.
 @(private = "file")
-place :: proc(b: ^Builder, item: Layout_Item, w, h: f32) {
+place :: proc(b: ^Builder, item: Layout_Item, w, h: f32, overhang: f32 = 0) {
 	if b.x > 0 && b.x + w > b.width {
 		end_line(b)
 	}
@@ -286,7 +293,7 @@ place :: proc(b: ^Builder, item: Layout_Item, w, h: f32) {
 	placed.rect = {b.x, 0, w, h}
 	append(&b.l.items, placed)
 	b.x += w
-	b.line_h = max(b.line_h, h)
+	b.line_h = max(b.line_h, h - 2 * overhang)
 }
 
 @(private = "file")
@@ -296,10 +303,21 @@ space :: proc(b: ^Builder, font: Font) {
 	}
 }
 
+// Logical height in, pixel size out: `height` tall, as wide as the image's shape
+// allows (square until it has loaded).
 @(private = "file")
-put_image :: proc(b: ^Builder, image: ^Image, placeholder: f32) {
-	size := image.size * b.scale if image.state == .Ready else {placeholder, placeholder} * b.scale
-	place(b, {kind = .Image, image = image}, size.x, size.y)
+image_size :: proc(b: ^Builder, image: ^Image, height: f32) -> [2]f32 {
+	aspect: f32 = 1
+	if image.state == .Ready && image.size.y > 0 {
+		aspect = image.size.x / image.size.y
+	}
+	return {height * aspect, height} * b.scale
+}
+
+@(private = "file")
+put_image :: proc(b: ^Builder, image: ^Image, height, overhang: f32) {
+	size := image_size(b, image, height)
+	place(b, {kind = .Image, image = image}, size.x, size.y, overhang * b.scale)
 }
 
 // Puts a zero-width emote over the previous emote on the line. False if there isn't one.
@@ -312,12 +330,12 @@ overlay_last :: proc(b: ^Builder, image: ^Image) -> bool {
 	if last.kind != .Image {
 		return false
 	}
-	size := image.size * b.scale if image.state == .Ready else [2]f32{last.rect.w, last.rect.h}
+	size := image_size(b, image, EMOTE_HEIGHT)
 	append(
 		&b.l.items,
 		Layout_Item{kind = .Image, image = image, rect = {last.rect.x + (last.rect.w - size.x) / 2, 0, size.x, size.y}},
 	)
-	b.line_h = max(b.line_h, size.y)
+	b.line_h = max(b.line_h, size.y - 2 * EMOTE_OVERHANG * b.scale)
 	return true
 }
 
