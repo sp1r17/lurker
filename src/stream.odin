@@ -35,7 +35,7 @@ Streamlink :: struct {
 // streamlink asks Twitch for the stream as that user, so their Turbo or channel
 // subscription can remove the ads at the source. The token is tied to `client_id`,
 // so that's sent too, replacing the website client ID streamlink sends by default.
-streamlink_start :: proc(channel: string, client_id := "", token := "") -> (s: Streamlink, ok: bool) {
+streamlink_start :: proc(channel: string, quality: Quality, client_id := "", token := "") -> (s: Streamlink, ok: bool) {
 	command := make([dynamic]string, context.temp_allocator)
 	append(&command, "streamlink", "--stdout", "--loglevel", "error")
 	if token != "" {
@@ -45,7 +45,7 @@ streamlink_start :: proc(channel: string, client_id := "", token := "") -> (s: S
 		}
 		append(&command, "--config", config)
 	}
-	append(&command, fmt.tprintf("https://twitch.tv/%s", channel), "best")
+	append(&command, fmt.tprintf("https://twitch.tv/%s", channel), QUALITY_STREAMS[quality])
 
 	video_r, video_w, pipe_err := os.pipe()
 	if pipe_err != nil {

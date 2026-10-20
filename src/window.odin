@@ -60,6 +60,9 @@ draggable :: proc(app: ^App, x, y: f32) -> bool {
 		if w.card.open && in_rect(w.card.rect, x, y) {
 			return false
 		}
+		if on_controls(app, x, y) {
+			return false
+		}
 		if w.show_tab.w > 0 && in_rect(w.show_tab, x, y) {
 			return false
 		}

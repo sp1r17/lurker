@@ -17,8 +17,10 @@ Layout :: struct {
 	// Watched channel -> the split channels, left to right. Owned.
 	splits: map[string][dynamic]string,
 	// 0 to MAX_VOLUME.
-	volume: int,
-	muted:  bool,
+	volume:  int,
+	muted:   bool,
+	// The stream quality picked last, for every channel.
+	quality: Quality,
 }
 
 layout_destroy :: proc(l: ^Layout) {
@@ -58,8 +60,9 @@ layout_load :: proc() -> (l: Layout) {
 parse_layout :: proc(data: []byte, l: ^Layout) -> bool {
 	saved: struct {
 		splits: map[string][]string,
-		volume: int,
-		muted:  bool,
+		volume:  int,
+		muted:   bool,
+		quality: string,
 	}
 	if json.unmarshal(data, &saved, allocator = context.temp_allocator) != nil {
 		log.warn("layout.json is unreadable; starting without saved splits")
@@ -72,6 +75,7 @@ parse_layout :: proc(data: []byte, l: ^Layout) -> bool {
 		}
 	}
 	l.muted = saved.muted
+	l.quality = quality_from_label(saved.quality)
 	for channel, splits in saved.splits {
 		if !valid_login(channel) {
 			continue
@@ -96,7 +100,14 @@ layout_save :: proc(l: ^Layout) {
 		log.warnf("can't save splits: %v", err)
 		return
 	}
-	data, err := json.marshal(l^, {pretty = true}, context.temp_allocator)
+	// The quality is saved by name, so reordering the enum can't change it.
+	saved := struct {
+		splits:  map[string][dynamic]string,
+		volume:  int,
+		muted:   bool,
+		quality: string,
+	}{l.splits, l.volume, l.muted, QUALITY_LABELS[l.quality]}
+	data, err := json.marshal(saved, {pretty = true}, context.temp_allocator)
 	if err != nil {
 		return
 	}

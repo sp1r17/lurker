@@ -27,9 +27,11 @@ layout_volume_defaults_when_missing :: proc(t: ^testing.T) {
 
 	saved: Layout
 	defer layout_destroy(&saved)
-	testing.expect(t, parse_layout(transmute([]byte)string(`{"splits":{},"volume":0,"muted":true}`), &saved))
+	testing.expect(t, parse_layout(transmute([]byte)string(`{"splits":{},"volume":0,"muted":true,"quality":"720p"}`), &saved))
 	testing.expect_value(t, saved.volume, 0)
 	testing.expect(t, saved.muted)
+	testing.expect_value(t, saved.quality, Quality.P720)
+	testing.expect_value(t, old.quality, Quality.Source)
 
 	loud: Layout
 	defer layout_destroy(&loud)

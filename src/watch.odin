@@ -22,6 +22,11 @@ VOLUME_STEP :: 5
 // How long the volume bar shows after a change.
 VOLUME_OSD_MS :: 1500
 VOLUME_BAR_WIDTH :: 160
+// The video's controls (the quality button) show this long after the mouse moves.
+CONTROLS_MS :: 2000
+MENU_ITEM_HEIGHT :: 34
+MENU_WIDTH :: 160
+MENU_HOVER :: Color{0x3a, 0x3a, 0x44, 255}
 // The part of the volume bar above 100%.
 VOLUME_BOOST :: Color{0xff, 0x9f, 0x43, 255}
 CHAT_TOGGLE_BACKGROUND :: Color{0x18, 0x18, 0x1b, 220}
@@ -54,6 +59,12 @@ Watch :: struct {
 	sent_at:         [dynamic]int,
 	// Until when (Assets.now_ms) the volume bar shows.
 	volume_osd_until: int,
+	// Until when the video's controls show; the quality menu is open.
+	controls_until:   int,
+	quality_menu:     bool,
+	// From the last draw, in pixels (zero size when hidden).
+	quality_button:   Rect,
+	quality_items:    [Quality]Rect,
 	// From the last draw, in pixels: the video, the header button that hides the
 	// chats, and the tab that shows them again (zero size when not shown).
 	video_rect:      Rect,
@@ -171,9 +182,9 @@ start_stream :: proc(app: ^App, signed: bool) {
 	s: Streamlink
 	ok: bool
 	if signed {
-		s, ok = streamlink_start(w.channel, app.client_id, app.auth.access_token)
+		s, ok = streamlink_start(w.channel, app.layout.quality, app.client_id, app.auth.access_token)
 	} else {
-		s, ok = streamlink_start(w.channel)
+		s, ok = streamlink_start(w.channel, app.layout.quality)
 	}
 	if !ok {
 		w.status = .Failed
@@ -181,6 +192,124 @@ start_stream :: proc(app: ^App, signed: bool) {
 	}
 	w.streamlink = s
 	player_load(&app.player, streamlink_url(&w.streamlink))
+}
+
+// Switches the stream to `q` (restarting it) and remembers it for every channel.
+watch_set_quality :: proc(app: ^App, q: Quality) {
+	w := &app.watch
+	w.quality_menu = false
+	if q == app.layout.quality {
+		return
+	}
+	app.layout.quality = q
+	layout_save(&app.layout)
+	player_command(&app.player, {"stop"})
+	streamlink_stop(&w.streamlink)
+	start_stream(app, signed = app.signed_in)
+}
+
+// The mouse moved over the window: show the video's controls for a while.
+watch_mouse_moved :: proc(app: ^App, x, y: f32) {
+	if in_rect(app.watch.video_rect, x, y) {
+		app.watch.controls_until = app.assets.now_ms + CONTROLS_MS
+	}
+}
+
+// ms until the controls hide, for the main loop's wait; -1 if they aren't showing.
+controls_wait :: proc(app: ^App) -> int {
+	w := &app.watch
+	left := w.controls_until - app.assets.now_ms
+	return left if app.screen == .Watch && !w.quality_menu && left > 0 else -1
+}
+
+// Whether (x, y) is on the video's controls, which take clicks rather than
+// dragging the window.
+on_controls :: proc(app: ^App, x, y: f32) -> bool {
+	w := &app.watch
+	if w.quality_button.w > 0 && in_rect(w.quality_button, x, y) {
+		return true
+	}
+	if w.quality_menu {
+		for item in w.quality_items {
+			if in_rect(item, x, y) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// A click on the controls. Returns true if it was used; any click elsewhere
+// closes the menu.
+@(private = "file")
+controls_click :: proc(app: ^App, x, y: f32) -> bool {
+	w := &app.watch
+	if w.quality_menu {
+		for item, q in w.quality_items {
+			if in_rect(item, x, y) {
+				watch_set_quality(app, q)
+				return true
+			}
+		}
+	}
+	if w.quality_button.w > 0 && in_rect(w.quality_button, x, y) {
+		w.quality_menu = !w.quality_menu
+		return true
+	}
+	if w.quality_menu {
+		w.quality_menu = false
+		return true
+	}
+	return false
+}
+
+// The quality button at the video's bottom right, and its menu above it.
+@(private = "file")
+draw_controls :: proc(app: ^App) {
+	w := &app.watch
+	w.quality_button = {}
+	w.quality_items = {}
+	if app.assets.now_ms >= w.controls_until && !w.quality_menu {
+		return
+	}
+	r := &app.assets.renderer
+	scale := app.scale
+	size := BROWSE_CARD_TEXT_SIZE * scale
+	pad := 12 * scale
+	label := strings.concatenate({QUALITY_LABELS[app.layout.quality], " ▾"}, context.temp_allocator)
+	bw := text_width(r, .Bold, size, label) + 2 * pad
+	bh := line_height(r, .Bold, size) + pad
+	v := w.video_rect
+	w.quality_button = {v.x + v.w - bw - 16 * scale, v.y + v.h - bh - 16 * scale, bw, bh}
+	hovered := in_rect(w.quality_button, app.mouse.x, app.mouse.y)
+	draw_rect(r, w.quality_button, MENU_HOVER if hovered || w.quality_menu else CHAT_TOGGLE_BACKGROUND)
+	draw_centered(r, .Bold, size, w.quality_button, label, BROWSE_TEXT)
+	if !w.quality_menu {
+		return
+	}
+
+	item_h := MENU_ITEM_HEIGHT * scale
+	menu_w := max(MENU_WIDTH * scale, bw)
+	menu := Rect {
+		w.quality_button.x + w.quality_button.w - menu_w,
+		w.quality_button.y - 6 * scale - item_h * len(Quality),
+		menu_w,
+		item_h * len(Quality),
+	}
+	draw_rect(r, menu, USER_CARD_BACKGROUND)
+	for q in Quality {
+		item := Rect{menu.x, menu.y + f32(int(q)) * item_h, menu.w, item_h}
+		w.quality_items[q] = item
+		if in_rect(item, app.mouse.x, app.mouse.y) {
+			draw_rect(r, item, MENU_HOVER)
+		}
+		current := q == app.layout.quality
+		ty := item.y + (item_h - line_height(r, .Regular, size)) / 2
+		if current {
+			draw_text(r, .Bold, size, item.x + pad, ty, "✓", BROWSE_ACCENT)
+		}
+		draw_text(r, .Bold if current else .Regular, size, item.x + pad + 20 * scale, ty, QUALITY_LABELS[q], BROWSE_TEXT)
+	}
 }
 
 // Acts on what mpv reports: the stream showing, or ending.
@@ -239,6 +368,8 @@ watch_key :: proc(app: ^App, key: sdl.KeyboardEvent) -> bool {
 	switch key.key {
 	case sdl.K_ESCAPE:
 		switch {
+		case w.quality_menu:
+			w.quality_menu = false
 		case w.card.open:
 			user_card_close(app)
 		case focused.searching:
@@ -353,6 +484,9 @@ watch_click :: proc(app: ^App, x, y: f32) {
 	if w.card.open && in_rect(w.card.rect, x, y) {
 		return
 	}
+	if controls_click(app, x, y) {
+		return
+	}
 	if w.show_chat && w.hide_button.w > 0 && in_rect(w.hide_button, x, y) {
 		watch_show_chat(app, false)
 		return
@@ -414,7 +548,11 @@ draw_watch :: proc(app: ^App) {
 	text_size := BROWSE_CARD_TEXT_SIZE * app.scale
 	switch w.status {
 	case .Playing:
-		draw_image(&a.renderer, app.player.texture, video)
+		if app.layout.quality == .Audio {
+			draw_centered(&a.renderer, .Regular, text_size, video, fmt.tprintf("Audio only · %s", w.channel), BROWSE_DIM_TEXT)
+		} else {
+			draw_image(&a.renderer, app.player.texture, video)
+		}
 	case .Starting:
 		draw_centered(&a.renderer, .Regular, text_size, video, fmt.tprintf("Loading %s...", w.channel), BROWSE_DIM_TEXT)
 	case .Ended:
@@ -427,6 +565,7 @@ draw_watch :: proc(app: ^App) {
 	r := &a.renderer
 	scale := app.scale
 	draw_volume(app)
+	draw_controls(app)
 	w.hide_button = {}
 	w.show_tab = {}
 	if !w.show_chat {
