@@ -35,9 +35,23 @@ Streamlink :: struct {
 // streamlink asks Twitch for the stream as that user, so their Turbo or channel
 // subscription can remove the ads at the source. The token is tied to `client_id`,
 // so that's sent too, replacing the website client ID streamlink sends by default.
-streamlink_start :: proc(channel: string, quality: Quality, client_id := "", token := "") -> (s: Streamlink, ok: bool) {
+// With `low_latency`, streamlink stays close to the live edge: it fetches segments
+// before they're complete and keeps only two behind (--twitch-low-latency).
+streamlink_start :: proc(
+	channel: string,
+	quality: Quality,
+	low_latency: bool,
+	client_id := "",
+	token := "",
+) -> (
+	s: Streamlink,
+	ok: bool,
+) {
 	command := make([dynamic]string, context.temp_allocator)
 	append(&command, "streamlink", "--stdout", "--loglevel", "error")
+	if low_latency {
+		append(&command, "--twitch-low-latency")
+	}
 	if token != "" {
 		config, config_ok := write_streamlink_config(client_id, token)
 		if !config_ok {

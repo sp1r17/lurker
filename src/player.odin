@@ -87,9 +87,20 @@ player_destroy :: proc(p: ^Player) {
 	gl.DeleteTextures(1, &p.texture)
 }
 
-player_load :: proc(p: ^Player, url: string) {
+// mpv's built-in low-latency profile, minus single-threaded decoding (which can
+// drop frames at 1080p60) and skipping stream probing (which could miss the audio
+// in what streamlink sends), plus no cache.
+LOW_LATENCY_OPTIONS :: "cache=no,cache-pause=no,audio-buffer=0,stream-buffer-size=4k,demuxer-lavf-o-add=fflags=+nobuffer,demuxer-lavf-analyzeduration=0.1,video-sync=audio,interpolation=no,video-latency-hacks=yes"
+
+// Plays `url`. With `low_latency`, mpv buffers as little as it can; the options
+// apply to this file only, so they're gone with the next.
+player_load :: proc(p: ^Player, url: string, low_latency := false) {
 	curl := strings.clone_to_cstring(url, context.temp_allocator)
-	player_command(p, {"loadfile", curl})
+	if low_latency {
+		player_command(p, {"loadfile", curl, "replace", "-1", LOW_LATENCY_OPTIONS})
+	} else {
+		player_command(p, {"loadfile", curl})
+	}
 }
 
 player_command :: proc(p: ^Player, args: []cstring) {

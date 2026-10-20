@@ -65,6 +65,7 @@ Watch :: struct {
 	// From the last draw, in pixels (zero size when hidden).
 	quality_button:   Rect,
 	quality_items:    [Quality]Rect,
+	latency_item:     Rect,
 	// From the last draw, in pixels: the video, the header button that hides the
 	// chats, and the tab that shows them again (zero size when not shown).
 	video_rect:      Rect,
@@ -181,17 +182,18 @@ start_stream :: proc(app: ^App, signed: bool) {
 	w.signed_stream = signed
 	s: Streamlink
 	ok: bool
+	l := &app.layout
 	if signed {
-		s, ok = streamlink_start(w.channel, app.layout.quality, app.client_id, app.auth.access_token)
+		s, ok = streamlink_start(w.channel, l.quality, l.low_latency, app.client_id, app.auth.access_token)
 	} else {
-		s, ok = streamlink_start(w.channel, app.layout.quality)
+		s, ok = streamlink_start(w.channel, l.quality, l.low_latency)
 	}
 	if !ok {
 		w.status = .Failed
 		return
 	}
 	w.streamlink = s
-	player_load(&app.player, streamlink_url(&w.streamlink))
+	player_load(&app.player, streamlink_url(&w.streamlink), l.low_latency)
 }
 
 // Switches the stream to `q` (restarting it) and remembers it for every channel.
@@ -203,8 +205,21 @@ watch_set_quality :: proc(app: ^App, q: Quality) {
 	}
 	app.layout.quality = q
 	layout_save(&app.layout)
+	restart_stream(app)
+}
+
+// Turns low latency on or off (restarting the stream) and remembers it.
+watch_toggle_low_latency :: proc(app: ^App) {
+	app.watch.quality_menu = false
+	app.layout.low_latency = !app.layout.low_latency
+	layout_save(&app.layout)
+	restart_stream(app)
+}
+
+@(private = "file")
+restart_stream :: proc(app: ^App) {
 	player_command(&app.player, {"stop"})
-	streamlink_stop(&w.streamlink)
+	streamlink_stop(&app.watch.streamlink)
 	start_stream(app, signed = app.signed_in)
 }
 
@@ -235,6 +250,9 @@ on_controls :: proc(app: ^App, x, y: f32) -> bool {
 				return true
 			}
 		}
+		if in_rect(w.latency_item, x, y) {
+			return true
+		}
 	}
 	return false
 }
@@ -250,6 +268,10 @@ controls_click :: proc(app: ^App, x, y: f32) -> bool {
 				watch_set_quality(app, q)
 				return true
 			}
+		}
+		if in_rect(w.latency_item, x, y) {
+			watch_toggle_low_latency(app)
+			return true
 		}
 	}
 	if w.quality_button.w > 0 && in_rect(w.quality_button, x, y) {
@@ -269,6 +291,7 @@ draw_controls :: proc(app: ^App) {
 	w := &app.watch
 	w.quality_button = {}
 	w.quality_items = {}
+	w.latency_item = {}
 	if app.assets.now_ms >= w.controls_until && !w.quality_menu {
 		return
 	}
@@ -288,28 +311,38 @@ draw_controls :: proc(app: ^App) {
 		return
 	}
 
+	// The qualities, a divider, then the low latency switch.
 	item_h := MENU_ITEM_HEIGHT * scale
+	divider := 9 * scale
 	menu_w := max(MENU_WIDTH * scale, bw)
-	menu := Rect {
-		w.quality_button.x + w.quality_button.w - menu_w,
-		w.quality_button.y - 6 * scale - item_h * len(Quality),
-		menu_w,
-		item_h * len(Quality),
-	}
+	menu_h := item_h * (len(Quality) + 1) + divider
+	menu := Rect{w.quality_button.x + w.quality_button.w - menu_w, w.quality_button.y - 6 * scale - menu_h, menu_w, menu_h}
 	draw_rect(r, menu, USER_CARD_BACKGROUND)
 	for q in Quality {
 		item := Rect{menu.x, menu.y + f32(int(q)) * item_h, menu.w, item_h}
 		w.quality_items[q] = item
-		if in_rect(item, app.mouse.x, app.mouse.y) {
-			draw_rect(r, item, MENU_HOVER)
-		}
-		current := q == app.layout.quality
-		ty := item.y + (item_h - line_height(r, .Regular, size)) / 2
-		if current {
-			draw_text(r, .Bold, size, item.x + pad, ty, "✓", BROWSE_ACCENT)
-		}
-		draw_text(r, .Bold if current else .Regular, size, item.x + pad + 20 * scale, ty, QUALITY_LABELS[q], BROWSE_TEXT)
+		draw_menu_item(app, item, QUALITY_LABELS[q], q == app.layout.quality)
 	}
+	line_y := menu.y + item_h * len(Quality) + divider / 2
+	draw_rect(r, {menu.x + pad, line_y, menu.w - 2 * pad, scale}, USER_CARD_BORDER)
+	w.latency_item = {menu.x, menu.y + menu_h - item_h, menu.w, item_h}
+	draw_menu_item(app, w.latency_item, "Low latency", app.layout.low_latency)
+}
+
+@(private = "file")
+draw_menu_item :: proc(app: ^App, item: Rect, label: string, checked: bool) {
+	r := &app.assets.renderer
+	scale := app.scale
+	size := BROWSE_CARD_TEXT_SIZE * scale
+	pad := 12 * scale
+	if in_rect(item, app.mouse.x, app.mouse.y) {
+		draw_rect(r, item, MENU_HOVER)
+	}
+	ty := item.y + (item.h - line_height(r, .Regular, size)) / 2
+	if checked {
+		draw_text(r, .Bold, size, item.x + pad, ty, "✓", BROWSE_ACCENT)
+	}
+	draw_text(r, .Bold if checked else .Regular, size, item.x + pad + 20 * scale, ty, label, BROWSE_TEXT)
 }
 
 // Acts on what mpv reports: the stream showing, or ending.
