@@ -3,6 +3,7 @@ package app
 import "core:log"
 import "core:strings"
 import "mpv"
+import gl "vendor:OpenGL"
 import sdl "vendor:sdl3"
 
 // Embedded mpv, drawing into the window's OpenGL context through libmpv's render API.
@@ -14,6 +15,10 @@ Player :: struct {
 	// SDL event types pushed when mpv has events waiting or a new frame to draw.
 	events_event:  u32,
 	redraw_event:  u32,
+	// mpv draws into this texture, which the renderer then draws into the window.
+	fbo:           u32,
+	texture:       u32,
+	target_size:   [2]i32,
 }
 
 Player_Error :: enum {
@@ -78,6 +83,8 @@ player_destroy :: proc(p: ^Player) {
 	// The render context goes first: it holds GL objects and keeps the core alive.
 	mpv.render_context_free(p.render)
 	mpv.terminate_destroy(p.handle)
+	gl.DeleteFramebuffers(1, &p.fbo)
+	gl.DeleteTextures(1, &p.texture)
 }
 
 player_load :: proc(p: ^Player, url: string) {
@@ -125,13 +132,39 @@ player_wants_redraw :: proc(p: ^Player) -> bool {
 	return .Frame in mpv.render_context_update(p.render)
 }
 
-// Draws the current frame into the default framebuffer.
-player_draw :: proc(p: ^Player, width, height: i32) {
-	fbo := mpv.Opengl_Fbo {
-		w = width,
-		h = height,
+// Sizes the texture mpv draws into, and draws the current frame into it again.
+player_resize :: proc(p: ^Player, size: [2]i32) {
+	if size == p.target_size {
+		return
 	}
-	flip_y: i32 = 1
+	if p.texture == 0 {
+		gl.GenFramebuffers(1, &p.fbo)
+		gl.GenTextures(1, &p.texture)
+	}
+	gl.BindTexture(gl.TEXTURE_2D, p.texture)
+	gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, size.x, size.y, 0, gl.RGBA, gl.UNSIGNED_BYTE, nil)
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+	gl.BindFramebuffer(gl.FRAMEBUFFER, p.fbo)
+	gl.FramebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, p.texture, 0)
+	gl.BindFramebuffer(gl.FRAMEBUFFER, 0)
+	p.target_size = size
+	player_render(p)
+}
+
+// Draws mpv's current frame into the player's texture.
+player_render :: proc(p: ^Player) {
+	if p.texture == 0 {
+		return
+	}
+	fbo := mpv.Opengl_Fbo {
+		fbo = i32(p.fbo),
+		w   = p.target_size.x,
+		h   = p.target_size.y,
+	}
+	// Unflipped, the texture's first row is the image's top, which is how the
+	// renderer maps textures.
+	flip_y: i32 = 0
 	params := [?]mpv.Render_Param{{.Opengl_Fbo, &fbo}, {.Flip_Y, &flip_y}, {}}
 	mpv.render_context_render(p.render, raw_data(params[:]))
 }
