@@ -15,7 +15,8 @@ MIN_ANIMATION_WAIT_MS :: 10
 
 USAGE :: `usage:
   %[0]s             browse the live channels you follow
-  %[0]s <channel>   watch a channel
+  %[0]s <channel> [<channel>...]
+                        watch a channel, with the other channels' chats split beside it
   %[0]s --login     sign in to Twitch`
 
 main :: proc() {
@@ -38,11 +39,17 @@ main :: proc() {
 		}
 	}
 
-	if len(os.args) > 2 || (len(os.args) == 2 && os.args[1] != "--login" && !valid_login(os.args[1])) {
-		fmt.eprintfln(USAGE, os.args[0])
-		os.exit(2)
+	login_mode := len(os.args) == 2 && os.args[1] == "--login"
+	channels := make([dynamic]string, context.temp_allocator)
+	if !login_mode {
+		for arg in os.args[1:] {
+			if !valid_login(arg) {
+				fmt.eprintfln(USAGE, os.args[0])
+				os.exit(2)
+			}
+			append(&channels, strings.to_lower(arg, context.temp_allocator))
+		}
 	}
-
 	if curl.global_init(curl.GLOBAL_DEFAULT) != .E_OK {
 		log.error("curl init failed")
 		os.exit(1)
@@ -56,12 +63,10 @@ main :: proc() {
 
 	ok: bool
 	switch {
-	case len(os.args) == 2 && os.args[1] == "--login":
+	case login_mode:
 		ok = login(config.client_id)
-	case len(os.args) == 2:
-		ok = run(strings.to_lower(os.args[1], context.temp_allocator), config)
 	case:
-		ok = run("", config)
+		ok = run(channels[:], config)
 	}
 	destroy_config(config)
 	curl.global_cleanup()
@@ -98,6 +103,8 @@ App :: struct {
 	watch:           Watch,
 	// Bumped whenever a watch starts or stops, so jobs for an old one are ignored.
 	session:         int,
+	// For Chat_Pane.id.
+	next_pane_id:    int,
 	chat_wake_event: u32,
 	// From the last draw: the display scale, and the mouse in pixels.
 	scale:           f32,
@@ -108,7 +115,7 @@ App :: struct {
 }
 
 // Opens the window on the browse screen, or watching `channel` if it's not "".
-run :: proc(channel: string, config: Config) -> bool {
+run :: proc(channels: []string, config: Config) -> bool {
 	if !sdl.Init({.VIDEO}) {
 		log.errorf("SDL init failed: %s", sdl.GetError())
 		return false
@@ -172,8 +179,13 @@ run :: proc(channel: string, config: Config) -> bool {
 	defer if app.screen == .Watch {
 		watch_stop(&app)
 	}
-	if channel != "" {
-		watch_start(&app, channel)
+	if len(channels) > 0 {
+		watch_start(&app, channels[0])
+		for split in channels[1:] {
+			p := pane_new(&app)
+			pane_join(&app, p, split)
+			append(&app.watch.panes, p)
+		}
 	}
 
 	draw(&app)
@@ -228,12 +240,12 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 		redraw^ = true
 	case e.type == .TEXT_INPUT:
 		if app.screen == .Watch {
-			watch_text_input(app, string(e.text.text))
+			pane_text_input(app, string(e.text.text))
 			redraw^ = true
 		}
 	case e.type == .KEY_DOWN && app.screen == .Watch && is_typing(app):
 		// Typing: every key goes to the box.
-		watch_input_key(app, e.key)
+		pane_input_key(app, e.key)
 		redraw^ = true
 	case e.type == .KEY_DOWN:
 		switch e.key.key {
@@ -241,9 +253,9 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 			return false
 		case sdl.K_F:
 			if e.key.mod & sdl.KMOD_CTRL != {} {
-				// Ctrl+F searches the chat.
+				// Ctrl+F searches the focused chat.
 				if app.screen == .Watch {
-					search_open(app)
+					search_open(app, app.watch.panes[app.watch.focus])
 					redraw^ = true
 				}
 				break
@@ -290,10 +302,8 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 		x, y := e.wheel.mouse_x * density, e.wheel.mouse_y * density
 		switch app.screen {
 		case .Watch:
-			if in_rect(app.watch.chat_rect, x, y) {
-				chat_view_scroll(&app.watch.chat_view, e.wheel.y, app.scale)
-				redraw^ = true
-			}
+			watch_scroll(app, x, y, e.wheel.y)
+			redraw^ = true
 		case .Browse:
 			browse_scroll(&app.browse, e.wheel.y, app.scale)
 			app.browse.hovered = browse_card_at(&app.browse, x, y)
@@ -347,13 +357,15 @@ finish_jobs :: proc(app: ^App) {
 		case Image_Job:
 			finish_image_job(&a.images, &p)
 		case Emote_Set_Job:
-			// A channel's set arriving after it was left is dropped.
-			if p.source < .Global_7TV && p.session != app.session {
-				break
+			if p.source >= .Global_7TV {
+				finish_emote_set_job(&a.emotes, &p)
+			} else if pane := find_pane(app, p.pane); pane != nil {
+				// A channel's set arriving after its pane closed is dropped.
+				finish_emote_set_job(&pane.emotes, &p)
 			}
-			finish_emote_set_job(&a.emotes, &p)
 		case Badges_Job:
-			finish_badges_job(&a.emotes, &p, p.session == app.session)
+			pane := find_pane(app, p.pane)
+			finish_badges_job(&pane.emotes if pane != nil else nil, &a.emotes, &p)
 			apply_auth_check(app, p.check, p.auth)
 		case Followed_Job:
 			apply_auth_check(app, p.check, p.auth)
@@ -388,7 +400,7 @@ apply_auth_check :: proc(app: ^App, check: Auth_Check, job_auth: Auth) {
 }
 
 is_typing :: proc(app: ^App) -> bool {
-	_, typing := focused_box(app)
+	_, _, typing := focused_box(app)
 	return typing
 }
 

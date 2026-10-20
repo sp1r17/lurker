@@ -36,7 +36,8 @@ Badge_Scope :: enum {
 }
 
 // Third-party emotes by name, and Twitch badges by "set/version" (e.g.
-// "subscriber/12"). Strings are owned.
+// "subscriber/12"). Strings are owned. The app has one for the global sets
+// (Global_* and Badge_Scope.Global), and each chat pane one for its channel's.
 Emotes :: struct {
 	sets:   [Emote_Source]map[string]Emote,
 	badges: [Badge_Scope]map[string]Badge,
@@ -51,14 +52,6 @@ emotes_destroy :: proc(e: ^Emotes) {
 		clear_badges(&e.badges[scope])
 		delete(e.badges[scope])
 	}
-}
-
-// Drops the channel's own emotes and badges, when leaving it.
-emotes_clear_channel :: proc(e: ^Emotes) {
-	for source in Emote_Source.Channel_7TV ..= Emote_Source.Channel_FFZ {
-		clear_set(&e.sets[source])
-	}
-	clear_badges(&e.badges[.Channel])
 }
 
 @(private = "file")
@@ -81,19 +74,32 @@ clear_badges :: proc(badges: ^map[string]Badge) {
 	clear(badges)
 }
 
-badge_lookup :: proc(e: ^Emotes, key: string) -> (badge: Badge, found: bool) {
-	for &scope in e.badges {
-		if badge, found = scope[key]; found {
-			return
+// Looks in the channel's badges, then the global ones. `channel` may be nil.
+badge_lookup :: proc(channel, global: ^Emotes, key: string) -> (badge: Badge, found: bool) {
+	for e in ([]^Emotes{channel, global}) {
+		if e == nil {
+			continue
+		}
+		for &scope in e.badges {
+			if badge, found = scope[key]; found {
+				return
+			}
 		}
 	}
 	return
 }
 
-emote_lookup :: proc(e: ^Emotes, name: string) -> (emote: Emote, found: bool) {
-	for &set in e.sets {
-		if emote, found = set[name]; found {
-			return
+// Looks in the channel's emotes, then the global ones, each in Emote_Source order.
+// `channel` may be nil.
+emote_lookup :: proc(channel, global: ^Emotes, name: string) -> (emote: Emote, found: bool) {
+	for e in ([]^Emotes{channel, global}) {
+		if e == nil {
+			continue
+		}
+		for &set in e.sets {
+			if emote, found = set[name]; found {
+				return
+			}
 		}
 	}
 	return
@@ -124,8 +130,8 @@ Named_Emote :: struct {
 
 Emote_Set_Job :: struct {
 	source:  Emote_Source,
-	// The watch session a channel set is for; the caller drops it if that's over.
-	session: int,
+	// The chat pane a channel set is for; dropped if it has closed.
+	pane:    int,
 	url:     string,
 	// Owned strings, moved into Emotes when the job finishes.
 	emotes: [dynamic]Named_Emote,
@@ -141,11 +147,11 @@ destroy_emote_set_job :: proc(p: ^Emote_Set_Job) {
 	delete(p.url)
 }
 
-emotes_request_set :: proc(jobs: ^Jobs, source: Emote_Source, room_id := "", session := 0) {
+emotes_request_set :: proc(jobs: ^Jobs, source: Emote_Source, room_id := "", pane := 0) {
 	jobs_add(
 		jobs,
 		run_emote_set_job,
-		Emote_Set_Job{source = source, session = session, url = strings.clone(emote_set_url(source, room_id))},
+		Emote_Set_Job{source = source, pane = pane, url = strings.clone(emote_set_url(source, room_id))},
 	)
 }
 
@@ -298,8 +304,8 @@ Badges_Job :: struct {
 	// A copy; the job may refresh it.
 	auth:      Auth,
 	room_id:   string,
-	// The watch session the channel badges are for.
-	session:   int,
+	// The chat pane the channel badges are for.
+	pane:      int,
 	check:     Auth_Check,
 	badges:    [Badge_Scope][dynamic]Named_Badge,
 }
@@ -327,7 +333,7 @@ destroy_named_badges :: proc(list: ^[dynamic]Named_Badge) {
 	delete(list^)
 }
 
-emotes_request_badges :: proc(jobs: ^Jobs, client_id: string, auth: Auth, room_id: string, session: int) {
+emotes_request_badges :: proc(jobs: ^Jobs, client_id: string, auth: Auth, room_id: string, pane: int) {
 	jobs_add(
 		jobs,
 		run_badges_job,
@@ -335,7 +341,7 @@ emotes_request_badges :: proc(jobs: ^Jobs, client_id: string, auth: Auth, room_i
 			client_id = strings.clone(client_id),
 			auth = clone_auth(auth),
 			room_id = strings.clone(room_id),
-			session = session,
+			pane = pane,
 		},
 	)
 }
@@ -398,16 +404,16 @@ parse_badges :: proc(body: []byte, out: ^[dynamic]Named_Badge) -> bool {
 	return true
 }
 
-// On the main thread: stores the badges, moving them out of the job. Channel badges
-// are only kept if `channel_current` (the job's session is still the one being
-// watched). The caller handles p.check, saving a refreshed sign-in or dropping a
-// rejected one.
-finish_badges_job :: proc(e: ^Emotes, p: ^Badges_Job, channel_current: bool) {
+// On the main thread: stores the badges, moving them out of the job: global ones
+// into `global`, the channel's into `channel` (nil if its pane has closed). The
+// caller handles p.check, saving a refreshed sign-in or dropping a rejected one.
+finish_badges_job :: proc(channel, global: ^Emotes, p: ^Badges_Job) {
 	for scope in Badge_Scope {
-		if scope == .Channel && !channel_current {
+		target := global if scope == .Global else channel
+		if target == nil {
 			continue
 		}
-		badges := &e.badges[scope]
+		badges := &target.badges[scope]
 		for named in p.badges[scope] {
 			if named.key in badges {
 				old_key, old := delete_key(badges, named.key)

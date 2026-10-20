@@ -39,6 +39,8 @@ User_Card_State :: enum {
 // Chatterino's user popup: who someone is, and what they've said here.
 User_Card :: struct {
 	open:     bool,
+	// The pane whose chat it was opened from, by ID.
+	pane:     int,
 	login:    string,
 	state:    User_Card_State,
 	info:     User_Info,
@@ -49,10 +51,11 @@ User_Card :: struct {
 	request:  int,
 }
 
-user_card_open :: proc(app: ^App, login: string, anchor_y: f32) {
+user_card_open :: proc(app: ^App, p: ^Chat_Pane, login: string, anchor_y: f32) {
 	c := &app.watch.card
 	user_card_close(app)
 	c.open = true
+	c.pane = p.id
 	c.login = strings.clone(login)
 	c.anchor_y = anchor_y
 	c.request += 1
@@ -147,9 +150,12 @@ draw_user_card :: proc(app: ^App) {
 	if !c.open {
 		return
 	}
+	p := find_pane(app, c.pane)
+	if p == nil {
+		return
+	}
 	a := &app.assets
 	r := &a.renderer
-	w := &app.watch
 	scale := app.scale
 	pad := 12 * scale
 	size := CHAT_FONT_SIZE * scale
@@ -161,8 +167,8 @@ draw_user_card :: proc(app: ^App) {
 	// Their messages here, newest last, and their colour from the latest.
 	recent := make([dynamic]^Chat_Message, context.temp_allocator)
 	color := CHAT_TEXT
-	for i := len(w.chat_view.messages) - 1; i >= 0 && len(recent) < USER_CARD_RECENT; i -= 1 {
-		m := &w.chat_view.messages[i]
+	for i := len(p.view.messages) - 1; i >= 0 && len(recent) < USER_CARD_RECENT; i -= 1 {
+		m := &p.view.messages[i]
 		if m.login == c.login && m.kind != .System {
 			if len(recent) == 0 {
 				color = m.color
@@ -175,8 +181,9 @@ draw_user_card :: proc(app: ^App) {
 	header_h := avatar + 2 * pad
 	recent_h := lh_small + f32(max(len(recent), 1)) * lh + pad
 	card_h := header_h + lh_small + pad + recent_h + lh_small + pad
-	x := max(8 * scale, w.chat_rect.x - card_w - 8 * scale)
-	y := clamp(c.anchor_y - 24 * scale, 8 * scale, w.chat_rect.h - card_h - 8 * scale)
+	// Beside the pane, over the video or the split to its left.
+	x := max(8 * scale, p.rect.x - card_w - 8 * scale)
+	y := clamp(c.anchor_y - 24 * scale, 8 * scale, p.rect.h - card_h - 8 * scale)
 	c.rect = {x, y, card_w, card_h}
 	draw_rect(r, c.rect, USER_CARD_BORDER)
 	draw_rect(r, {x + scale, y + scale, card_w - 2 * scale, card_h - 2 * scale}, USER_CARD_BACKGROUND)

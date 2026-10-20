@@ -66,7 +66,7 @@ third_party_emotes_replace_words :: proc(t: ^testing.T) {
 	destroy_fragments(m.fragments[:])
 	clear(&m.fragments)
 	append(&m.fragments, Fragment{kind = .Text, text = strings.clone("so catJAM good")})
-	apply_third_party_emotes(&m, &emotes)
+	apply_third_party_emotes(&m, nil, &emotes)
 	testing.expect_value(t, len(m.fragments), 3)
 	testing.expect_value(t, m.fragments[0].text, "so")
 	testing.expect_value(t, m.fragments[1].kind, Fragment_Kind.Emote)

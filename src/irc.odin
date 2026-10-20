@@ -383,8 +383,9 @@ twitch_emote_fragments :: proc(text, emotes_tag: string, out: ^[dynamic]Fragment
 	}
 }
 
-// Replaces words in the message's text fragments that name a third-party emote.
-apply_third_party_emotes :: proc(m: ^Chat_Message, emotes: ^Emotes) {
+// Replaces words in the message's text fragments that name a third-party emote,
+// the channel's (`channel`, may be nil) or global.
+apply_third_party_emotes :: proc(m: ^Chat_Message, channel, global: ^Emotes) {
 	if m.kind == .System {
 		return
 	}
@@ -404,7 +405,7 @@ apply_third_party_emotes :: proc(m: ^Chat_Message, emotes: ^Emotes) {
 		}
 		rest := f.text
 		for word in strings.fields_iterator(&rest) {
-			if emote, found := emote_lookup(emotes, word); found {
+			if emote, found := emote_lookup(channel, global, word); found {
 				flush(&pending, &m.fragments)
 				append(
 					&m.fragments,

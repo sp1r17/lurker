@@ -47,6 +47,8 @@ Assets :: struct {
 // newest message, in pixels; 0 follows new messages as they arrive.
 Chat_View :: struct {
 	messages:   [dynamic]Chat_Message,
+	// The channel's own emotes and badges (owned by the pane), or nil.
+	emotes:     ^Emotes,
 	scroll:     f32,
 	// Set while drawing: the furthest the view can scroll, where the "more
 	// messages below" bar is (zero size when hidden), and where names are.
@@ -87,10 +89,10 @@ chat_view_add :: proc(v: ^Chat_View, a: ^Assets, scale, width: f32, new_messages
 		}
 		append(&v.messages, m)
 		added := &v.messages[len(v.messages) - 1]
-		apply_third_party_emotes(added, &a.emotes)
+		apply_third_party_emotes(added, v.emotes, &a.emotes)
 		added.mention = mentions(added, self_login)
 		if v.scroll > 0 {
-			v.scroll += message_layout(a, added, scale, width).height + CHAT_MESSAGE_GAP * scale
+			v.scroll += message_layout(a, v.emotes, added, scale, width).height + CHAT_MESSAGE_GAP * scale
 		}
 	}
 	if over := len(v.messages) - CHAT_MAX_MESSAGES; over > 0 {
@@ -207,7 +209,7 @@ draw_chat_view :: proc(a: ^Assets, v: ^Chat_View, rect: Rect, scale: f32, filter
 			}
 			v.matches += 1
 		}
-		layout := message_layout(a, m, scale, content_w)
+		layout := message_layout(a, v.emotes, m, scale, content_w)
 		top := bottom - layout.height
 		if top < rect.y + rect.h {
 			if m.mention {
@@ -305,7 +307,7 @@ Message_Layout :: struct {
 // Lays the message out, unless its cached layout still fits.
 // "Badges Name: text" for chat, "Badges Name text" in the name's colour for /me,
 // grey text for system messages.
-message_layout :: proc(a: ^Assets, m: ^Chat_Message, scale, width: f32) -> ^Message_Layout {
+message_layout :: proc(a: ^Assets, channel: ^Emotes, m: ^Chat_Message, scale, width: f32) -> ^Message_Layout {
 	l := &m.layout
 	if l.height > 0 && l.width == width && l.scale == scale && l.images_version == a.images.version {
 		return l
@@ -327,7 +329,7 @@ message_layout :: proc(a: ^Assets, m: ^Chat_Message, scale, width: f32) -> ^Mess
 	pixel_scale: f32 = 2 if scale > 1 else 1
 
 	for key in m.badges {
-		badge, found := badge_lookup(&a.emotes, key)
+		badge, found := badge_lookup(channel, &a.emotes, key)
 		if !found {
 			continue
 		}
