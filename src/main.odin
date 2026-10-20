@@ -303,6 +303,11 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 				redraw^ = true
 			}
 		}
+		if app.screen == .Watch {
+			// The hide button lights up, and the show-chat tab appears, under the
+			// mouse. Video frames redraw anyway; a paused or ended stream doesn't.
+			redraw^ = true
+		}
 	case e.type == .MOUSE_WHEEL:
 		x, y := e.wheel.mouse_x * density, e.wheel.mouse_y * density
 		switch app.screen {

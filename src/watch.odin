@@ -14,6 +14,11 @@ SELECTION_BACKGROUND :: Color{0x91, 0x47, 0xff, 110}
 // The chats never take more of the window than this; with many splits, each gets
 // narrower.
 MAX_CHAT_SHARE :: 0.6
+// With chats hidden, the tab to show them appears while the mouse is this close to
+// the window's right edge.
+SHOW_CHAT_ZONE :: 80
+SHOW_CHAT_TAB :: [2]f32{28, 64}
+CHAT_TOGGLE_BACKGROUND :: Color{0x18, 0x18, 0x1b, 220}
 
 Stream_Status :: enum {
 	// Streamlink is starting, or waiting out pre-roll ads.
@@ -41,8 +46,11 @@ Watch :: struct {
 	card:            User_Card,
 	// When recent messages were sent (Assets.now_ms), for the rate limit.
 	sent_at:         [dynamic]int,
-	// From the last draw, in pixels.
+	// From the last draw, in pixels: the video, the header button that hides the
+	// chats, and the tab that shows them again (zero size when not shown).
 	video_rect:      Rect,
+	hide_button:     Rect,
+	show_tab:        Rect,
 }
 
 // Starts watching `channel`, with the splits last open with it unless not
@@ -239,14 +247,28 @@ watch_key :: proc(app: ^App, key: sdl.KeyboardEvent) -> bool {
 	case sdl.K_DOWN:
 		player_command(&app.player, {"add", "volume", "-" + VOLUME_STEP})
 	case sdl.K_C:
-		w.show_chat = !w.show_chat
-		user_card_close(app)
+		watch_show_chat(app, !w.show_chat)
 	case sdl.K_RETURN, sdl.K_KP_ENTER:
 		box_focus(app, focused, .Chat)
 	case:
 		return false
 	}
 	return true
+}
+
+watch_show_chat :: proc(app: ^App, show: bool) {
+	w := &app.watch
+	w.show_chat = show
+	if !show {
+		box_unfocus(app)
+		user_card_close(app)
+	}
+}
+
+// Whether the mouse is where the show-chat tab appears.
+show_tab_hovered :: proc(app: ^App, screen_w: f32) -> bool {
+	w := &app.watch
+	return !w.show_chat && app.mouse.x >= screen_w - SHOW_CHAT_ZONE * app.scale && app.mouse.x < screen_w
 }
 
 // The pane under (x, y), or nil.
@@ -265,6 +287,14 @@ pane_at :: proc(app: ^App, x, y: f32) -> (p: ^Chat_Pane, index: int) {
 watch_click :: proc(app: ^App, x, y: f32) {
 	w := &app.watch
 	if w.card.open && in_rect(w.card.rect, x, y) {
+		return
+	}
+	if w.show_chat && w.hide_button.w > 0 && in_rect(w.hide_button, x, y) {
+		watch_show_chat(app, false)
+		return
+	}
+	if !w.show_chat && w.show_tab.w > 0 && in_rect(w.show_tab, x, y) {
+		watch_show_chat(app, true)
 		return
 	}
 	p, i := pane_at(app, x, y)
@@ -322,14 +352,31 @@ draw_watch :: proc(app: ^App) {
 	case .Failed:
 		draw_centered(&a.renderer, .Regular, text_size, video, "Couldn't load the stream. Esc to go back.", BROWSE_DIM_TEXT)
 	}
+	r := &a.renderer
+	scale := app.scale
+	w.hide_button = {}
+	w.show_tab = {}
 	if !w.show_chat {
+		// A tab at the right edge, only while the mouse is near it.
+		if show_tab_hovered(app, video.w) {
+			size := SHOW_CHAT_TAB * scale
+			w.show_tab = {video.w - size.x, (video.h - size.y) / 2, size.x, size.y}
+			hovered := in_rect(w.show_tab, app.mouse.x, app.mouse.y)
+			draw_rect(r, w.show_tab, CHAT_TOGGLE_BACKGROUND)
+			draw_centered(r, .Bold, 20 * scale, w.show_tab, "«", BROWSE_TEXT if hovered else BROWSE_DIM_TEXT)
+		}
 		return
 	}
 	for p, i in w.panes {
 		draw_pane(app, p, i == w.focus)
 		if i > 0 {
-			draw_rect(&a.renderer, {p.rect.x, p.rect.y, app.scale, p.rect.h}, CHAT_DIVIDER)
+			draw_rect(r, {p.rect.x, p.rect.y, scale, p.rect.h}, CHAT_DIVIDER)
 		}
 	}
+	// "»" at the first header's left end hides the chats.
+	h := w.panes[0].header_rect
+	w.hide_button = {h.x, h.y, h.h, h.h}
+	hovered := in_rect(w.hide_button, app.mouse.x, app.mouse.y)
+	draw_centered(r, .Bold, 18 * scale, w.hide_button, "»", BROWSE_TEXT if hovered else BROWSE_DIM_TEXT)
 	draw_user_card(app)
 }
