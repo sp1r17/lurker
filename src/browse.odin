@@ -84,6 +84,24 @@ browse_tick :: proc(app: ^App) -> (wait_ms: int) {
 	return due - now
 }
 
+// Empties the list, releasing its thumbnails (after signing out).
+browse_clear :: proc(app: ^App) {
+	b := &app.browse
+	for s in b.streams {
+		destroy_stream(s)
+	}
+	clear(&b.streams)
+	for url in b.thumbnails {
+		image_release(&app.assets.images, url)
+		delete(url)
+	}
+	clear(&b.thumbnails)
+	clear(&b.cards)
+	b.state = .Empty
+	b.hovered = -1
+	b.scroll = 0
+}
+
 browse_refresh :: proc(app: ^App) {
 	if !app.signed_in || app.browse.state == .Loading {
 		return
@@ -206,18 +224,28 @@ draw_browse :: proc(app: ^App, screen: Rect) {
 			BROWSE_DIM_TEXT,
 		)
 	}
+	app.sign_in.sign_out = {}
 	if app.signed_in {
-		hint := fmt.tprintf("%s  ·  R to refresh", app.auth.login)
+		// "R to refresh  ·  login  ·  Sign out", with "Sign out" clickable.
+		y := (header_h - line_height(r, .Regular, text_size)) / 2
+		label := "Sign out"
+		lw := text_width(r, .Regular, text_size, label)
+		app.sign_in.sign_out = {screen.w - pad - lw, y, lw, line_height(r, .Regular, text_size)}
+		hovered := in_rect(app.sign_in.sign_out, app.mouse.x, app.mouse.y)
+		draw_text(r, .Regular, text_size, app.sign_in.sign_out.x, y, label, BROWSE_TEXT if hovered else BROWSE_ACCENT)
+		hint := fmt.tprintf("R to refresh  ·  %s  ·  ", app.auth.login)
 		hw := text_width(r, .Regular, text_size, hint)
-		draw_text(r, .Regular, text_size, screen.w - pad - hw, (header_h - line_height(r, .Regular, text_size)) / 2, hint, BROWSE_DIM_TEXT)
+		draw_text(r, .Regular, text_size, app.sign_in.sign_out.x - hw, y, hint, BROWSE_DIM_TEXT)
 	}
 
 	clear(&b.cards)
 	content := Rect{0, header_h, screen.w, screen.h - header_h}
+	if !app.signed_in {
+		draw_sign_in(app, content)
+		return
+	}
 	message := ""
 	switch {
-	case !app.signed_in:
-		message = "Sign in to see the channels you follow: run twitch-app --login"
 	case b.state == .Empty || (b.state == .Loading && len(b.streams) == 0):
 		message = "Loading..."
 	case b.state == .Failed:

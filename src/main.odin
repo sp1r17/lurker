@@ -94,6 +94,7 @@ App :: struct {
 	player:          Player,
 	screen:          Screen,
 	browse:          Browse,
+	sign_in:         Sign_In,
 	watch:           Watch,
 	// Bumped whenever a watch starts or stops, so jobs for an old one are ignored.
 	session:         int,
@@ -159,7 +160,7 @@ run :: proc(channel: string, config: Config) -> bool {
 
 	app.auth, app.signed_in = load_auth()
 	if !app.signed_in {
-		log.info("not signed in: run --login to browse followed channels and show badges")
+		log.info("not signed in: sign in from the browse screen (or --login) for followed channels, badges and chatting")
 	}
 	defer if app.signed_in {
 		destroy_auth(app.auth)
@@ -167,6 +168,7 @@ run :: proc(channel: string, config: Config) -> bool {
 
 	app.chat_wake_event = sdl.RegisterEvents(1)
 	defer browse_destroy(&app.browse)
+	defer sign_in_destroy(&app.sign_in)
 	defer if app.screen == .Watch {
 		watch_stop(&app)
 	}
@@ -178,11 +180,14 @@ run :: proc(channel: string, config: Config) -> bool {
 	for running := true; running; {
 		defer free_all(context.temp_allocator)
 
-		// Wake up for the next animation frame or browse refresh, if either is due.
+		// Wake up for the next animation frame, browse refresh or sign-in poll,
+		// whichever is due first.
 		wait := a.next_frame_ms if a.next_frame_ms >= 0 else -1
 		if app.screen == .Browse {
-			if refresh := browse_tick(&app); refresh >= 0 && (wait < 0 || refresh < wait) {
-				wait = refresh
+			for due in ([]int{browse_tick(&app), sign_in_tick(&app)}) {
+				if due >= 0 && (wait < 0 || due < wait) {
+					wait = due
+				}
 			}
 		}
 		e: sdl.Event
@@ -221,6 +226,15 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 		return false
 	case e.type == .WINDOW_EXPOSED || e.type == .WINDOW_PIXEL_SIZE_CHANGED:
 		redraw^ = true
+	case e.type == .TEXT_INPUT:
+		if app.screen == .Watch {
+			watch_text_input(app, string(e.text.text))
+			redraw^ = true
+		}
+	case e.type == .KEY_DOWN && app.screen == .Watch && app.watch.input.focused:
+		// Typing: every key goes to the chat box.
+		watch_input_key(app, e.key)
+		redraw^ = true
 	case e.type == .KEY_DOWN:
 		switch e.key.key {
 		case sdl.K_Q:
@@ -237,9 +251,16 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 			case .Browse:
 				switch e.key.key {
 				case sdl.K_ESCAPE:
-					return false
+					if !sign_in_active(app) {
+						return false
+					}
+					sign_in_cancel(app)
 				case sdl.K_R:
 					browse_refresh(app)
+				case sdl.K_L:
+					if !app.signed_in {
+						sign_in_start(app)
+					}
 				}
 			}
 			redraw^ = true
@@ -250,6 +271,10 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 			hovered := browse_card_at(&app.browse, app.mouse.x, app.mouse.y)
 			if hovered != app.browse.hovered {
 				app.browse.hovered = hovered
+				redraw^ = true
+			}
+			// Buttons and links change colour under the mouse.
+			if !app.signed_in || app.sign_in.sign_out.w > 0 {
 				redraw^ = true
 			}
 		}
@@ -273,11 +298,12 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 		x, y := e.button.x * density, e.button.y * density
 		switch app.screen {
 		case .Watch:
-			if chat_view_click(&app.watch.chat_view, x, y) {
-				redraw^ = true
-			}
+			watch_click(app, x, y)
+			redraw^ = true
 		case .Browse:
-			if i := browse_card_at(&app.browse, x, y); i >= 0 {
+			if sign_in_click(app, x, y) {
+				redraw^ = true
+			} else if i := browse_card_at(&app.browse, x, y); i >= 0 {
 				watch_start(app, app.browse.streams[i].user_login)
 				redraw^ = true
 			}
@@ -323,6 +349,10 @@ finish_jobs :: proc(app: ^App) {
 		case Followed_Job:
 			apply_auth_check(app, p.check, p.auth)
 			finish_followed_job(app, &p)
+		case Device_Start_Job:
+			finish_device_start_job(app, &p)
+		case Device_Poll_Job:
+			finish_device_poll_job(app, &p)
 		}
 		destroy_job(job)
 	}

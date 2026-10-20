@@ -14,28 +14,50 @@ import sdl "vendor:sdl3"
 
 CHAT_URL :: "wss://irc-ws.chat.twitch.tv:443"
 CHAT_RECONNECT_DELAY :: 3 * time.Second
-// How often the chat thread checks whether it should stop while the socket is quiet.
-CHAT_STOP_CHECK_MS :: 250
+// How often the chat thread checks for messages to send, or whether to stop, while
+// the socket is quiet.
+CHAT_STOP_CHECK_MS :: 100
 
-// Read-only Twitch chat for one channel, over IRC on a WebSocket. A thread owns the
-// connection and hands finished messages to the main thread through `incoming`,
-// pushing `wake_event` so the main loop picks them up.
+// Twitch chat for one channel, over IRC on a WebSocket: anonymous and read-only, or
+// signed in and able to send. A thread owns the connection and hands finished
+// messages to the main thread through `incoming`, pushing `wake_event` so the main
+// loop picks them up.
 Chat :: struct {
 	channel:    string,
 	wake_event: u32,
+	// Empty for anonymous, read-only chat.
+	login:      string,
+	token:      string,
 	stop:       bool,
 	mutex:      sync.Mutex,
 	incoming:   [dynamic]Chat_Message,
+	// Messages to send, from chat_send. Guarded by mutex.
+	outgoing:   [dynamic]string,
 	// The channel's user ID, from ROOMSTATE; "" until joined. Guarded by mutex.
 	room_id:    string,
+	// The tags of the last USERSTATE (our name, colour and badges in this channel),
+	// for showing our own messages. Only the chat thread uses it.
+	user_tags:  string,
 	thread:     ^thread.Thread,
 }
 
-// curl.global_init must have been called. `channel` must outlive the chat.
-chat_start :: proc(chat: ^Chat, channel: string, wake_event: u32) {
+// Signs in as `login` if `token` isn't empty. curl.global_init must have been
+// called. `channel` must outlive the chat.
+chat_start :: proc(chat: ^Chat, channel: string, wake_event: u32, login := "", token := "") {
 	chat.channel = channel
 	chat.wake_event = wake_event
+	chat.login = strings.clone(login)
+	chat.token = strings.clone(token)
 	chat.thread = thread.create_and_start_with_poly_data(chat, chat_thread, context)
+}
+
+// Queues a message to send. Line breaks become spaces: one could otherwise end the
+// IRC line and smuggle in a command of its own.
+chat_send :: proc(chat: ^Chat, text: string) {
+	line, _ := strings.replace_all(text, "\r", " ", context.temp_allocator)
+	line, _ = strings.replace_all(line, "\n", " ", context.temp_allocator)
+	sync.guard(&chat.mutex)
+	append(&chat.outgoing, strings.clone(line))
 }
 
 chat_stop :: proc(chat: ^Chat) {
@@ -46,7 +68,14 @@ chat_stop :: proc(chat: ^Chat) {
 		destroy_chat_message(m)
 	}
 	delete(chat.incoming)
+	for line in chat.outgoing {
+		delete(line)
+	}
+	delete(chat.outgoing)
 	delete(chat.room_id)
+	delete(chat.user_tags)
+	delete(chat.login)
+	delete(chat.token)
 }
 
 // The channel's user ID once the chat has joined, else "". Allocated with the temp
@@ -115,11 +144,20 @@ chat_session :: proc(chat: ^Chat) {
 		return
 	}
 
-	// Anonymous read-only login: Twitch accepts any justinfan<number> nick.
-	nick := fmt.tprintf("justinfan%d", 10000 + rand.int_max(90000))
-	if !send_line(h, "CAP REQ :twitch.tv/tags twitch.tv/commands") ||
-	   !send_line(h, fmt.tprintf("NICK %s", nick)) ||
-	   !send_line(h, fmt.tprintf("JOIN #%s", chat.channel)) {
+	if !send_line(h, "CAP REQ :twitch.tv/tags twitch.tv/commands") {
+		return
+	}
+	if chat.token != "" {
+		if !send_line(h, fmt.tprintf("PASS oauth:%s", chat.token)) || !send_line(h, fmt.tprintf("NICK %s", chat.login)) {
+			return
+		}
+	} else {
+		// Anonymous read-only login: Twitch accepts any justinfan<number> nick.
+		if !send_line(h, fmt.tprintf("NICK justinfan%d", 10000 + rand.int_max(90000))) {
+			return
+		}
+	}
+	if !send_line(h, fmt.tprintf("JOIN #%s", chat.channel)) {
 		return
 	}
 
@@ -161,6 +199,9 @@ chat_session :: proc(chat: ^Chat) {
 			}
 		}
 
+		if !send_outgoing(chat, h) {
+			return
+		}
 		fds := [1]posix.pollfd{{fd = posix.FD(sock), events = {.IN}}}
 		posix.poll(&fds[0], 1, CHAT_STOP_CHECK_MS)
 	}
@@ -196,6 +237,9 @@ handle_payload :: proc(chat: ^Chat, h: ^curl.CURL, payload: string) -> bool {
 			}
 		case "PRIVMSG":
 			chat_post(chat, privmsg_to_chat(msg))
+		case "USERSTATE":
+			delete(chat.user_tags)
+			chat.user_tags = strings.clone(msg.tags)
 		case "USERNOTICE":
 			// Subs, gifts, raids: Twitch's own wording, then the user's message if any.
 			if text, has_text := irc_tag(msg, "system-msg"); has_text {
@@ -209,6 +253,42 @@ handle_payload :: proc(chat: ^Chat, h: ^curl.CURL, payload: string) -> bool {
 		}
 	}
 	return true
+}
+
+// Sends the queued messages, showing each in chat: Twitch doesn't echo our own
+// messages back. Returns false if the connection failed.
+@(private = "file")
+send_outgoing :: proc(chat: ^Chat, h: ^curl.CURL) -> bool {
+	lines: [dynamic]string
+	defer delete(lines)
+	{
+		sync.guard(&chat.mutex)
+		lines, chat.outgoing = chat.outgoing, {}
+	}
+	defer for line in lines {
+		delete(line)
+	}
+	if chat.token == "" {
+		return true
+	}
+	for text in lines {
+		if !send_line(h, fmt.tprintf("PRIVMSG #%s :%s", chat.channel, text)) {
+			return false
+		}
+		chat_post(chat, own_message(chat.login, chat.channel, chat.user_tags, text))
+	}
+	return true
+}
+
+// Our own message as Twitch would have sent it to others, styled from USERSTATE.
+own_message :: proc(login, channel, user_tags, text: string) -> Chat_Message {
+	msg := Irc_Message {
+		tags    = user_tags,
+		prefix  = fmt.tprintf("%s!%s@%s.tmi.twitch.tv", login, login, login),
+		command = "PRIVMSG",
+		params  = {fmt.tprintf("#%s", channel), text},
+	}
+	return privmsg_to_chat(msg)
 }
 
 @(private = "file")

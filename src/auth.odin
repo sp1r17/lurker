@@ -112,16 +112,24 @@ form :: proc(pairs: ..string) -> string {
 	return strings.to_string(sb)
 }
 
-// Interactive sign-in for the terminal: prints the code and waits for approval.
-// Blocks for up to the code's lifetime (about 30 minutes).
-login_with_device_code :: proc(client_id: string) -> (a: Auth, ok: bool) {
-	Device_Response :: struct {
-		device_code:      string,
-		user_code:        string,
-		verification_uri: string,
-		expires_in:       i64,
-		interval:         i64,
-	}
+// A sign-in code to show the user. Strings are owned; free with destroy_device_code.
+Device_Code :: struct {
+	device_code:      string,
+	user_code:        string,
+	verification_uri: string,
+	// Seconds.
+	expires_in:       i64,
+	interval:         i64,
+}
+
+destroy_device_code :: proc(d: Device_Code) {
+	delete(d.device_code)
+	delete(d.user_code)
+	delete(d.verification_uri)
+}
+
+// Asks Twitch for a sign-in code. Blocks: call from a worker thread or the terminal.
+device_code_start :: proc(client_id: string) -> (d: Device_Code, ok: bool) {
 	res, req_ok := http_request(
 		DEVICE_URL,
 		post_body = form("client_id", client_id, "scopes", AUTH_SCOPES),
@@ -130,53 +138,102 @@ login_with_device_code :: proc(client_id: string) -> (a: Auth, ok: bool) {
 	if !req_ok {
 		return {}, false
 	}
-	device: Device_Response
-	if res.status != 200 || json.unmarshal(res.body, &device, allocator = context.temp_allocator) != nil {
-		log.errorf(
-			"Twitch refused the sign-in request (%d): %s",
-			res.status,
-			strings.trim_space(string(res.body)),
-		)
+	parsed: Device_Code
+	if res.status != 200 || json.unmarshal(res.body, &parsed, allocator = context.temp_allocator) != nil {
+		log.errorf("Twitch refused the sign-in request (%d): %s", res.status, strings.trim_space(string(res.body)))
 		return {}, false
 	}
+	return {
+			device_code = strings.clone(parsed.device_code),
+			user_code = strings.clone(parsed.user_code),
+			verification_uri = strings.clone(parsed.verification_uri),
+			expires_in = parsed.expires_in,
+			interval = max(parsed.interval, 5),
+		},
+		true
+}
+
+Device_Poll :: enum {
+	// Not approved yet: poll again after the interval.
+	Pending,
+	// Polling too often: add 5 seconds to the interval.
+	Slow_Down,
+	Approved,
+	// Denied, expired, or broken: start over.
+	Failed,
+}
+
+// Checks once whether the user has approved the code. On Approved, `a` is the new
+// sign-in. Blocks: call from a worker thread or the terminal.
+device_code_poll :: proc(client_id, device_code: string) -> (result: Device_Poll, a: Auth) {
+	res, ok := http_request(
+		TOKEN_URL,
+		post_body = form(
+			"client_id",
+			client_id,
+			"scopes",
+			AUTH_SCOPES,
+			"device_code",
+			device_code,
+			"grant_type",
+			DEVICE_GRANT_TYPE,
+		),
+		allocator = context.temp_allocator,
+	)
+	if !ok {
+		// Network trouble: worth another try.
+		return .Pending, {}
+	}
+	token: Token_Response
+	_ = json.unmarshal(res.body, &token, allocator = context.temp_allocator)
+	switch {
+	case res.status == 200 && token.access_token != "":
+		if a, ok = finish_login(client_id, token); ok {
+			return .Approved, a
+		}
+		return .Failed, {}
+	case token.message == "authorization_pending":
+		return .Pending, {}
+	case token.message == "slow_down":
+		return .Slow_Down, {}
+	case:
+		log.warnf("sign-in failed (%d): %s", res.status, strings.trim_space(string(res.body)))
+		return .Failed, {}
+	}
+}
+
+// Interactive sign-in for the terminal: prints the code and waits for approval.
+// Blocks for up to the code's lifetime (about 30 minutes).
+login_with_device_code :: proc(client_id: string) -> (a: Auth, ok: bool) {
+	device := device_code_start(client_id) or_return
+	defer destroy_device_code(device)
 
 	fmt.printfln("To sign in, open %s and enter the code %s", device.verification_uri, device.user_code)
-	interval := max(device.interval, 5)
+	interval := device.interval
 	deadline := time.time_to_unix(time.now()) + device.expires_in
 	for time.time_to_unix(time.now()) < deadline {
 		time.sleep(time.Duration(interval) * time.Second)
-		poll, poll_ok := http_request(
-			TOKEN_URL,
-			post_body = form(
-				"client_id",
-				client_id,
-				"scopes",
-				AUTH_SCOPES,
-				"device_code",
-				device.device_code,
-				"grant_type",
-				DEVICE_GRANT_TYPE,
-			),
-			allocator = context.temp_allocator,
-		)
-		if !poll_ok {
-			continue
-		}
-		token: Token_Response
-		_ = json.unmarshal(poll.body, &token, allocator = context.temp_allocator)
-		switch {
-		case poll.status == 200 && token.access_token != "":
-			return finish_login(client_id, token)
-		case token.message == "authorization_pending":
-		case token.message == "slow_down":
+		result: Device_Poll
+		result, a = device_code_poll(client_id, device.device_code)
+		switch result {
+		case .Pending:
+		case .Slow_Down:
 			interval += 5
-		case:
-			log.errorf("sign-in failed (%d): %s", poll.status, strings.trim_space(string(poll.body)))
+		case .Approved:
+			return a, true
+		case .Failed:
 			return {}, false
 		}
 	}
 	log.error("the sign-in code expired")
 	return {}, false
+}
+
+// Forgets the saved sign-in.
+delete_saved_auth :: proc() {
+	if path, ok := auth_path(); ok {
+		os.remove(path)
+	}
 }
 
 // Looks up who the token belongs to.
