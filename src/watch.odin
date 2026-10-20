@@ -18,6 +18,12 @@ MAX_CHAT_SHARE :: 0.6
 // the window's right edge.
 SHOW_CHAT_ZONE :: 80
 SHOW_CHAT_TAB :: [2]f32{28, 64}
+VOLUME_STEP :: 5
+// How long the volume bar shows after a change.
+VOLUME_OSD_MS :: 1500
+VOLUME_BAR_WIDTH :: 160
+// The part of the volume bar above 100%.
+VOLUME_BOOST :: Color{0xff, 0x9f, 0x43, 255}
 CHAT_TOGGLE_BACKGROUND :: Color{0x18, 0x18, 0x1b, 220}
 
 Stream_Status :: enum {
@@ -46,6 +52,8 @@ Watch :: struct {
 	card:            User_Card,
 	// When recent messages were sent (Assets.now_ms), for the rate limit.
 	sent_at:         [dynamic]int,
+	// Until when (Assets.now_ms) the volume bar shows.
+	volume_osd_until: int,
 	// From the last draw, in pixels: the video, the header button that hides the
 	// chats, and the tab that shows them again (zero size when not shown).
 	video_rect:      Rect,
@@ -241,11 +249,11 @@ watch_key :: proc(app: ^App, key: sdl.KeyboardEvent) -> bool {
 	case sdl.K_SPACE:
 		player_command(&app.player, {"cycle", "pause"})
 	case sdl.K_M:
-		player_command(&app.player, {"cycle", "mute"})
+		set_volume(app, app.layout.volume, !app.layout.muted)
 	case sdl.K_UP:
-		player_command(&app.player, {"add", "volume", VOLUME_STEP})
+		set_volume(app, app.layout.volume + VOLUME_STEP, false)
 	case sdl.K_DOWN:
-		player_command(&app.player, {"add", "volume", "-" + VOLUME_STEP})
+		set_volume(app, app.layout.volume - VOLUME_STEP, app.layout.muted)
 	case sdl.K_C:
 		watch_show_chat(app, !w.show_chat)
 	case sdl.K_RETURN, sdl.K_KP_ENTER:
@@ -254,6 +262,62 @@ watch_key :: proc(app: ^App, key: sdl.KeyboardEvent) -> bool {
 		return false
 	}
 	return true
+}
+
+// Sets mpv's volume (0 to MAX_VOLUME; above 100 boosts) and mute, shows the
+// volume bar, and saves both. Raising the volume unmutes, as in most players.
+set_volume :: proc(app: ^App, volume: int, muted: bool) {
+	l := &app.layout
+	l.volume = clamp(volume, 0, MAX_VOLUME)
+	l.muted = muted
+	apply_volume(app)
+	app.watch.volume_osd_until = app.assets.now_ms + VOLUME_OSD_MS
+	layout_save(l)
+}
+
+// Tells mpv the saved volume and mute.
+apply_volume :: proc(app: ^App) {
+	volume := strings.clone_to_cstring(fmt.tprint(app.layout.volume), context.temp_allocator)
+	player_command(&app.player, {"set", "volume", volume})
+	player_command(&app.player, {"set", "mute", "yes" if app.layout.muted else "no"})
+}
+
+// The volume bar, at the video's top left: a speaker level or "Muted".
+@(private = "file")
+draw_volume :: proc(app: ^App) {
+	w := &app.watch
+	if app.assets.now_ms >= w.volume_osd_until {
+		return
+	}
+	r := &app.assets.renderer
+	scale := app.scale
+	size := BROWSE_CARD_TEXT_SIZE * scale
+	pad := 10 * scale
+	lh := line_height(r, .Bold, size)
+	label := "Muted" if app.layout.muted else fmt.tprintf("Volume %d%%", app.layout.volume)
+	bar_w := VOLUME_BAR_WIDTH * scale
+	panel := Rect{w.video_rect.x + 16 * scale, w.video_rect.y + 16 * scale, bar_w + 2 * pad, lh + 14 * scale + 2 * pad}
+	draw_rect(r, panel, CHAT_TOGGLE_BACKGROUND)
+	draw_text(r, .Bold, size, panel.x + pad, panel.y + pad, label, BROWSE_TEXT)
+	// The bar spans 0 to MAX_VOLUME, with a tick at 100% and the boost above it in
+	// orange.
+	track := Rect{panel.x + pad, panel.y + pad + lh + 6 * scale, bar_w, 6 * scale}
+	draw_rect(r, track, INPUT_BACKGROUND)
+	full := track.w * 100 / MAX_VOLUME
+	if !app.layout.muted {
+		level := track.w * f32(app.layout.volume) / MAX_VOLUME
+		draw_rect(r, {track.x, track.y, min(level, full), track.h}, BROWSE_ACCENT)
+		if level > full {
+			draw_rect(r, {track.x + full, track.y, level - full, track.h}, VOLUME_BOOST)
+		}
+	}
+	draw_rect(r, {track.x + full - scale, track.y - 3 * scale, 2 * scale, track.h + 6 * scale}, BROWSE_TEXT)
+}
+
+// ms until the volume bar hides, for the main loop's wait; -1 if it isn't showing.
+volume_osd_wait :: proc(app: ^App) -> int {
+	left := app.watch.volume_osd_until - app.assets.now_ms
+	return left if app.screen == .Watch && left > 0 else -1
 }
 
 watch_show_chat :: proc(app: ^App, show: bool) {
@@ -307,9 +371,17 @@ watch_click :: proc(app: ^App, x, y: f32) {
 	pane_click(app, p, x, y)
 }
 
+// The wheel scrolls a chat, or over the video, changes the volume as in mpv.
 watch_scroll :: proc(app: ^App, x, y, wheel_y: f32) {
-	if p, _ := pane_at(app, x, y); p != nil && in_rect(p.messages_rect, x, y) {
-		chat_view_scroll(&p.view, wheel_y, app.scale)
+	if p, _ := pane_at(app, x, y); p != nil {
+		if in_rect(p.messages_rect, x, y) {
+			chat_view_scroll(&p.view, wheel_y, app.scale)
+		}
+		return
+	}
+	if in_rect(app.watch.video_rect, x, y) && wheel_y != 0 {
+		step := VOLUME_STEP if wheel_y > 0 else -VOLUME_STEP
+		set_volume(app, app.layout.volume + step, false if step > 0 else app.layout.muted)
 	}
 }
 
@@ -354,6 +426,7 @@ draw_watch :: proc(app: ^App) {
 	}
 	r := &a.renderer
 	scale := app.scale
+	draw_volume(app)
 	w.hide_button = {}
 	w.show_tab = {}
 	if !w.show_chat {

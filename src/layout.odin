@@ -6,11 +6,19 @@ import "core:os"
 import "core:path/filepath"
 import "core:strings"
 
-// The splits last open with each watched channel, so watching it again brings
-// them back. Saved in ~/.config/twitch-app/layout.json.
+DEFAULT_VOLUME :: 100
+// mpv's own limit (volume-max): above 100% is a software boost.
+MAX_VOLUME :: 130
+
+// What's kept between runs: the splits last open with each watched channel, so
+// watching it again brings them back, and the volume. Saved in
+// ~/.config/twitch-app/layout.json.
 Layout :: struct {
 	// Watched channel -> the split channels, left to right. Owned.
 	splits: map[string][dynamic]string,
+	// 0 to MAX_VOLUME.
+	volume: int,
+	muted:  bool,
 }
 
 layout_destroy :: proc(l: ^Layout) {
@@ -31,8 +39,9 @@ layout_path :: proc() -> (path: string, ok: bool) {
 	return joined, err == nil
 }
 
-// A missing or unreadable file is an empty layout.
+// A missing or unreadable file is an empty layout at full volume.
 layout_load :: proc() -> (l: Layout) {
+	l.volume = DEFAULT_VOLUME
 	path, ok := layout_path()
 	if !ok {
 		return
@@ -45,15 +54,24 @@ layout_load :: proc() -> (l: Layout) {
 	return
 }
 
-// Reads saved splits into `l`, keeping only valid channel names.
+// Reads saved splits and volume into `l`, keeping only valid channel names.
 parse_layout :: proc(data: []byte, l: ^Layout) -> bool {
 	saved: struct {
 		splits: map[string][]string,
+		volume: int,
+		muted:  bool,
 	}
 	if json.unmarshal(data, &saved, allocator = context.temp_allocator) != nil {
 		log.warn("layout.json is unreadable; starting without saved splits")
 		return false
 	}
+	// A file from before the volume was saved has none: keep the default, not 0.
+	if value, err := json.parse(data, allocator = context.temp_allocator); err == nil {
+		if obj, is_obj := value.(json.Object); is_obj && "volume" in obj {
+			l.volume = clamp(saved.volume, 0, MAX_VOLUME)
+		}
+	}
+	l.muted = saved.muted
 	for channel, splits in saved.splits {
 		if !valid_login(channel) {
 			continue

@@ -9,7 +9,6 @@ import "vendor:curl"
 import gl "vendor:OpenGL"
 import sdl "vendor:sdl3"
 
-VOLUME_STEP :: "5"
 // Shortest wait between animation frames, so many emotes can't spin the CPU.
 MIN_ANIMATION_WAIT_MS :: 10
 
@@ -190,6 +189,7 @@ run :: proc(channels: []string, config: Config) -> bool {
 	}
 
 	app.layout = layout_load()
+	apply_volume(&app)
 	defer layout_destroy(&app.layout)
 	app.chat_wake_event = sdl.RegisterEvents(1)
 	defer browse_destroy(&app.browse)
@@ -215,11 +215,13 @@ run :: proc(channels: []string, config: Config) -> bool {
 		// Wake up for the next animation frame, browse refresh or sign-in poll,
 		// whichever is due first.
 		wait := a.next_frame_ms if a.next_frame_ms >= 0 else -1
+		dues := []int{-1, -1, volume_osd_wait(&app)}
 		if app.screen == .Browse {
-			for due in ([]int{browse_tick(&app), sign_in_tick(&app)}) {
-				if due >= 0 && (wait < 0 || due < wait) {
-					wait = due
-				}
+			dues[0], dues[1] = browse_tick(&app), sign_in_tick(&app)
+		}
+		for due in dues {
+			if due >= 0 && (wait < 0 || due < wait) {
+				wait = due
 			}
 		}
 		e: sdl.Event
