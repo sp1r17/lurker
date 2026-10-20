@@ -174,11 +174,13 @@ run :: proc(channels: []string, config: Config) -> bool {
 
 	defer images_destroy(&a.images)
 	defer emotes_destroy(&a.emotes)
+	defer emoji_table_destroy(&a.emoji)
 	jobs_start(&a.jobs, sdl.RegisterEvents(1))
 	defer jobs_stop(&a.jobs)
 	for source in Emote_Source.Global_7TV ..= Emote_Source.Global_FFZ {
 		emotes_request_set(&a.jobs, source)
 	}
+	emoji_request(&a.jobs)
 
 	app.auth, app.signed_in = load_auth()
 	if !app.signed_in {
@@ -417,6 +419,8 @@ finish_jobs :: proc(app: ^App) {
 			finish_user_job(app, &p)
 		case Stream_Info_Job:
 			finish_stream_info_job(app, &p)
+		case Emoji_Job:
+			finish_emoji_job(a, &p)
 		}
 		destroy_job(job)
 	}

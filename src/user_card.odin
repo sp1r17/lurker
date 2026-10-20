@@ -222,7 +222,7 @@ draw_user_card :: proc(app: ^App) {
 	// Their bio, on one line.
 	ty = y + header_h
 	if c.state == .Loaded && c.info.description != "" {
-		draw_text(r, .Regular, small, x + pad, ty, fit_text(r, .Regular, small, c.info.description, card_w - 2 * pad), CHAT_TEXT)
+		draw_text_line(a, .Regular, small, x + pad, ty, c.info.description, CHAT_TEXT, card_w - 2 * pad)
 	}
 	ty += lh_small + pad
 
@@ -238,7 +238,7 @@ draw_user_card :: proc(app: ^App) {
 		if m.deleted {
 			text_color = CHAT_SYSTEM_TEXT
 		}
-		draw_text(r, .Regular, size, x + pad, ty, fit_text(r, .Regular, size, text, card_w - 2 * pad), text_color)
+		draw_text_line(a, .Regular, size, x + pad, ty, text, text_color, card_w - 2 * pad)
 		ty += lh
 	}
 	ty = y + card_h - pad - lh_small

@@ -17,6 +17,8 @@ CHAT_MORE_BAR_HEIGHT :: 28
 // from different providers (Twitch 28 px, 7TV 32 px, some taller) line up.
 EMOTE_HEIGHT :: 28
 BADGE_HEIGHT :: 18
+// Emoji are sized to sit in a line of text.
+EMOJI_HEIGHT :: 21
 // How far an emote may stick out above and below its line, as on twitch.tv, so
 // lines with emotes are barely taller than lines of text.
 EMOTE_OVERHANG :: 3
@@ -37,6 +39,7 @@ Assets :: struct {
 	images:        Images,
 	jobs:          Jobs,
 	emotes:        Emotes,
+	emoji:         Emoji_Table,
 	// Milliseconds since startup, for animations.
 	now_ms:        int,
 	// Set while drawing: ms until an animated image on screen changes frame, or -1.
@@ -90,6 +93,7 @@ chat_view_add :: proc(v: ^Chat_View, a: ^Assets, scale, width: f32, new_messages
 		append(&v.messages, m)
 		added := &v.messages[len(v.messages) - 1]
 		apply_third_party_emotes(added, v.emotes, &a.emotes)
+		apply_emoji(added, &a.emoji)
 		added.mention = mentions(added, self_login)
 		if v.scroll > 0 {
 			v.scroll += message_layout(a, v.emotes, added, scale, width).height + CHAT_MESSAGE_GAP * scale
@@ -360,14 +364,20 @@ message_layout :: proc(a: ^Assets, channel: ^Emotes, m: ^Chat_Message, scale, wi
 	for f in m.fragments {
 		switch f.kind {
 		case .Text:
-			put_words(&b, .Regular, text_color, f.text)
+			put_words(&b, .Regular, text_color, f.text, f.attached)
 		case .Emote:
 			image := image_get(&a.images, &a.jobs, f.url_2x if pixel_scale > 1 && f.url_2x != "" else f.url_1x, pixel_scale)
-			if image.state == .Failed {
-				put_words(&b, .Regular, text_color, f.text)
-			} else if f.zero_width && overlay_last(&b, image) {
-				// Drawn over the previous emote.
-			} else {
+			switch {
+			case image.state == .Failed:
+				put_words(&b, .Regular, text_color, f.text, f.attached)
+			case f.zero_width && overlay_last(&b, image):
+			// Drawn over the previous emote.
+			case f.emoji:
+				if !f.attached {
+					space(&b, .Regular)
+				}
+				put_image(&b, image, EMOJI_HEIGHT, 0)
+			case:
 				space(&b, .Regular)
 				put_image(&b, image, EMOTE_HEIGHT, EMOTE_OVERHANG)
 			}
@@ -465,12 +475,17 @@ overlay_last :: proc(b: ^Builder, image: ^Image) -> bool {
 	return true
 }
 
-// Puts space-separated words, wrapping between words.
+// Puts space-separated words, wrapping between words. With `attached`, the first
+// word joins what's before it unless the text starts with whitespace.
 @(private = "file")
-put_words :: proc(b: ^Builder, font: Font, color: Color, text: string) {
+put_words :: proc(b: ^Builder, font: Font, color: Color, text: string, attached := false) {
+	glued := attached && len(text) > 0 && text[0] != ' '
 	rest := text
 	for word in strings.fields_iterator(&rest) {
-		space(b, font)
+		if !glued {
+			space(b, font)
+		}
+		glued = false
 		put_word(b, font, color, word)
 	}
 }

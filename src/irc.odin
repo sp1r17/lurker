@@ -133,6 +133,10 @@ Fragment :: struct {
 	url_1x:     string,
 	url_2x:     string,
 	zero_width: bool,
+	// An emoji image, sized like text rather than like an emote.
+	emoji:      bool,
+	// No whitespace between this and the fragment before ("hi😀").
+	attached:   bool,
 }
 
 // What a moderation message does to earlier messages.

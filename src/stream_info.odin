@@ -170,6 +170,5 @@ draw_stream_info :: proc(app: ^App) {
 		game_y := bar.y + pad + (name_h - lh) / 2
 		draw_text(r, .Regular, size, x, game_y, fit_text(r, .Regular, size, game, right - x), BROWSE_ACCENT)
 	}
-	title := fit_text(r, .Regular, size, w.info.title, bar.w - 2 * pad)
-	draw_text(r, .Regular, size, bar.x + pad, bar.y + pad + name_h, title, BROWSE_DIM_TEXT)
+	draw_text_line(&app.assets, .Regular, size, bar.x + pad, bar.y + pad + name_h, w.info.title, BROWSE_DIM_TEXT, bar.w - 2 * pad)
 }

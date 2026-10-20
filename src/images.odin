@@ -198,7 +198,10 @@ finish_image_job :: proc(images: ^Images, p: ^Image_Job) {
 		gl.BindTexture(gl.TEXTURE_2D, tex)
 		gl.PixelStorei(gl.UNPACK_ALIGNMENT, 4)
 		gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, p.size.x, p.size.y, 0, gl.RGBA, gl.UNSIGNED_BYTE, raw_data(f.pixels))
-		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
+		// Mipmaps keep images drawn well below their size (64 px emoji at text
+		// height, 2x emotes) smooth instead of grainy.
+		gl.GenerateMipmap(gl.TEXTURE_2D)
+		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR)
 		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
 		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
 		gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)

@@ -313,7 +313,7 @@ draw_browse :: proc(app: ^App, screen: Rect) {
 		tx := card.x + text_pad
 		tw := card.w - 2 * text_pad
 		ty := thumb.y + thumb.h + text_pad
-		draw_text(r, .Bold, card_title_size, tx, ty, fit_text(r, .Bold, card_title_size, s.title, tw), BROWSE_TEXT)
+		draw_text_line(a, .Bold, card_title_size, tx, ty, s.title, BROWSE_TEXT, tw)
 		ty += lh_title
 		draw_text(r, .Regular, text_size, tx, ty, fit_text(r, .Regular, text_size, s.user_name, tw), BROWSE_ACCENT)
 		ty += lh_text
