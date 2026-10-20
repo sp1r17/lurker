@@ -3,6 +3,7 @@ package app
 import "core:fmt"
 import "core:log"
 import "core:os"
+import "core:path/filepath"
 import "core:strings"
 import "core:sys/posix"
 import "core:time"
@@ -30,8 +31,22 @@ Streamlink :: struct {
 	running: bool,
 }
 
-// Starts streamlink on `channel`. Play streamlink_url(s) in mpv.
-streamlink_start :: proc(channel: string) -> (s: Streamlink, ok: bool) {
+// Starts streamlink on `channel`. Play streamlink_url(s) in mpv. With a `token`,
+// streamlink asks Twitch for the stream as that user, so their Turbo or channel
+// subscription can remove the ads at the source. The token is tied to `client_id`,
+// so that's sent too, replacing the website client ID streamlink sends by default.
+streamlink_start :: proc(channel: string, client_id := "", token := "") -> (s: Streamlink, ok: bool) {
+	command := make([dynamic]string, context.temp_allocator)
+	append(&command, "streamlink", "--stdout", "--loglevel", "error")
+	if token != "" {
+		config, config_ok := write_streamlink_config(client_id, token)
+		if !config_ok {
+			return {}, false
+		}
+		append(&command, "--config", config)
+	}
+	append(&command, fmt.tprintf("https://twitch.tv/%s", channel), "best")
+
 	video_r, video_w, pipe_err := os.pipe()
 	if pipe_err != nil {
 		return {}, false
@@ -43,11 +58,7 @@ streamlink_start :: proc(channel: string) -> (s: Streamlink, ok: bool) {
 		return {}, false
 	}
 	process, start_err := os.process_start(
-		{
-			command = {"streamlink", "--stdout", "--loglevel", "error", fmt.tprintf("https://twitch.tv/%s", channel), "best"},
-			stdout = video_w,
-			stderr = errors_w,
-		},
+		{command = command[:], stdout = video_w, stderr = errors_w},
 	)
 	// The child has its own copies of the write ends.
 	os.close(video_w)
@@ -72,6 +83,32 @@ streamlink_start :: proc(channel: string) -> (s: Streamlink, ok: bool) {
 		return {}, false
 	}
 	return s, true
+}
+
+// Writes the sign-in for streamlink to a config file only the user can read:
+// arguments would show the token to everyone on the machine (ps). Returns its path,
+// allocated with the temp allocator.
+@(private = "file")
+write_streamlink_config :: proc(client_id, token: string) -> (path: string, ok: bool) {
+	auth_file := auth_path() or_return
+	dir := filepath.dir(auth_file)
+	if err := os.make_directory_all(dir, {.Read_User, .Write_User, .Execute_User}); err != nil && err != .Exist {
+		return "", false
+	}
+	joined, join_err := filepath.join({dir, "streamlink.conf"}, context.temp_allocator)
+	if join_err != nil {
+		return "", false
+	}
+	config := fmt.tprintf(
+		"twitch-api-header=Authorization=OAuth %s\ntwitch-api-header=Client-ID=%s\n",
+		token,
+		client_id,
+	)
+	if err := os.write_entire_file(joined, config, {.Read_User, .Write_User}); err != nil {
+		log.errorf("can't write %s: %v", joined, err)
+		return "", false
+	}
+	return joined, true
 }
 
 // What mpv should play.

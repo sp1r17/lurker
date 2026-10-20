@@ -26,6 +26,9 @@ Watch :: struct {
 	channel:         string,
 	status:          Stream_Status,
 	streamlink:      Streamlink,
+	// Streamlink was given the sign-in (for Turbo); cleared if that failed and
+	// it's running anonymously instead.
+	signed_stream:   bool,
 	chat:            ^Chat,
 	chat_view:       Chat_View,
 	show_chat:       bool,
@@ -61,12 +64,7 @@ watch_start :: proc(app: ^App, channel: string) {
 		status    = .Starting,
 		show_chat = true,
 	}
-	if s, ok := streamlink_start(w.channel); ok {
-		w.streamlink = s
-		player_load(&app.player, streamlink_url(&w.streamlink))
-	} else {
-		w.status = .Failed
-	}
+	start_stream(app, signed = app.signed_in)
 	w.chat = new(Chat)
 	if app.signed_in {
 		chat_start(w.chat, w.channel, app.chat_wake_event, app.auth.login, app.auth.access_token)
@@ -108,6 +106,26 @@ set_title :: proc(app: ^App, channel: string) {
 	sdl.SetWindowTitle(app.window, strings.clone_to_cstring(title, context.temp_allocator))
 }
 
+@(private = "file")
+start_stream :: proc(app: ^App, signed: bool) {
+	w := &app.watch
+	w.status = .Starting
+	w.signed_stream = signed
+	s: Streamlink
+	ok: bool
+	if signed {
+		s, ok = streamlink_start(w.channel, app.client_id, app.auth.access_token)
+	} else {
+		s, ok = streamlink_start(w.channel)
+	}
+	if !ok {
+		w.status = .Failed
+		return
+	}
+	w.streamlink = s
+	player_load(&app.player, streamlink_url(&w.streamlink))
+}
+
 // Acts on what mpv reports: the stream showing, or ending.
 watch_player_events :: proc(app: ^App, events: Player_Events) {
 	w := &app.watch
@@ -124,6 +142,13 @@ watch_player_events :: proc(app: ^App, events: Player_Events) {
 		case .Offline:
 			w.status = .Offline
 		case .Streamlink_Failed:
+			if w.signed_stream && w.status == .Starting {
+				// Twitch may refuse the sign-in for playback; watching without it beats
+				// not watching (streamlink still cuts the ads).
+				log.warn("streamlink failed with the sign-in; trying without it")
+				start_stream(app, signed = false)
+				return
+			}
 			w.status = .Failed
 		}
 	}
