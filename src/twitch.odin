@@ -1,6 +1,7 @@
 package app
 
 import "core:encoding/json"
+import "core:fmt"
 import "core:log"
 import "core:strings"
 
@@ -9,13 +10,40 @@ HELIX_URL :: "https://api.twitch.tv/helix"
 // Helix accepts at most 100 user_login parameters per request.
 MAX_LOGINS_PER_REQUEST :: 100
 
+// A live stream, as Helix describes it.
 Stream :: struct {
-	user_login:   string,
-	user_name:    string,
-	game_name:    string,
-	title:        string,
-	viewer_count: int,
-	started_at:   string,
+	user_id:       string,
+	user_login:    string,
+	user_name:     string,
+	game_name:     string,
+	title:         string,
+	viewer_count:  int,
+	started_at:    string,
+	// With "{width}" and "{height}" placeholders.
+	thumbnail_url: string,
+}
+
+clone_stream :: proc(s: Stream) -> Stream {
+	return {
+		user_id = strings.clone(s.user_id),
+		user_login = strings.clone(s.user_login),
+		user_name = strings.clone(s.user_name),
+		game_name = strings.clone(s.game_name),
+		title = strings.clone(s.title),
+		viewer_count = s.viewer_count,
+		started_at = strings.clone(s.started_at),
+		thumbnail_url = strings.clone(s.thumbnail_url),
+	}
+}
+
+destroy_stream :: proc(s: Stream) {
+	delete(s.user_id)
+	delete(s.user_login)
+	delete(s.user_name)
+	delete(s.game_name)
+	delete(s.title)
+	delete(s.started_at)
+	delete(s.thumbnail_url)
 }
 
 Twitch_Error :: enum {
@@ -82,12 +110,42 @@ streams_path :: proc(logins: []string) -> string {
 }
 
 parse_streams_response :: proc(body: []byte) -> (streams: []Stream, err: Twitch_Error) {
+	streams, _, err = parse_streams_page(body)
+	return
+}
+
+// A page of streams and the cursor for the next page ("" on the last). Allocated
+// with the temp allocator.
+parse_streams_page :: proc(body: []byte) -> (streams: []Stream, cursor: string, err: Twitch_Error) {
 	Streams_Response :: struct {
-		data: []Stream,
+		data:       []Stream,
+		pagination: struct {
+			cursor: string,
+		},
 	}
 	r: Streams_Response
 	if json.unmarshal(body, &r, allocator = context.temp_allocator) != nil {
-		return nil, .Bad_Json
+		return nil, "", .Bad_Json
 	}
-	return r.data, .None
+	return r.data, r.pagination.cursor, .None
+}
+
+// The live channels a user follows, most viewers first, allocated with the temp
+// allocator. Needs the user:read:follows scope.
+get_followed_streams :: proc(client_id, token, user_id: string) -> (streams: []Stream, err: Twitch_Error) {
+	all := make([dynamic]Stream, context.temp_allocator)
+	cursor := ""
+	for {
+		path := fmt.tprintf("/streams/followed?user_id=%s&first=100", user_id)
+		if cursor != "" {
+			path = fmt.tprintf("%s&after=%s", path, cursor)
+		}
+		body := helix_get(client_id, token, path) or_return
+		page: []Stream
+		page, cursor = parse_streams_page(body) or_return
+		append(&all, ..page)
+		if cursor == "" || len(page) == 0 {
+			return all[:], .None
+		}
+	}
 }

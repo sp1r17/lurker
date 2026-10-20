@@ -1,12 +1,26 @@
 package app
 
 import "core:log"
+import "core:math"
+import "core:os"
 import fs "vendor:fontstash"
 import gl "vendor:OpenGL"
+import stbtt "vendor:stb/truetype"
 
 FONT_REGULAR_DATA :: #load("../assets/fonts/noto_sans/NotoSans-Regular.ttf")
 FONT_BOLD_DATA :: #load("../assets/fonts/noto_sans/NotoSans-Bold.ttf")
 FONT_ATLAS_SIZE :: 1024
+
+// System fonts tried, in order, for characters Noto Sans lacks; missing ones are
+// skipped. stb_truetype can't read variable CJK fonts (Fedora's default
+// NotoSansCJK-VF.ttc) or colour emoji, so these are static and monochrome.
+FALLBACK_FONTS := [?]string {
+	"/usr/share/fonts/google-noto-emoji-fonts/NotoEmoji-Regular.ttf",
+	"/usr/share/fonts/google-noto/NotoSansSymbols2-Regular.ttf",
+	// CJK: google-noto-sans-cjk-fonts or wqy-microhei-fonts.
+	"/usr/share/fonts/google-noto-sans-cjk-fonts/NotoSansCJK-Regular.ttc",
+	"/usr/share/fonts/wqy-microhei/wqy-microhei.ttc",
+}
 
 Font :: enum {
 	Regular,
@@ -101,10 +115,32 @@ renderer_init :: proc(r: ^Renderer) -> bool {
 	fs.Init(&r.fonts, FONT_ATLAS_SIZE, FONT_ATLAS_SIZE, .TOPLEFT)
 	r.font_ids[.Regular] = fs.AddFontMem(&r.fonts, "regular", FONT_REGULAR_DATA, false)
 	r.font_ids[.Bold] = fs.AddFontMem(&r.fonts, "bold", FONT_BOLD_DATA, false)
+	for path in FALLBACK_FONTS {
+		add_fallback_font(r, path)
+	}
 	fs.SetAlignVertical(&r.fonts, .TOP)
 	gl.GenTextures(1, &r.font_texture)
 	upload_font_atlas(r)
 	return true
+}
+
+@(private = "file")
+add_fallback_font :: proc(r: ^Renderer, path: string) {
+	data, err := os.read_entire_file(path, context.allocator)
+	if err != nil {
+		return
+	}
+	// fontstash doesn't check that a font loads, and using one that didn't crashes.
+	info: stbtt.fontinfo
+	if !stbtt.InitFont(&info, raw_data(data), stbtt.GetFontOffsetForIndex(raw_data(data), 0)) {
+		log.warnf("can't use fallback font %s", path)
+		delete(data)
+		return
+	}
+	id := fs.AddFontMem(&r.fonts, path, data, true)
+	for base in r.font_ids {
+		fs.AddFallbackFont(&r.fonts, base, id)
+	}
 }
 
 renderer_destroy :: proc(r: ^Renderer) {
@@ -244,7 +280,11 @@ draw_text :: proc(r: ^Renderer, font: Font, size: f32, x, y: f32, text: string, 
 	iter := fs.TextIterInit(&r.fonts, x, y, text)
 	quad: fs.Quad
 	for fs.TextIterNext(&r.fonts, &iter, &quad) {
-		push_quad(r, quad.x0, quad.y0, quad.x1, quad.y1, quad.s0, quad.t0, quad.s1, quad.t1, color)
+		// Glyphs are rasterized unhinted; drawn at fractional positions, the texture
+		// filter smears them across two pixels. Whole pixels keep them sharp.
+		dx := math.round(quad.x0) - quad.x0
+		dy := math.round(quad.y0) - quad.y0
+		push_quad(r, quad.x0 + dx, quad.y0 + dy, quad.x1 + dx, quad.y1 + dy, quad.s0, quad.t0, quad.s1, quad.t1, color)
 	}
 	return iter.nextx
 }

@@ -6,7 +6,7 @@ import "core:unicode/utf8"
 CHAT_MAX_MESSAGES :: 1000
 // Sizes in logical pixels, scaled by the display scale.
 CHAT_WIDTH :: 340
-CHAT_FONT_SIZE :: 15
+CHAT_FONT_SIZE :: 17
 CHAT_PADDING :: 8
 // Room for emotes to stick out of their message (EMOTE_OVERHANG) without
 // touching the next one.
@@ -209,7 +209,7 @@ message_layout :: proc(a: ^Assets, m: ^Chat_Message, scale, width: f32) -> ^Mess
 	pixel_scale: f32 = 2 if scale > 1 else 1
 
 	for key in m.badges {
-		badge, found := a.emotes.badges[key]
+		badge, found := badge_lookup(&a.emotes, key)
 		if !found {
 			continue
 		}

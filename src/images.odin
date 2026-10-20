@@ -32,6 +32,8 @@ Image :: struct {
 	size:        [2]f32,
 	frames:      [dynamic]Image_Frame,
 	duration_ms: int,
+	// Released while still downloading: freed when the download finishes.
+	orphaned:    bool,
 }
 
 // Every image by URL, each downloaded once. `version` goes up whenever an image
@@ -42,16 +44,37 @@ Images :: struct {
 }
 
 images_destroy :: proc(images: ^Images) {
+	// Call after jobs_stop: unfinished jobs point at loading images.
 	for url, image in images.by_url {
-		for f in image.frames {
-			tex := f.texture
-			gl.DeleteTextures(1, &tex)
-		}
-		delete(image.frames)
-		free(image)
+		free_image(image)
 		delete(url)
 	}
 	delete(images.by_url)
+}
+
+@(private = "file")
+free_image :: proc(image: ^Image) {
+	for f in image.frames {
+		tex := f.texture
+		gl.DeleteTextures(1, &tex)
+	}
+	delete(image.frames)
+	free(image)
+}
+
+// Forgets the image for `url`, for images that are replaced over time (stream
+// thumbnails). Pointers to it become invalid.
+image_release :: proc(images: ^Images, url: string) {
+	key, image := delete_key(&images.by_url, url)
+	if image == nil {
+		return
+	}
+	delete(key)
+	if image.state == .Loading {
+		image.orphaned = true
+	} else {
+		free_image(image)
+	}
 }
 
 // Returns the image for `url`, starting its download the first time it's asked for.
@@ -97,6 +120,11 @@ Image_Job :: struct {
 }
 
 destroy_image_job :: proc(p: ^Image_Job) {
+	// A released image waiting on this job has nobody else to free it. It has no
+	// textures yet, so this needs no GL.
+	if p.image.orphaned {
+		free_image(p.image)
+	}
 	for f in p.frames {
 		delete(f.pixels)
 	}
@@ -154,6 +182,10 @@ run_image_job :: proc(job: ^Job) {
 // On the main thread: upload the frames.
 finish_image_job :: proc(images: ^Images, p: ^Image_Job) {
 	image := p.image
+	if image.orphaned {
+		// Freed by destroy_job.
+		return
+	}
 	if !p.ok {
 		image.state = .Failed
 		images.version += 1

@@ -33,3 +33,26 @@ resolve_stream_url :: proc(channel: string) -> (url: string, err: Stream_Error) 
 	}
 	return strings.clone(out), .None
 }
+
+Resolve_Job :: struct {
+	channel: string,
+	// The watch session it's for; the caller drops the result if that's over.
+	session: int,
+	url:     string,
+	err:     Stream_Error,
+}
+
+destroy_resolve_job :: proc(p: ^Resolve_Job) {
+	delete(p.channel)
+	delete(p.url)
+}
+
+request_stream_url :: proc(jobs: ^Jobs, channel: string, session: int) {
+	jobs_add(jobs, run_resolve_job, Resolve_Job{channel = strings.clone(channel), session = session})
+}
+
+@(private = "file")
+run_resolve_job :: proc(job: ^Job) {
+	p := &job.payload.(Resolve_Job)
+	p.url, p.err = resolve_stream_url(p.channel)
+}

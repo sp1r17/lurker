@@ -106,14 +106,7 @@ bttv_channel_and_ffz_sets_parse :: proc(t: ^testing.T) {
 badges_parse :: proc(t: ^testing.T) {
 	defer free_all(context.temp_allocator)
 	list: [dynamic]Named_Badge
-	defer {
-		for b in list {
-			delete(b.key)
-			delete(b.badge.url_1x)
-			delete(b.badge.url_2x)
-		}
-		delete(list)
-	}
+	defer destroy_named_badges(&list)
 	body := `{"data":[{"set_id":"subscriber","versions":[{"id":"12","image_url_1x":"u1","image_url_2x":"u2"}]}]}`
 	testing.expect(t, parse_badges(transmute([]byte)body, &list))
 	testing.expect_value(t, len(list), 1)

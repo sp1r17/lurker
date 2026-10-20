@@ -28,28 +28,66 @@ Badge :: struct {
 	url_2x: string,
 }
 
+// Badge lists in lookup order: a channel's own badges (its subscriber badges)
+// replace Twitch's global ones.
+Badge_Scope :: enum {
+	Channel,
+	Global,
+}
+
 // Third-party emotes by name, and Twitch badges by "set/version" (e.g.
 // "subscriber/12"). Strings are owned.
 Emotes :: struct {
 	sets:   [Emote_Source]map[string]Emote,
-	badges: map[string]Badge,
+	badges: [Badge_Scope]map[string]Badge,
 }
 
 emotes_destroy :: proc(e: ^Emotes) {
 	for &set in e.sets {
-		for name, emote in set {
-			delete(name)
-			delete(emote.url_1x)
-			delete(emote.url_2x)
-		}
+		clear_set(&set)
 		delete(set)
 	}
-	for key, badge in e.badges {
+	for scope in Badge_Scope {
+		clear_badges(&e.badges[scope])
+		delete(e.badges[scope])
+	}
+}
+
+// Drops the channel's own emotes and badges, when leaving it.
+emotes_clear_channel :: proc(e: ^Emotes) {
+	for source in Emote_Source.Channel_7TV ..= Emote_Source.Channel_FFZ {
+		clear_set(&e.sets[source])
+	}
+	clear_badges(&e.badges[.Channel])
+}
+
+@(private = "file")
+clear_set :: proc(set: ^map[string]Emote) {
+	for name, emote in set {
+		delete(name)
+		delete(emote.url_1x)
+		delete(emote.url_2x)
+	}
+	clear(set)
+}
+
+@(private = "file")
+clear_badges :: proc(badges: ^map[string]Badge) {
+	for key, badge in badges {
 		delete(key)
 		delete(badge.url_1x)
 		delete(badge.url_2x)
 	}
-	delete(e.badges)
+	clear(badges)
+}
+
+badge_lookup :: proc(e: ^Emotes, key: string) -> (badge: Badge, found: bool) {
+	for &scope in e.badges {
+		if badge, found = scope[key]; found {
+			return
+		}
+	}
+	return
 }
 
 emote_lookup :: proc(e: ^Emotes, name: string) -> (emote: Emote, found: bool) {
@@ -85,8 +123,10 @@ Named_Emote :: struct {
 }
 
 Emote_Set_Job :: struct {
-	source: Emote_Source,
-	url:    string,
+	source:  Emote_Source,
+	// The watch session a channel set is for; the caller drops it if that's over.
+	session: int,
+	url:     string,
 	// Owned strings, moved into Emotes when the job finishes.
 	emotes: [dynamic]Named_Emote,
 }
@@ -101,8 +141,12 @@ destroy_emote_set_job :: proc(p: ^Emote_Set_Job) {
 	delete(p.url)
 }
 
-emotes_request_set :: proc(jobs: ^Jobs, source: Emote_Source, room_id := "") {
-	jobs_add(jobs, run_emote_set_job, Emote_Set_Job{source = source, url = strings.clone(emote_set_url(source, room_id))})
+emotes_request_set :: proc(jobs: ^Jobs, source: Emote_Source, room_id := "", session := 0) {
+	jobs_add(
+		jobs,
+		run_emote_set_job,
+		Emote_Set_Job{source = source, session = session, url = strings.clone(emote_set_url(source, room_id))},
+	)
 }
 
 @(private = "file")
@@ -254,8 +298,10 @@ Badges_Job :: struct {
 	// A copy; the job may refresh it.
 	auth:      Auth,
 	room_id:   string,
+	// The watch session the channel badges are for.
+	session:   int,
 	check:     Auth_Check,
-	badges:    [dynamic]Named_Badge,
+	badges:    [Badge_Scope][dynamic]Named_Badge,
 }
 
 Named_Badge :: struct {
@@ -264,22 +310,33 @@ Named_Badge :: struct {
 }
 
 destroy_badges_job :: proc(p: ^Badges_Job) {
-	for b in p.badges {
-		delete(b.key)
-		delete(b.badge.url_1x)
-		delete(b.badge.url_2x)
+	for &list in p.badges {
+		destroy_named_badges(&list)
 	}
-	delete(p.badges)
 	delete(p.client_id)
 	destroy_auth(p.auth)
 	delete(p.room_id)
 }
 
-emotes_request_badges :: proc(jobs: ^Jobs, client_id: string, auth: Auth, room_id: string) {
+destroy_named_badges :: proc(list: ^[dynamic]Named_Badge) {
+	for b in list {
+		delete(b.key)
+		delete(b.badge.url_1x)
+		delete(b.badge.url_2x)
+	}
+	delete(list^)
+}
+
+emotes_request_badges :: proc(jobs: ^Jobs, client_id: string, auth: Auth, room_id: string, session: int) {
 	jobs_add(
 		jobs,
 		run_badges_job,
-		Badges_Job{client_id = strings.clone(client_id), auth = clone_auth(auth), room_id = strings.clone(room_id)},
+		Badges_Job {
+			client_id = strings.clone(client_id),
+			auth = clone_auth(auth),
+			room_id = strings.clone(room_id),
+			session = session,
+		},
 	)
 }
 
@@ -292,8 +349,11 @@ run_badges_job :: proc(job: ^Job) {
 	if p.check == .Signed_Out || p.check == .Unreachable {
 		return
 	}
-	paths := []string{"/chat/badges/global", fmt.tprintf("/chat/badges?broadcaster_id=%s", p.room_id)}
-	for path in paths {
+	paths := [Badge_Scope]string {
+		.Global  = "/chat/badges/global",
+		.Channel = fmt.tprintf("/chat/badges?broadcaster_id=%s", p.room_id),
+	}
+	for path, scope in paths {
 		body, err := helix_get(p.client_id, p.auth.access_token, path)
 		if err == .Unauthorized {
 			p.check = refresh_auth(p.client_id, &p.auth)
@@ -302,14 +362,13 @@ run_badges_job :: proc(job: ^Job) {
 			}
 			body, err = helix_get(p.client_id, p.auth.access_token, path)
 		}
-		if err != .None || !parse_badges(body, &p.badges) {
+		if err != .None || !parse_badges(body, &p.badges[scope]) {
 			log.warnf("badges %s: failed (%v)", path, err)
 		}
 	}
 }
 
-// Parses Helix's badge sets into owned "set/version" badges. Channel badges come
-// after global ones, so they replace them (a channel's own subscriber badges).
+// Parses Helix's badge sets into owned "set/version" badges.
 parse_badges :: proc(body: []byte, out: ^[dynamic]Named_Badge) -> bool {
 	Response :: struct {
 		data: []struct {
@@ -339,21 +398,28 @@ parse_badges :: proc(body: []byte, out: ^[dynamic]Named_Badge) -> bool {
 	return true
 }
 
-// On the main thread: stores the badges. The caller handles p.check, saving a
-// refreshed sign-in or dropping a rejected one.
-finish_badges_job :: proc(e: ^Emotes, p: ^Badges_Job) {
-	for named in p.badges {
-		if old, found := e.badges[named.key]; found {
-			delete(old.url_1x)
-			delete(old.url_2x)
-			e.badges[named.key] = named.badge
-			delete(named.key)
-		} else {
-			e.badges[named.key] = named.badge
+// On the main thread: stores the badges, moving them out of the job. Channel badges
+// are only kept if `channel_current` (the job's session is still the one being
+// watched). The caller handles p.check, saving a refreshed sign-in or dropping a
+// rejected one.
+finish_badges_job :: proc(e: ^Emotes, p: ^Badges_Job, channel_current: bool) {
+	for scope in Badge_Scope {
+		if scope == .Channel && !channel_current {
+			continue
 		}
+		badges := &e.badges[scope]
+		for named in p.badges[scope] {
+			if named.key in badges {
+				old_key, old := delete_key(badges, named.key)
+				delete(old_key)
+				delete(old.url_1x)
+				delete(old.url_2x)
+			}
+			badges[named.key] = named.badge
+		}
+		if len(p.badges[scope]) > 0 {
+			log.infof("loaded %d %v badges", len(p.badges[scope]), scope)
+		}
+		clear(&p.badges[scope])
 	}
-	if len(p.badges) > 0 {
-		log.infof("loaded %d badges", len(p.badges))
-	}
-	clear(&p.badges)
 }
