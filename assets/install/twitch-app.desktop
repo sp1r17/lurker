@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=twitch-app
+GenericName=Twitch Player
+Comment=Watch the live channels you follow, with their chat
+Exec=twitch-app
+Icon=twitch-app
+Terminal=false
+Categories=AudioVideo;Video;Player;
+Keywords=twitch;stream;live;chat;
+StartupWMClass=twitch-app
