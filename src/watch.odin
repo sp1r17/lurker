@@ -324,14 +324,25 @@ draw_controls :: proc(app: ^App) {
 	scale := app.scale
 	size := BROWSE_CARD_TEXT_SIZE * scale
 	pad := 12 * scale
-	label := strings.concatenate({QUALITY_LABELS[app.layout.quality], " ▼"}, context.temp_allocator)
-	bw := text_width(r, .Bold, size, label) + 2 * pad
-	bh := line_height(r, .Bold, size) + pad
+	label := QUALITY_LABELS[app.layout.quality]
+	lh := line_height(r, .Bold, size)
+	// A chevron after the label, drawn: Noto Sans has no "▼".
+	arrow := lh * 0.4
+	gap := lh * 0.35
+	lw := text_width(r, .Bold, size, label)
+	bw := lw + gap + arrow + 2 * pad
+	bh := lh + pad
 	v := w.video_rect
 	w.quality_button = {v.x + v.w - bw - 16 * scale, v.y + v.h - bh - 16 * scale, bw, bh}
 	hovered := in_rect(w.quality_button, app.mouse.x, app.mouse.y)
 	draw_rect(r, w.quality_button, MENU_HOVER if hovered || w.quality_menu else CHAT_TOGGLE_BACKGROUND)
-	draw_centered(r, .Bold, size, w.quality_button, label, BROWSE_TEXT)
+	b := w.quality_button
+	draw_text(r, .Bold, size, b.x + pad, b.y + (b.h - lh) / 2, label, BROWSE_TEXT)
+	ax := b.x + pad + lw + gap
+	ay := b.y + b.h / 2 - arrow / 4
+	stroke := max(1.5, 2 * scale * r.text_scale)
+	draw_line(r, ax, ay, ax + arrow / 2, ay + arrow / 2, stroke, BROWSE_TEXT)
+	draw_line(r, ax + arrow / 2, ay + arrow / 2, ax + arrow, ay, stroke, BROWSE_TEXT)
 	if !w.quality_menu {
 		return
 	}
@@ -364,11 +375,19 @@ draw_menu_item :: proc(app: ^App, item: Rect, label: string, checked: bool) {
 	if in_rect(item, app.mouse.x, app.mouse.y) {
 		draw_rect(r, item, MENU_HOVER)
 	}
-	ty := item.y + (item.h - line_height(r, .Regular, size)) / 2
+	lh := line_height(r, .Regular, size)
+	ty := item.y + (item.h - lh) / 2
+	// Room for the check mark, which grows with the text.
+	mark := lh * 0.55
 	if checked {
-		draw_text(r, .Bold, size, item.x + pad, ty, "✓", BROWSE_ACCENT)
+		// Drawn: Noto Sans has no "✓".
+		mx := item.x + pad
+		my := item.y + (item.h - mark) / 2
+		stroke := max(1.5, 2 * scale * r.text_scale)
+		draw_line(r, mx, my + mark * 0.55, mx + mark * 0.38, my + mark * 0.9, stroke, BROWSE_ACCENT)
+		draw_line(r, mx + mark * 0.38, my + mark * 0.9, mx + mark, my + mark * 0.1, stroke, BROWSE_ACCENT)
 	}
-	draw_text(r, .Bold if checked else .Regular, size, item.x + pad + 20 * scale, ty, label, BROWSE_TEXT)
+	draw_text(r, .Bold if checked else .Regular, size, item.x + pad + mark + 8 * scale, ty, label, BROWSE_TEXT)
 }
 
 // Acts on what mpv reports: the stream showing, or ending.

@@ -268,6 +268,47 @@ draw_rect :: proc(r: ^Renderer, rect: Rect, color: Color) {
 	push_quad(r, rect.x, rect.y, rect.x + rect.w, rect.y + rect.h, u, v, u, v, color)
 }
 
+// A straight stroke `width` pixels wide from (x0, y0) to (x1, y1), with square ends
+// that reach half the width past each point (so strokes meeting at a point join).
+// Its long edges fade out over a pixel, so diagonals stay smooth.
+draw_line :: proc(r: ^Renderer, x0, y0, x1, y1, width: f32, color: Color) {
+	dx, dy := x1 - x0, y1 - y0
+	length := math.sqrt(dx * dx + dy * dy)
+	if length == 0 {
+		return
+	}
+	use(r, .Alpha_Texture, r.font_texture)
+	u := 1 / f32(r.fonts.width)
+	v := 1 / f32(r.fonts.height)
+	along := [2]f32{dx, dy} / length
+	across := [2]f32{-along.y, along.x}
+	half := width / 2
+	a := [2]f32{x0, y0} - along * half
+	b := [2]f32{x1, y1} + along * half
+	faded := Color{color.r, color.g, color.b, 0}
+	inner := max(half - 0.5, 0)
+	outer := half + 0.5
+	// The solid middle, then a strip on each side fading to clear.
+	push_strip(r, a + across * inner, b + across * inner, b - across * inner, a - across * inner, color, color, u, v)
+	push_strip(r, a + across * outer, b + across * outer, b + across * inner, a + across * inner, faded, color, u, v)
+	push_strip(r, a - across * inner, b - across * inner, b - across * outer, a - across * outer, color, faded, u, v)
+}
+
+// Two triangles from four corners in order; the first two corners get `first`,
+// the last two `second`.
+@(private = "file")
+push_strip :: proc(r: ^Renderer, p0, p1, p2, p3: [2]f32, first, second: Color, u, v: f32) {
+	append(
+		&r.vertices,
+		Vertex{p0, {u, v}, first},
+		Vertex{p1, {u, v}, first},
+		Vertex{p2, {u, v}, second},
+		Vertex{p0, {u, v}, first},
+		Vertex{p2, {u, v}, second},
+		Vertex{p3, {u, v}, second},
+	)
+}
+
 draw_image :: proc(r: ^Renderer, texture: u32, rect: Rect, tint := Color{255, 255, 255, 255}) {
 	use(r, .Rgba_Texture, texture)
 	push_quad(r, rect.x, rect.y, rect.x + rect.w, rect.y + rect.h, 0, 0, 1, 1, tint)
