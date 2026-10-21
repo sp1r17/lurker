@@ -312,6 +312,11 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 			}
 			redraw^ = true
 		}
+	case e.type == .WINDOW_MOUSE_LEAVE:
+		// Hover states and the video's controls go with the mouse.
+		app.mouse = {-1, -1}
+		app.watch.controls_until = 0
+		redraw^ = true
 	case e.type == .MOUSE_MOTION:
 		app.mouse = {e.motion.x * density, e.motion.y * density}
 		if .LEFT in e.motion.state {

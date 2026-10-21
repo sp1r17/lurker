@@ -631,11 +631,13 @@ draw_watch :: proc(app: ^App) {
 	w.hide_button = {}
 	w.show_tab = {}
 	if !w.show_chat {
-		// A tab at the right edge, only while the mouse is near it.
-		if show_tab_hovered(app, video.w) {
-			size := SHOW_CHAT_TAB * scale
-			w.show_tab = {video.w - size.x, (video.h - size.y) / 2, size.x, size.y}
-			hovered := in_rect(w.show_tab, app.mouse.x, app.mouse.y)
+		// A tab at the right edge, only while the mouse is near it and has moved
+		// lately, or is on the tab itself.
+		size := SHOW_CHAT_TAB * scale
+		tab := Rect{video.w - size.x, (video.h - size.y) / 2, size.x, size.y}
+		hovered := in_rect(tab, app.mouse.x, app.mouse.y)
+		if show_tab_hovered(app, video.w) && (controls_visible(app) || hovered) {
+			w.show_tab = tab
 			draw_rect(r, w.show_tab, CHAT_TOGGLE_BACKGROUND)
 			draw_centered(r, .Bold, 20 * scale, w.show_tab, "«", BROWSE_TEXT if hovered else BROWSE_DIM_TEXT)
 		}
