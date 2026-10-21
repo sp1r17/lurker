@@ -11,8 +11,8 @@ DEFAULT_VOLUME :: 100
 MAX_VOLUME :: 130
 
 // What's kept between runs: the splits last open with each watched channel, so
-// watching it again brings them back, and the volume. Saved in
-// ~/.config/twitch-app/layout.json.
+// watching it again brings them back, the volume, the quality and whether the
+// chats are hidden. Saved in ~/.config/twitch-app/layout.json.
 Layout :: struct {
 	// Watched channel -> the split channels, left to right. Owned.
 	splits: map[string][dynamic]string,
@@ -22,6 +22,8 @@ Layout :: struct {
 	// The stream quality picked last, for every channel.
 	quality:     Quality,
 	low_latency: bool,
+	// The chats were hidden last, for every channel.
+	hide_chat:   bool,
 }
 
 layout_destroy :: proc(l: ^Layout) {
@@ -65,6 +67,7 @@ parse_layout :: proc(data: []byte, l: ^Layout) -> bool {
 		muted:       bool,
 		quality:     string,
 		low_latency: bool,
+		hide_chat:   bool,
 	}
 	if json.unmarshal(data, &saved, allocator = context.temp_allocator) != nil {
 		log.warn("layout.json is unreadable; starting without saved splits")
@@ -79,6 +82,7 @@ parse_layout :: proc(data: []byte, l: ^Layout) -> bool {
 	l.muted = saved.muted
 	l.quality = quality_from_label(saved.quality)
 	l.low_latency = saved.low_latency
+	l.hide_chat = saved.hide_chat
 	for channel, splits in saved.splits {
 		if !valid_login(channel) {
 			continue
@@ -110,7 +114,8 @@ layout_save :: proc(l: ^Layout) {
 		muted:       bool,
 		quality:     string,
 		low_latency: bool,
-	}{l.splits, l.volume, l.muted, QUALITY_LABELS[l.quality], l.low_latency}
+		hide_chat:   bool,
+	}{l.splits, l.volume, l.muted, QUALITY_LABELS[l.quality], l.low_latency, l.hide_chat}
 	data, err := json.marshal(saved, {pretty = true}, context.temp_allocator)
 	if err != nil {
 		return

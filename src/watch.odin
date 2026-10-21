@@ -95,7 +95,7 @@ watch_start :: proc(app: ^App, channel: string, restore := true, info: ^Stream =
 	w^ = {
 		channel   = strings.clone(channel),
 		status    = .Starting,
-		show_chat = true,
+		show_chat = !app.layout.hide_chat,
 	}
 	if info != nil {
 		watch_set_info(app, info^)
@@ -150,7 +150,7 @@ watch_stop :: proc(app: ^App) {
 // Adds a split that asks which channel to join.
 watch_add_pane :: proc(app: ^App) {
 	w := &app.watch
-	w.show_chat = true
+	watch_show_chat(app, true)
 	p := pane_new(app)
 	append(&w.panes, p)
 	w.focus = len(w.panes) - 1
@@ -512,6 +512,7 @@ volume_osd_wait :: proc(app: ^App) -> int {
 	return left if app.screen == .Watch && left > 0 else -1
 }
 
+// Shows or hides the chats, and remembers it for every channel.
 watch_show_chat :: proc(app: ^App, show: bool) {
 	w := &app.watch
 	w.show_chat = show
@@ -519,6 +520,11 @@ watch_show_chat :: proc(app: ^App, show: bool) {
 		box_unfocus(app)
 		user_card_close(app)
 	}
+	if app.layout.hide_chat == !show {
+		return
+	}
+	app.layout.hide_chat = !show
+	layout_save(&app.layout)
 }
 
 // Whether the mouse is where the show-chat tab appears.
