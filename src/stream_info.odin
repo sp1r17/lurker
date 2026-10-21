@@ -147,7 +147,9 @@ draw_stream_info :: proc(app: ^App) {
 	if in_rect(w.back_button, app.mouse.x, app.mouse.y) {
 		draw_rect(r, w.back_button, WINDOW_BUTTON_HOVER)
 	}
-	draw_centered(r, .Bold, 26 * scale, w.back_button, "←", BROWSE_TEXT)
+	// Noto Sans has no arrows ("←" drew as a missing-glyph box); its chevron matches
+	// the chats' "»" and "«".
+	draw_centered(r, .Bold, 44 * scale, w.back_button, "‹", BROWSE_TEXT)
 
 	// Right side first, so the text on the left knows how much room it has: the
 	// window buttons, then viewers and uptime.
