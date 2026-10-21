@@ -87,7 +87,10 @@ uniform int u_mode;
 out vec4 o_color;
 void main() {
 	vec4 t = texture(u_texture, v_uv);
-	o_color = u_mode == 0 ? vec4(v_color.rgb, v_color.a * t.r) : t * v_color;
+	// stb_truetype's unhinted coverage, blended as is, draws light text on the
+	// dark UI thin: raising it fills in the strokes' soft edges.
+	float coverage = pow(t.r, 0.75);
+	o_color = u_mode == 0 ? vec4(v_color.rgb, v_color.a * coverage) : t * v_color;
 }
 `
 
