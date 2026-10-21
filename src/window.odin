@@ -1,6 +1,7 @@
 package app
 
 import "base:runtime"
+import "core:math"
 import sdl "vendor:sdl3"
 
 // How close to the window's edge a press resizes it, in logical pixels.
@@ -60,7 +61,7 @@ draggable :: proc(app: ^App, x, y: f32) -> bool {
 		if w.card.open && in_rect(w.card.rect, x, y) {
 			return false
 		}
-		if on_controls(app, x, y) {
+		if on_controls(app, x, y) || on_window_controls(app, x, y) {
 			return false
 		}
 		if w.show_tab.w > 0 && in_rect(w.show_tab, x, y) {
@@ -69,6 +70,9 @@ draggable :: proc(app: ^App, x, y: f32) -> bool {
 		return in_rect(w.video_rect, x, y)
 	case .Browse:
 		if app.sign_in.sign_out.w > 0 && in_rect(app.sign_in.sign_out, x, y) {
+			return false
+		}
+		if on_window_controls(app, x, y) {
 			return false
 		}
 		return y < BROWSE_HEADER_HEIGHT * app.scale
@@ -88,8 +92,15 @@ window_press :: proc(app: ^App, x, y: f32, clicks: u8) {
 	if !draggable(app, x, y) {
 		return
 	}
-	if clicks == 2 && app.screen == .Watch {
-		toggle_fullscreen(app)
+	// Double-click: the video goes fullscreen; the browse header maximizes, like
+	// a title bar.
+	if clicks == 2 {
+		switch app.screen {
+		case .Watch:
+			toggle_fullscreen(app)
+		case .Browse:
+			toggle_maximized(app)
+		}
 		return
 	}
 	if app.wayland_drag_ok && .FULLSCREEN not_in sdl.GetWindowFlags(app.window) {
@@ -109,5 +120,100 @@ window_drag_motion :: proc(app: ^App, x, y: f32) {
 	if d.x * d.x + d.y * d.y >= threshold * threshold {
 		app.drag_armed = false
 		wayland_drag_start(&app.wayland_drag)
+	}
+}
+
+Window_Control :: enum {
+	Minimize,
+	Maximize,
+	Close,
+}
+
+// Logical pixels, like a title bar's buttons.
+WINDOW_BUTTON :: [2]f32{46, 34}
+WINDOW_BUTTON_HOVER :: Color{0xff, 0xff, 0xff, 30}
+CLOSE_BUTTON_HOVER :: Color{0xe8, 0x11, 0x23, 255}
+
+// Minimize, maximize (restore when maximized) and close, right-aligned at `right`,
+// since the borderless window has no title bar. Returns the x of their left edge.
+draw_window_controls :: proc(app: ^App, right, top: f32) -> (left: f32) {
+	r := &app.assets.renderer
+	scale := app.scale
+	size := WINDOW_BUTTON * scale
+	maximized := .MAXIMIZED in sdl.GetWindowFlags(app.window)
+	x := right - size.x * len(Window_Control)
+	for control in Window_Control {
+		rect := Rect{x + f32(int(control)) * size.x, top, size.x, size.y}
+		app.window_buttons[control] = rect
+		if in_rect(rect, app.mouse.x, app.mouse.y) {
+			draw_rect(r, rect, CLOSE_BUTTON_HOVER if control == .Close else WINDOW_BUTTON_HOVER)
+		}
+		// Icons drawn from rects stay crisp at any scale.
+		cx, cy := rect.x + rect.w / 2, rect.y + rect.h / 2
+		icon := 10 * scale
+		line := max(1, math.round(scale))
+		switch control {
+		case .Minimize:
+			draw_rect(r, {cx - icon / 2, cy, icon, line}, BROWSE_TEXT)
+		case .Maximize:
+			if maximized {
+				// Two overlapping squares: restore.
+				outline(r, {cx - icon / 2 + 2 * scale, cy - icon / 2 - 2 * scale, icon - 2 * scale, icon - 2 * scale}, line)
+				draw_rect(r, {cx - icon / 2, cy - icon / 2, icon - 2 * scale, icon - 2 * scale}, CHAT_TOGGLE_BACKGROUND)
+				outline(r, {cx - icon / 2, cy - icon / 2, icon - 2 * scale, icon - 2 * scale}, line)
+			} else {
+				outline(r, {cx - icon / 2, cy - icon / 2, icon, icon}, line)
+			}
+		case .Close:
+			draw_centered(r, .Regular, 22 * scale, rect, "×", BROWSE_TEXT)
+		}
+	}
+	return x
+}
+
+@(private = "file")
+outline :: proc(r: ^Renderer, b: Rect, line: f32) {
+	draw_rect(r, {b.x, b.y, b.w, line}, BROWSE_TEXT)
+	draw_rect(r, {b.x, b.y + b.h - line, b.w, line}, BROWSE_TEXT)
+	draw_rect(r, {b.x, b.y, line, b.h}, BROWSE_TEXT)
+	draw_rect(r, {b.x + b.w - line, b.y, line, b.h}, BROWSE_TEXT)
+}
+
+// Whether (x, y) is on a window button drawn this frame.
+on_window_controls :: proc(app: ^App, x, y: f32) -> bool {
+	for rect in app.window_buttons {
+		if rect.w > 0 && in_rect(rect, x, y) {
+			return true
+		}
+	}
+	return false
+}
+
+// Handles a click on the window buttons. Returns true if it was used.
+window_controls_click :: proc(app: ^App, x, y: f32) -> bool {
+	for rect, control in app.window_buttons {
+		if rect.w == 0 || !in_rect(rect, x, y) {
+			continue
+		}
+		switch control {
+		case .Minimize:
+			_ = sdl.MinimizeWindow(app.window)
+		case .Maximize:
+			toggle_maximized(app)
+		case .Close:
+			e: sdl.Event
+			e.type = .QUIT
+			_ = sdl.PushEvent(&e)
+		}
+		return true
+	}
+	return false
+}
+
+toggle_maximized :: proc(app: ^App) {
+	if .MAXIMIZED in sdl.GetWindowFlags(app.window) {
+		_ = sdl.RestoreWindow(app.window)
+	} else {
+		_ = sdl.MaximizeWindow(app.window)
 	}
 }

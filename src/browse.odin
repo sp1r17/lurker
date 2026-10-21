@@ -224,13 +224,15 @@ draw_browse :: proc(app: ^App, screen: Rect) {
 			BROWSE_DIM_TEXT,
 		)
 	}
+	// Window buttons at the far right, like a title bar's.
+	controls_left := draw_window_controls(app, screen.w, 0)
 	app.sign_in.sign_out = {}
 	if app.signed_in {
 		// "R to refresh  ·  login  ·  Sign out", with "Sign out" clickable.
 		y := (header_h - line_height(r, .Regular, text_size)) / 2
 		label := "Sign out"
 		lw := text_width(r, .Regular, text_size, label)
-		app.sign_in.sign_out = {screen.w - pad - lw, y, lw, line_height(r, .Regular, text_size)}
+		app.sign_in.sign_out = {controls_left - pad - lw, y, lw, line_height(r, .Regular, text_size)}
 		hovered := in_rect(app.sign_in.sign_out, app.mouse.x, app.mouse.y)
 		draw_text(r, .Regular, text_size, app.sign_in.sign_out.x, y, label, BROWSE_TEXT if hovered else BROWSE_ACCENT)
 		hint := fmt.tprintf("R to refresh  ·  %s  ·  ", app.auth.login)

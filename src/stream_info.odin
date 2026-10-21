@@ -127,6 +127,7 @@ stream_info_height :: proc(app: ^App) -> f32 {
 // viewers and uptime on the right. Shown with the video's other controls.
 draw_stream_info :: proc(app: ^App) {
 	w := &app.watch
+	w.back_button = {}
 	if !controls_visible(app) {
 		return
 	}
@@ -141,8 +142,16 @@ draw_stream_info :: proc(app: ^App) {
 	bar := Rect{v.x, v.y, v.w, stream_info_height(app)}
 	draw_rect(r, bar, STREAM_INFO_BACKGROUND)
 
-	// Right side first, so the text on the left knows how much room it has.
-	right := bar.x + bar.w - pad
+	// A back button at the left, so the mouse alone can leave the stream.
+	w.back_button = {bar.x, bar.y, 52 * scale, bar.h}
+	if in_rect(w.back_button, app.mouse.x, app.mouse.y) {
+		draw_rect(r, w.back_button, WINDOW_BUTTON_HOVER)
+	}
+	draw_centered(r, .Bold, 26 * scale, w.back_button, "←", BROWSE_TEXT)
+
+	// Right side first, so the text on the left knows how much room it has: the
+	// window buttons, then viewers and uptime.
+	right := draw_window_controls(app, bar.x + bar.w, bar.y) - pad
 	if w.has_info {
 		parts := make([dynamic]string, context.temp_allocator)
 		append(&parts, format_viewers(w.info.viewer_count))
@@ -158,7 +167,7 @@ draw_stream_info :: proc(app: ^App) {
 		right -= sw + dot + 24 * scale
 	}
 
-	x := bar.x + pad
+	x := w.back_button.x + w.back_button.w
 	name := w.info.user_name if w.has_info && w.info.user_name != "" else w.channel
 	name = fit_text(r, .Bold, name_size, name, right - x)
 	x = draw_text(r, .Bold, name_size, x, bar.y + pad, name, BROWSE_TEXT)
@@ -170,5 +179,6 @@ draw_stream_info :: proc(app: ^App) {
 		game_y := bar.y + pad + (name_h - lh) / 2
 		draw_text(r, .Regular, size, x, game_y, fit_text(r, .Regular, size, game, right - x), BROWSE_ACCENT)
 	}
-	draw_text_line(&app.assets, .Regular, size, bar.x + pad, bar.y + pad + name_h, w.info.title, BROWSE_DIM_TEXT, bar.w - 2 * pad)
+	title_x := w.back_button.x + w.back_button.w
+	draw_text_line(&app.assets, .Regular, size, title_x, bar.y + pad + name_h, w.info.title, BROWSE_DIM_TEXT, right - title_x)
 }

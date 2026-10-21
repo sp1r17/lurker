@@ -115,6 +115,8 @@ App :: struct {
 	// A press on a drag area that becomes a drag if the mouse moves far enough.
 	drag_armed:      bool,
 	drag_from:       [2]f32,
+	// Set while drawing: the window buttons (zero size when not shown).
+	window_buttons:  [Window_Control]Rect,
 	client_id:       string,
 	auth:            Auth,
 	signed_in:       bool,
@@ -350,12 +352,21 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 	case e.type == .MOUSE_BUTTON_UP:
 		app.drag_armed = false
 	case e.type == .MOUSE_BUTTON_DOWN:
+		// The mouse's back button leaves the stream, like a browser's.
+		if e.button.button == sdl.BUTTON_X1 && app.screen == .Watch {
+			watch_stop(app)
+			redraw^ = true
+			return true
+		}
 		if e.button.button != sdl.BUTTON_LEFT {
 			return true
 		}
 		x, y := e.button.x * density, e.button.y * density
-		window_press(app, x, y, e.button.clicks)
 		redraw^ = true
+		if window_controls_click(app, x, y) {
+			return true
+		}
+		window_press(app, x, y, e.button.clicks)
 		switch app.screen {
 		case .Watch:
 			watch_click(app, x, y)
@@ -469,6 +480,7 @@ draw :: proc(app: ^App) {
 	// The font atlas can grow mid-frame, which needs one more pass.
 	for _ in 0 ..< 2 {
 		a.next_frame_ms = -1
+		app.window_buttons = {}
 		renderer_begin(&a.renderer, w, h)
 		gl.ClearColor(0, 0, 0, 1)
 		gl.Clear(gl.COLOR_BUFFER_BIT)
