@@ -48,6 +48,8 @@ Renderer :: struct {
 	font_texture: u32,
 	// The atlas size the texture was made for; fontstash doubles the atlas when full.
 	font_texture_size: [2]int,
+	// Every text size is multiplied by this: the user's text size (Ctrl+= and Ctrl+-).
+	text_scale:   f32,
 }
 
 Vertex :: struct {
@@ -101,6 +103,7 @@ renderer_init :: proc(r: ^Renderer) -> bool {
 		return false
 	}
 	r.program = program
+	r.text_scale = 1
 	r.u_screen = gl.GetUniformLocation(program, "u_screen")
 	r.u_mode = gl.GetUniformLocation(program, "u_mode")
 
@@ -273,7 +276,7 @@ draw_image :: proc(r: ^Renderer, texture: u32, rect: Rect, tint := Color{255, 25
 @(private = "file")
 set_font :: proc(r: ^Renderer, font: Font, size: f32) {
 	fs.SetFont(&r.fonts, r.font_ids[font])
-	fs.SetSize(&r.fonts, size)
+	fs.SetSize(&r.fonts, size * r.text_scale)
 }
 
 // Draws text with its top at y. Returns the x after the text.

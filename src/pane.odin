@@ -118,7 +118,9 @@ pane_layout :: proc(app: ^App, p: ^Chat_Pane, rect: Rect) {
 	pad := CHAT_PADDING * scale
 	box_h := line_height(&app.assets.renderer, .Regular, CHAT_FONT_SIZE * scale) + 2 * pad
 	p.rect = rect
-	p.header_rect = {rect.x, rect.y, rect.w, CHAT_HEADER_HEIGHT * scale}
+	// Taller than CHAT_HEADER_HEIGHT if the text size needs it.
+	title_h := line_height(&app.assets.renderer, .Bold, BROWSE_CARD_TEXT_SIZE * scale) + 8 * scale
+	p.header_rect = {rect.x, rect.y, rect.w, max(CHAT_HEADER_HEIGHT * scale, title_h)}
 	top := p.header_rect.y + p.header_rect.h
 	if p.searching {
 		p.search_rect = {rect.x + pad, top + pad, rect.w - 2 * pad, box_h}

@@ -337,9 +337,10 @@ draw_controls :: proc(app: ^App) {
 	}
 
 	// The qualities, a divider, then the low latency switch.
-	item_h := MENU_ITEM_HEIGHT * scale
+	// Grows with the text size, to fit its labels.
+	item_h := MENU_ITEM_HEIGHT * scale * r.text_scale
 	divider := 9 * scale
-	menu_w := max(MENU_WIDTH * scale, bw)
+	menu_w := max(MENU_WIDTH * scale * r.text_scale, bw)
 	menu_h := item_h * (len(Quality) + 1) + divider
 	menu := Rect{w.quality_button.x + w.quality_button.w - menu_w, w.quality_button.y - 6 * scale - menu_h, menu_w, menu_h}
 	draw_rect(r, menu, USER_CARD_BACKGROUND)

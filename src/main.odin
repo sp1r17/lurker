@@ -206,6 +206,7 @@ run :: proc(channels: []string, config: Config) -> bool {
 
 	app.layout = layout_load()
 	apply_volume(&app)
+	a.renderer.text_scale = f32(app.layout.text_size) / 100
 	defer layout_destroy(&app.layout)
 	app.chat_wake_event = sdl.RegisterEvents(1)
 	defer browse_destroy(&app.browse)
@@ -269,6 +270,40 @@ run :: proc(channels: []string, config: Config) -> bool {
 	return true
 }
 
+// Ctrl+= (or Ctrl++) and Ctrl+- make the text bigger and smaller, Ctrl+0 back
+// to normal, on any screen and while typing. Returns true if the key was used.
+text_size_key :: proc(app: ^App, key: sdl.KeyboardEvent) -> bool {
+	if key.mod & sdl.KMOD_CTRL == {} {
+		return false
+	}
+	size := app.layout.text_size
+	switch key.key {
+	case sdl.K_EQUALS, sdl.K_PLUS, sdl.K_KP_PLUS:
+		size += TEXT_SIZE_STEP
+	case sdl.K_MINUS, sdl.K_KP_MINUS:
+		size -= TEXT_SIZE_STEP
+	case sdl.K_0, sdl.K_KP_0:
+		size = DEFAULT_TEXT_SIZE
+	case:
+		return false
+	}
+	set_text_size(app, size)
+	return true
+}
+
+// Sets the text size (a percentage, clamped to MIN_TEXT_SIZE..MAX_TEXT_SIZE) and
+// saves it.
+set_text_size :: proc(app: ^App, size: int) {
+	l := &app.layout
+	clamped := clamp(size, MIN_TEXT_SIZE, MAX_TEXT_SIZE)
+	if clamped == l.text_size {
+		return
+	}
+	l.text_size = clamped
+	app.assets.renderer.text_scale = f32(clamped) / 100
+	layout_save(l)
+}
+
 // Returns false to quit.
 handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 	density := sdl.GetWindowPixelDensity(app.window)
@@ -282,6 +317,8 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 			pane_text_input(app, string(e.text.text))
 			redraw^ = true
 		}
+	case e.type == .KEY_DOWN && text_size_key(app, e.key):
+		redraw^ = true
 	case e.type == .KEY_DOWN && app.screen == .Watch && is_typing(app):
 		// Typing: every key goes to the box.
 		pane_input_key(app, e.key)

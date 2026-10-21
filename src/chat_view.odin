@@ -241,13 +241,13 @@ draw_chat_view :: proc(a: ^Assets, v: ^Chat_View, rect: Rect, scale: f32, filter
 
 	v.more_bar = {}
 	if v.scroll > 0 {
-		bar_h := CHAT_MORE_BAR_HEIGHT * scale
-		v.more_bar = {rect.x, rect.y + rect.h - bar_h, rect.w, bar_h}
-		draw_rect(r, v.more_bar, CHAT_MORE_BAR)
 		label := "More messages below"
 		size := CHAT_FONT_SIZE * scale
 		lw := text_width(r, .Regular, size, label)
 		lh := line_height(r, .Regular, size)
+		bar_h := max(CHAT_MORE_BAR_HEIGHT * scale, lh + 8 * scale)
+		v.more_bar = {rect.x, rect.y + rect.h - bar_h, rect.w, bar_h}
+		draw_rect(r, v.more_bar, CHAT_MORE_BAR)
 		draw_text(r, .Regular, size, v.more_bar.x + (v.more_bar.w - lw) / 2, v.more_bar.y + (bar_h - lh) / 2, label, CHAT_TEXT)
 	}
 	clip_end(r)
@@ -298,11 +298,12 @@ Layout_Item :: struct {
 	is_name: bool,
 }
 
-// A message laid out for one width and scale. Images that finish loading can change
+// A message laid out for one width, scale and text size. Images that finish loading can change
 // sizes, so it's also redone whenever Images.version moves on.
 Message_Layout :: struct {
 	width:          f32,
 	scale:          f32,
+	text_scale:     f32,
 	images_version: int,
 	height:         f32,
 	items:          [dynamic]Layout_Item,
@@ -313,24 +314,27 @@ Message_Layout :: struct {
 // grey text for system messages.
 message_layout :: proc(a: ^Assets, channel: ^Emotes, m: ^Chat_Message, scale, width: f32) -> ^Message_Layout {
 	l := &m.layout
-	if l.height > 0 && l.width == width && l.scale == scale && l.images_version == a.images.version {
+	if l.height > 0 && l.width == width && l.scale == scale && l.text_scale == a.renderer.text_scale && l.images_version == a.images.version {
 		return l
 	}
 	clear(&l.items)
 	l.width = width
 	l.scale = scale
+	l.text_scale = a.renderer.text_scale
 	l.images_version = a.images.version
 
+	// Badges, emoji and emotes grow with the text.
+	image_scale := scale * a.renderer.text_scale
 	b := Builder {
 		a     = a,
 		l     = l,
-		scale = scale,
+		scale = image_scale,
 		size  = CHAT_FONT_SIZE * scale,
 		width = width,
 	}
 	b.text_h = line_height(&a.renderer, .Regular, b.size)
 	b.line_h = b.text_h
-	pixel_scale: f32 = 2 if scale > 1 else 1
+	pixel_scale: f32 = 2 if image_scale > 1 else 1
 
 	for key in m.badges {
 		badge, found := badge_lookup(channel, &a.emotes, key)
@@ -392,6 +396,7 @@ message_layout :: proc(a: ^Assets, channel: ^Emotes, m: ^Chat_Message, scale, wi
 Builder :: struct {
 	a:          ^Assets,
 	l:          ^Message_Layout,
+	// For images: the display scale times the text size.
 	scale:      f32,
 	size:       f32,
 	width:      f32,

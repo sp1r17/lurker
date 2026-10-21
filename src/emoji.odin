@@ -246,7 +246,7 @@ draw_text_line :: proc(a: ^Assets, font: Font, size, x, y: f32, text: string, co
 		pos = end
 	}
 
-	emoji_h := size * 1.25
+	emoji_h := size * r.text_scale * 1.25
 	lh := line_height(r, font, size)
 	width :: proc(r: ^Renderer, font: Font, size, emoji_h: f32, s: Segment) -> f32 {
 		return emoji_h if s.image != "" else text_width(r, font, size, s.text)

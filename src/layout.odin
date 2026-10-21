@@ -9,10 +9,15 @@ import "core:strings"
 DEFAULT_VOLUME :: 100
 // mpv's own limit (volume-max): above 100% is a software boost.
 MAX_VOLUME :: 130
+// Text size as a percentage of the normal size (Ctrl+= and Ctrl+-).
+DEFAULT_TEXT_SIZE :: 100
+MIN_TEXT_SIZE :: 70
+MAX_TEXT_SIZE :: 200
+TEXT_SIZE_STEP :: 10
 
 // What's kept between runs: the splits last open with each watched channel, so
-// watching it again brings them back, the volume, the quality and whether the
-// chats are hidden. Saved in ~/.config/twitch-app/layout.json.
+// watching it again brings them back, the volume, the quality, whether the
+// chats are hidden and the text size. Saved in ~/.config/twitch-app/layout.json.
 Layout :: struct {
 	// Watched channel -> the split channels, left to right. Owned.
 	splits: map[string][dynamic]string,
@@ -24,6 +29,8 @@ Layout :: struct {
 	low_latency: bool,
 	// The chats were hidden last, for every channel.
 	hide_chat:   bool,
+	// MIN_TEXT_SIZE to MAX_TEXT_SIZE percent.
+	text_size:   int,
 }
 
 layout_destroy :: proc(l: ^Layout) {
@@ -47,6 +54,7 @@ layout_path :: proc() -> (path: string, ok: bool) {
 // A missing or unreadable file is an empty layout at full volume.
 layout_load :: proc() -> (l: Layout) {
 	l.volume = DEFAULT_VOLUME
+	l.text_size = DEFAULT_TEXT_SIZE
 	path, ok := layout_path()
 	if !ok {
 		return
@@ -68,6 +76,7 @@ parse_layout :: proc(data: []byte, l: ^Layout) -> bool {
 		quality:     string,
 		low_latency: bool,
 		hide_chat:   bool,
+		text_size:   int,
 	}
 	if json.unmarshal(data, &saved, allocator = context.temp_allocator) != nil {
 		log.warn("layout.json is unreadable; starting without saved splits")
@@ -83,6 +92,10 @@ parse_layout :: proc(data: []byte, l: ^Layout) -> bool {
 	l.quality = quality_from_label(saved.quality)
 	l.low_latency = saved.low_latency
 	l.hide_chat = saved.hide_chat
+	// A file from before the text size was saved has none (0): keep the default.
+	if saved.text_size != 0 {
+		l.text_size = clamp(saved.text_size, MIN_TEXT_SIZE, MAX_TEXT_SIZE)
+	}
 	for channel, splits in saved.splits {
 		if !valid_login(channel) {
 			continue
@@ -115,7 +128,8 @@ layout_save :: proc(l: ^Layout) {
 		quality:     string,
 		low_latency: bool,
 		hide_chat:   bool,
-	}{l.splits, l.volume, l.muted, QUALITY_LABELS[l.quality], l.low_latency, l.hide_chat}
+		text_size:   int,
+	}{l.splits, l.volume, l.muted, QUALITY_LABELS[l.quality], l.low_latency, l.hide_chat, l.text_size}
 	data, err := json.marshal(saved, {pretty = true}, context.temp_allocator)
 	if err != nil {
 		return
