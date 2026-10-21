@@ -8,6 +8,10 @@ import "core:strings"
 import "vendor:curl"
 import gl "vendor:OpenGL"
 import sdl "vendor:sdl3"
+import img "vendor:sdl3/image"
+
+// The window's icon, for when no installed desktop entry gives it one.
+ICON_DATA :: #load("../assets/install/twitch-app.png")
 
 // Shortest wait between animation frames, so many emotes can't spin the CPU.
 MIN_ANIMATION_WAIT_MS :: 10
@@ -125,6 +129,8 @@ App :: struct {
 
 // Opens the window on the browse screen, or watching `channel` if it's not "".
 run :: proc(channels: []string, config: Config) -> bool {
+	// Matches the installed twitch-app.desktop, so the desktop finds its icon and name.
+	sdl.SetHint(sdl.HINT_APP_ID, "twitch-app")
 	if !sdl.Init({.VIDEO}) {
 		log.errorf("SDL init failed: %s", sdl.GetError())
 		return false
@@ -141,6 +147,10 @@ run :: proc(channels: []string, config: Config) -> bool {
 		return false
 	}
 	defer sdl.DestroyWindow(window)
+	if icon := img.Load_IO(sdl.IOFromConstMem(raw_data(ICON_DATA), len(ICON_DATA)), true); icon != nil {
+		sdl.SetWindowIcon(window, icon)
+		sdl.DestroySurface(icon)
+	}
 
 	gl_context := sdl.GL_CreateContext(window)
 	if gl_context == nil {
