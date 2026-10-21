@@ -53,9 +53,10 @@ main :: proc() {
 		log.error("curl init failed")
 		os.exit(1)
 	}
-	config, config_err := load_config(CONFIG_PATH)
+	config_file := config_path()
+	config, config_err := load_config(config_file)
 	if config_err != .None {
-		log.errorf("can't load %s: %v", CONFIG_PATH, config_err)
+		log.errorf("can't load %s: %v", config_file, config_err)
 		curl.global_cleanup()
 		os.exit(1)
 	}

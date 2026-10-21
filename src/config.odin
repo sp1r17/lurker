@@ -2,9 +2,8 @@ package app
 
 import "core:encoding/json"
 import "core:os"
+import "core:path/filepath"
 import "core:strings"
-
-CONFIG_PATH :: "config.json"
 
 // The client ID SmartTwitchTV signs in with (it belongs to Twitch's Android TV app),
 // so signing in needs no app registered on dev.twitch.tv. Twitch could restrict it
@@ -16,6 +15,21 @@ Config :: struct {
 	client_id:    string,
 	channels:     []string,
 	poll_seconds: int,
+}
+
+// config.json in the working directory, for running from the source tree, or
+// else ~/.config/twitch-app/config.json (beside auth.json), for an installed
+// copy. Allocated with the temp allocator.
+config_path :: proc() -> string {
+	if os.exists("config.json") {
+		return "config.json"
+	}
+	auth, ok := auth_path()
+	if !ok {
+		return "config.json"
+	}
+	joined, err := filepath.join({filepath.dir(auth), "config.json"}, context.temp_allocator)
+	return joined if err == nil else "config.json"
 }
 
 Config_Error :: enum {
