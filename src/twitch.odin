@@ -14,6 +14,7 @@ HELIX_URL :: "https://api.twitch.tv/helix"
 GQL_URL :: "https://gql.twitch.tv/gql"
 // Categories on the browse screen: box art is fetched at this size.
 BOX_ART_SIZE :: [2]int{188, 250}
+SEARCH_RESULTS :: 40
 // Helix accepts at most 100 user_login parameters per request.
 MAX_LOGINS_PER_REQUEST :: 100
 
@@ -316,6 +317,46 @@ parse_categories_response :: proc(body: []byte) -> (followed, top: []Category, n
 	return f[:], t[:], next, .None
 }
 
+// Categories whose names match `query`, best match first. Allocated with the temp
+// allocator.
+search_categories :: proc(client_id, token, query: string) -> (categories: []Category, err: Twitch_Error) {
+	q := strings.concatenate(
+		{"query($q: String!) { searchCategories(query: $q, first: ", fmt.tprint(SEARCH_RESULTS), ") { edges { node { ", category_fields(), " } } } }"},
+		context.temp_allocator,
+	)
+	variables := make(map[string]string, context.temp_allocator)
+	variables["q"] = query
+	body := gql_post(client_id, token, q, variables) or_return
+	return parse_category_search_response(body)
+}
+
+parse_category_search_response :: proc(body: []byte) -> (categories: []Category, err: Twitch_Error) {
+	r: struct {
+		data:   struct {
+			searchCategories: struct {
+				edges: []struct {
+					node: Category_Node,
+				},
+			},
+		},
+		errors: []struct {
+			message: string,
+		},
+	}
+	if json.unmarshal(body, &r, allocator = context.temp_allocator) != nil {
+		return nil, .Bad_Json
+	}
+	if len(r.errors) > 0 {
+		log.warnf("GraphQL error: %s", r.errors[0].message)
+		return nil, .Bad_Status
+	}
+	found := make([dynamic]Category, context.temp_allocator)
+	for e in r.data.searchCategories.edges {
+		append(&found, category_from_node(e.node))
+	}
+	return found[:], .None
+}
+
 // A category as GraphQL describes it. A category nobody is watching has a null
 // viewersCount, read as 0.
 @(private = "file")
@@ -333,4 +374,52 @@ category_from_node :: proc(n: Category_Node) -> Category {
 
 sort_by_viewers :: proc(categories: []Category) {
 	slice.stable_sort_by(categories, proc(a, b: Category) -> bool {return a.viewers > b.viewers})
+}
+
+// A channel found by searching: live or not.
+Channel :: struct {
+	broadcaster_login: string,
+	display_name:      string,
+	game_name:         string,
+	title:             string,
+	is_live:           bool,
+	// The channel's profile picture.
+	thumbnail_url:     string,
+}
+
+clone_channel :: proc(c: Channel) -> Channel {
+	return {
+		broadcaster_login = strings.clone(c.broadcaster_login),
+		display_name = strings.clone(c.display_name),
+		game_name = strings.clone(c.game_name),
+		title = strings.clone(c.title),
+		is_live = c.is_live,
+		thumbnail_url = strings.clone(c.thumbnail_url),
+	}
+}
+
+destroy_channel :: proc(c: Channel) {
+	delete(c.broadcaster_login)
+	delete(c.display_name)
+	delete(c.game_name)
+	delete(c.title)
+	delete(c.thumbnail_url)
+}
+
+// Channels whose names match `query`, as Twitch ranks them (live ones tend to come
+// first). Allocated with the temp allocator.
+search_channels :: proc(client_id, token, query: string) -> (channels: []Channel, err: Twitch_Error) {
+	path := fmt.tprintf("/search/channels?first=%d&query=%s", SEARCH_RESULTS, net.percent_encode(query, context.temp_allocator))
+	body := helix_get(client_id, token, path) or_return
+	return parse_channels_response(body)
+}
+
+parse_channels_response :: proc(body: []byte) -> (channels: []Channel, err: Twitch_Error) {
+	r: struct {
+		data: []Channel,
+	}
+	if json.unmarshal(body, &r, allocator = context.temp_allocator) != nil {
+		return nil, .Bad_Json
+	}
+	return r.data, .None
 }

@@ -83,3 +83,40 @@ categories_read_followed_and_top :: proc(t: ^testing.T) {
 	_, _, _, gql_err := parse_categories_response(transmute([]byte)string(`{"errors":[{"message":"bad"}]}`))
 	testing.expect_value(t, gql_err, Twitch_Error.Bad_Status)
 }
+
+@(test)
+category_search_keeps_twitch_order :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	body := `{"data":{"searchCategories":{"edges":[` +
+		`{"node":{"id":"512953","displayName":"ELDEN RING","viewersCount":34063,"boxArtURL":"https://x/a.jpg"}},` +
+		`{"node":{"id":"511078","displayName":"Elden: Path of the Forgotten","viewersCount":null,"boxArtURL":"https://x/b.jpg"}},` +
+		`{"node":{"id":"982348888","displayName":"ELDEN RING NIGHTREIGN","viewersCount":1005}}]}}}`
+	found, err := parse_category_search_response(transmute([]byte)body)
+	testing.expect_value(t, err, Twitch_Error.None)
+	testing.expect_value(t, len(found), 3)
+	// Best match first, not most viewers.
+	testing.expect_value(t, found[1].name, "Elden: Path of the Forgotten")
+	testing.expect_value(t, found[1].viewers, 0)
+}
+
+@(test)
+channel_search_reads_live_and_offline :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	body := `{"data":[{"broadcaster_login":"moonmoon","display_name":"MOONMOON","game_name":"Games + Demos",` +
+		`"is_live":false,"thumbnail_url":"https://x/p.png","title":"T","started_at":""},` +
+		`{"broadcaster_login":"lirik","display_name":"LIRIK","is_live":true,"title":"U"}]}`
+	channels, err := parse_channels_response(transmute([]byte)body)
+	testing.expect_value(t, err, Twitch_Error.None)
+	testing.expect_value(t, len(channels), 2)
+	testing.expect_value(t, channels[0].display_name, "MOONMOON")
+	testing.expect(t, !channels[0].is_live)
+	testing.expect(t, channels[1].is_live)
+}
+
+@(test)
+channel_label_adds_login_when_name_differs :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	testing.expect_value(t, channel_label({broadcaster_login = "moonmoon", display_name = "MOONMOON"}), "MOONMOON")
+	testing.expect_value(t, channel_label({broadcaster_login = "moondogs_celestial", display_name = "幻月_"}), "幻月_ (moondogs_celestial)")
+	testing.expect_value(t, channel_label({broadcaster_login = "lirik"}), "lirik")
+}

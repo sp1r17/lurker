@@ -178,9 +178,13 @@ draw_pane :: proc(app: ^App, p: ^Chat_Pane, focused: bool) {
 // A text box: what's typed, or a hint, with a cursor while focused.
 @(private = "file")
 draw_box :: proc(app: ^App, p: ^Chat_Pane, box: Box, rect: Rect, hint: string) {
+	draw_text_box(app, &p.boxes[box], &p.box_scroll[box], rect, hint)
+}
+
+// A one-line text field in `rect`, `hint` showing while it's empty and unfocused.
+// `scroll` keeps the cursor in view between frames.
+draw_text_box :: proc(app: ^App, ti: ^Text_Input, scroll: ^f32, rect: Rect, hint: string) {
 	r := &app.assets.renderer
-	ti := &p.boxes[box]
-	scroll := &p.box_scroll[box]
 	scale := app.scale
 	size := CHAT_FONT_SIZE * scale
 	pad := CHAT_PADDING * scale
@@ -310,7 +314,6 @@ pane_input_key :: proc(app: ^App, key: sdl.KeyboardEvent) {
 	ti := &p.boxes[box]
 	ctrl := key.mod & sdl.KMOD_CTRL != {}
 	shift := key.mod & sdl.KMOD_SHIFT != {}
-	by: Input_Move = .Word if ctrl else .Char
 	before := len(ti.text)
 	switch key.key {
 	case sdl.K_ESCAPE:
@@ -337,6 +340,29 @@ pane_input_key :: proc(app: ^App, key: sdl.KeyboardEvent) {
 		if ctrl {
 			search_open(app, p)
 		}
+	case sdl.K_TAB:
+		emote_names, user_names := completion_names(app, p)
+		input_complete(ti, emote_names, user_names, backwards = shift)
+	case sdl.K_W:
+		if ctrl {
+			watch_close_pane(app, p)
+			return
+		}
+	case:
+		text_box_key(ti, key)
+	}
+	if box == .Search && len(ti.text) != before {
+		p.view.scroll = 0
+	}
+}
+
+// The editing keys every text box shares: deleting, moving (by word with Ctrl,
+// selecting with Shift), and Ctrl+A, C, X and V. Returns true if the key was one.
+text_box_key :: proc(ti: ^Text_Input, key: sdl.KeyboardEvent) -> bool {
+	ctrl := key.mod & sdl.KMOD_CTRL != {}
+	shift := key.mod & sdl.KMOD_SHIFT != {}
+	by: Input_Move = .Word if ctrl else .Char
+	switch key.key {
 	case sdl.K_BACKSPACE:
 		input_delete(ti, by)
 	case sdl.K_DELETE:
@@ -350,32 +376,29 @@ pane_input_key :: proc(app: ^App, key: sdl.KeyboardEvent) {
 	case sdl.K_END:
 		input_move(ti, .Line, forward = true, extend = shift)
 	case sdl.K_A:
-		if ctrl {
-			input_select_all(ti)
+		if !ctrl {
+			return false
 		}
+		input_select_all(ti)
 	case sdl.K_C, sdl.K_X:
-		if ctrl && input_selected_text(ti) != "" {
+		if !ctrl {
+			return false
+		}
+		if input_selected_text(ti) != "" {
 			copy_text(input_selected_text(ti))
 			if key.key == sdl.K_X {
 				input_delete(ti, .Char)
 			}
 		}
-	case sdl.K_TAB:
-		emote_names, user_names := completion_names(app, p)
-		input_complete(ti, emote_names, user_names, backwards = shift)
 	case sdl.K_V:
-		if ctrl {
-			paste(ti)
+		if !ctrl {
+			return false
 		}
-	case sdl.K_W:
-		if ctrl {
-			watch_close_pane(app, p)
-			return
-		}
+		paste(ti)
+	case:
+		return false
 	}
-	if box == .Search && len(ti.text) != before {
-		p.view.scroll = 0
-	}
+	return true
 }
 
 // A new split's chat box holds the channel to join.

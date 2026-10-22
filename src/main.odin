@@ -316,6 +316,9 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 		if app.screen == .Watch {
 			pane_text_input(app, string(e.text.text))
 			redraw^ = true
+		} else if app.browse.search.focused {
+			browse_search_text(app, string(e.text.text))
+			redraw^ = true
 		}
 	case e.type == .KEY_DOWN && text_size_key(app, e.key):
 		redraw^ = true
@@ -323,17 +326,22 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 		// Typing: every key goes to the box.
 		pane_input_key(app, e.key)
 		redraw^ = true
+	case e.type == .KEY_DOWN && app.screen == .Browse && app.browse.search.focused:
+		browse_search_key(app, e.key)
+		redraw^ = true
 	case e.type == .KEY_DOWN:
 		switch e.key.key {
 		case sdl.K_Q:
 			return false
 		case sdl.K_F:
 			if e.key.mod & sdl.KMOD_CTRL != {} {
-				// Ctrl+F searches the focused chat.
+				// Ctrl+F searches the focused chat, or channels when browsing.
 				if app.screen == .Watch {
 					search_open(app, app.watch.panes[app.watch.focus])
-					redraw^ = true
+				} else {
+					browse_search_focus(app)
 				}
+				redraw^ = true
 				break
 			}
 			toggle_fullscreen(app)
@@ -353,6 +361,10 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 					case:
 						return false
 					}
+				case sdl.K_SLASH, sdl.K_KP_DIVIDE:
+					// The "/" itself may also arrive as text; it isn't typed.
+					browse_search_focus(app)
+					app.browse.skip_slash = true
 				case sdl.K_R:
 					browse_refresh(app)
 				case sdl.K_L:
@@ -471,6 +483,9 @@ finish_jobs :: proc(app: ^App) {
 		case Categories_Job:
 			apply_auth_check(app, p.check, p.auth)
 			finish_categories_job(app, &p)
+		case Search_Job:
+			apply_auth_check(app, p.check, p.auth)
+			finish_search_job(app, &p)
 		case Device_Start_Job:
 			finish_device_start_job(app, &p)
 		case Device_Poll_Job:
