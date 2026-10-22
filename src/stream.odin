@@ -8,7 +8,7 @@ import "core:strings"
 import "core:sys/posix"
 import "core:time"
 
-// How long streamlink gets to exit after being asked, before it's killed.
+// How long streamlink gets to exit by itself once mpv has reached the stream's end.
 STREAMLINK_EXIT_WAIT :: 2 * time.Second
 
 Stream_Error :: enum {
@@ -136,11 +136,11 @@ streamlink_stop :: proc(s: ^Streamlink) {
 		return
 	}
 	s.running = false
-	_ = os.process_terminate(s.process)
-	if _, err := os.process_wait(s.process, STREAMLINK_EXIT_WAIT); err != nil {
-		_ = os.process_kill(s.process)
-		_, _ = os.process_wait(s.process)
-	}
+	// Killed outright: asked to stop (SIGTERM) mid-stream, streamlink took 1 to
+	// over 10 seconds winding down its download threads, with the window frozen
+	// waiting. It only passes the stream on, so there's nothing to lose.
+	_ = os.process_kill(s.process)
+	_, _ = os.process_wait(s.process)
 	os.close(s.errors)
 }
 
