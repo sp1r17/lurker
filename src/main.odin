@@ -346,10 +346,13 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 			case .Browse:
 				switch e.key.key {
 				case sdl.K_ESCAPE:
-					if !sign_in_active(app) {
+					switch {
+					case sign_in_active(app):
+						sign_in_cancel(app)
+					case browse_back(app):
+					case:
 						return false
 					}
-					sign_in_cancel(app)
 				case sdl.K_R:
 					browse_refresh(app)
 				case sdl.K_L:
@@ -376,15 +379,9 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 			watch_mouse_moved(app, app.mouse.x, app.mouse.y)
 		}
 		if app.screen == .Browse {
-			hovered := browse_card_at(&app.browse, app.mouse.x, app.mouse.y)
-			if hovered != app.browse.hovered {
-				app.browse.hovered = hovered
-				redraw^ = true
-			}
-			// Buttons and links change colour under the mouse.
-			if !app.signed_in || app.sign_in.sign_out.w > 0 {
-				redraw^ = true
-			}
+			app.browse.hovered = browse_card_at(&app.browse, app.mouse.x, app.mouse.y)
+			// Cards, tabs, buttons and links change colour under the mouse.
+			redraw^ = true
 		}
 		if app.screen == .Watch {
 			// The hide button lights up, and the show-chat tab appears, under the
@@ -425,12 +422,7 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 			watch_click(app, x, y)
 			redraw^ = true
 		case .Browse:
-			if sign_in_click(app, x, y) {
-				redraw^ = true
-			} else if i := browse_card_at(&app.browse, x, y); i >= 0 {
-				watch_start(app, app.browse.streams[i].user_login, info = &app.browse.streams[i])
-				redraw^ = true
-			}
+			browse_click(app, x, y)
 		}
 	case u32(e.type) == app.chat_wake_event:
 		watch_chat_arrived(app)
@@ -473,9 +465,12 @@ finish_jobs :: proc(app: ^App) {
 			pane := find_pane(app, p.pane)
 			finish_badges_job(&pane.emotes if pane != nil else nil, &a.emotes, &p)
 			apply_auth_check(app, p.check, p.auth)
-		case Followed_Job:
+		case Streams_Job:
 			apply_auth_check(app, p.check, p.auth)
-			finish_followed_job(app, &p)
+			finish_streams_job(app, &p)
+		case Categories_Job:
+			apply_auth_check(app, p.check, p.auth)
+			finish_categories_job(app, &p)
 		case Device_Start_Job:
 			finish_device_start_job(app, &p)
 		case Device_Poll_Job:

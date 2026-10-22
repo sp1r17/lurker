@@ -3,10 +3,17 @@ package app
 import "core:encoding/json"
 import "core:fmt"
 import "core:log"
+import "core:net"
+import "core:slice"
 import "core:strings"
 
 TOKEN_URL :: "https://id.twitch.tv/oauth2/token"
 HELIX_URL :: "https://api.twitch.tv/helix"
+// Twitch's own GraphQL API: the only way to get the categories a user follows.
+// Like the Android TV app it signs in as, it takes the same token as Helix.
+GQL_URL :: "https://gql.twitch.tv/gql"
+// Categories on the browse screen: box art is fetched at this size.
+BOX_ART_SIZE :: [2]int{188, 250}
 // Helix accepts at most 100 user_login parameters per request.
 MAX_LOGINS_PER_REQUEST :: 100
 
@@ -148,4 +155,182 @@ get_followed_streams :: proc(client_id, token, user_id: string) -> (streams: []S
 			return all[:], .None
 		}
 	}
+}
+
+// The most watched live streams on Twitch, or in one category if `game_id` isn't
+// "": the first 100, most viewers first. Allocated with the temp allocator.
+get_top_streams :: proc(client_id, token: string, game_id := "") -> (streams: []Stream, err: Twitch_Error) {
+	path := "/streams?first=100"
+	if game_id != "" {
+		path = fmt.tprintf("%s&game_id=%s", path, net.percent_encode(game_id, context.temp_allocator))
+	}
+	body := helix_get(client_id, token, path) or_return
+	return parse_streams_response(body)
+}
+
+// A category (game), with how many are watching it.
+Category :: struct {
+	id:          string,
+	name:        string,
+	viewers:     int,
+	box_art_url: string,
+}
+
+clone_category :: proc(c: Category) -> Category {
+	return {
+		id = strings.clone(c.id),
+		name = strings.clone(c.name),
+		viewers = c.viewers,
+		box_art_url = strings.clone(c.box_art_url),
+	}
+}
+
+destroy_category :: proc(c: Category) {
+	delete(c.id)
+	delete(c.name)
+	delete(c.box_art_url)
+}
+
+// A POST to the GraphQL API, with `variables` for the query's $parameters (so
+// nothing typed is ever spliced into the query). The body is allocated with the
+// temp allocator.
+gql_post :: proc(client_id, token, query: string, variables: map[string]string = nil) -> (body: []byte, err: Twitch_Error) {
+	request, marshal_err := json.marshal(
+		struct {
+			query:     string,
+			variables: map[string]string,
+		}{query, variables},
+		allocator = context.temp_allocator,
+	)
+	if marshal_err != nil {
+		return nil, .Bad_Json
+	}
+	headers := []string {
+		strings.concatenate({"Client-Id: ", client_id}, context.temp_allocator),
+		strings.concatenate({"Authorization: OAuth ", token}, context.temp_allocator),
+		"Content-Type: application/json",
+	}
+	res, ok := http_request(GQL_URL, headers, post_body = string(request), allocator = context.temp_allocator)
+	if !ok {
+		return nil, .Request_Failed
+	}
+	switch res.status {
+	case 200:
+		return res.body, .None
+	case 401:
+		return nil, .Unauthorized
+	case:
+		log.warnf("GraphQL returned %d: %s", res.status, strings.trim_space(string(res.body)))
+		return nil, .Bad_Status
+	}
+}
+
+// What every category query asks for. Concatenated into queries, not formatted:
+// fmt reads GraphQL's braces as its own.
+@(private = "file")
+category_fields :: proc() -> string {
+	return fmt.tprintf("id displayName viewersCount boxArtURL(width: %d, height: %d)", BOX_ART_SIZE.x, BOX_ART_SIZE.y)
+}
+
+// A page of the most watched categories, after `after` ("" for the first page,
+// which also brings the user's followed categories).
+categories_query :: proc(after: string) -> string {
+	fields := category_fields()
+	games := strings.concatenate(
+		{" games(first: 100, after: $after) { edges { cursor node { ", fields, " } } pageInfo { hasNextPage } }"},
+		context.temp_allocator,
+	)
+	if after != "" {
+		return strings.concatenate({"query($after: Cursor) {", games, " }"}, context.temp_allocator)
+	}
+	return strings.concatenate(
+		{"query($after: Cursor) { currentUser { followedGames(first: 100, type: ALL) { nodes { ", fields, " } } }", games, " }"},
+		context.temp_allocator,
+	)
+}
+
+// Categories, most viewers first: the user's followed ones (first page only) and a
+// page of the most watched, with the cursor for the next page ("" if it's the
+// last). Allocated with the temp allocator.
+get_categories :: proc(
+	client_id, token: string,
+	after := "",
+) -> (
+	followed, top: []Category,
+	next: string,
+	err: Twitch_Error,
+) {
+	variables := make(map[string]string, context.temp_allocator)
+	if after != "" {
+		variables["after"] = after
+	}
+	body := gql_post(client_id, token, categories_query(after), variables) or_return
+	return parse_categories_response(body)
+}
+
+parse_categories_response :: proc(body: []byte) -> (followed, top: []Category, next: string, err: Twitch_Error) {
+	Response :: struct {
+		data:   struct {
+			currentUser: struct {
+				followedGames: struct {
+					nodes: []Category_Node,
+				},
+			},
+			games:       struct {
+				edges:    []struct {
+					cursor: string,
+					node:   Category_Node,
+				},
+				pageInfo: struct {
+					hasNextPage: bool,
+				},
+			},
+		},
+		errors: []struct {
+			message: string,
+		},
+	}
+	r: Response
+	if json.unmarshal(body, &r, allocator = context.temp_allocator) != nil {
+		return nil, nil, "", .Bad_Json
+	}
+	if len(r.errors) > 0 {
+		log.warnf("GraphQL error: %s", r.errors[0].message)
+		return nil, nil, "", .Bad_Status
+	}
+	f := make([dynamic]Category, context.temp_allocator)
+	for n in r.data.currentUser.followedGames.nodes {
+		append(&f, category_from_node(n))
+	}
+	sort_by_viewers(f[:])
+	t := make([dynamic]Category, context.temp_allocator)
+	for e in r.data.games.edges {
+		append(&t, category_from_node(e.node))
+	}
+	// Twitch's order is only roughly by viewers.
+	sort_by_viewers(t[:])
+	edges := r.data.games.edges
+	if r.data.games.pageInfo.hasNextPage && len(edges) > 0 {
+		next = edges[len(edges) - 1].cursor
+	}
+	return f[:], t[:], next, .None
+}
+
+// A category as GraphQL describes it. A category nobody is watching has a null
+// viewersCount, read as 0.
+@(private = "file")
+Category_Node :: struct {
+	id:           string,
+	displayName:  string,
+	viewersCount: int,
+	boxArtURL:    string,
+}
+
+@(private = "file")
+category_from_node :: proc(n: Category_Node) -> Category {
+	return {id = n.id, name = n.displayName, viewers = n.viewersCount, box_art_url = n.boxArtURL}
+}
+
+sort_by_viewers :: proc(categories: []Category) {
+	slice.stable_sort_by(categories, proc(a, b: Category) -> bool {return a.viewers > b.viewers})
 }

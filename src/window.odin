@@ -72,10 +72,10 @@ draggable :: proc(app: ^App, x, y: f32) -> bool {
 		if app.sign_in.sign_out.w > 0 && in_rect(app.sign_in.sign_out, x, y) {
 			return false
 		}
-		if on_window_controls(app, x, y) {
+		if on_window_controls(app, x, y) || on_browse_header_controls(app, x, y) {
 			return false
 		}
-		return y < BROWSE_HEADER_HEIGHT * app.scale
+		return y < app.browse.header_h
 	}
 	return false
 }

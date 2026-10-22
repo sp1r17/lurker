@@ -39,3 +39,47 @@ uptime_reads_as_hours_minutes_seconds :: proc(t: ^testing.T) {
 	_, bad := format_uptime("yesterday", now)
 	testing.expect(t, !bad)
 }
+
+@(test)
+categories_query_pages :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	FIELDS :: "id displayName viewersCount boxArtURL(width: 188, height: 250)"
+	GAMES :: " games(first: 100, after: $after) { edges { cursor node { " + FIELDS + " } } pageInfo { hasNextPage } }"
+	// The first page brings the followed categories too; later ones don't.
+	testing.expect_value(
+		t,
+		categories_query(""),
+		"query($after: Cursor) { currentUser { followedGames(first: 100, type: ALL) { nodes { " + FIELDS + " } } }" + GAMES + " }",
+	)
+	testing.expect_value(t, categories_query("abc"), "query($after: Cursor) {" + GAMES + " }")
+}
+
+@(test)
+categories_read_followed_and_top :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	body := `{"data":{"currentUser":{"followedGames":{"nodes":[` +
+		`{"id":"1","displayName":"Retro","viewersCount":50,"boxArtURL":"https://x/1-188x250.jpg"},` +
+		`{"id":"2","displayName":"Deadlock","viewersCount":4000,"boxArtURL":"https://x/2-188x250.jpg"}]}},` +
+		`"games":{"edges":[{"cursor":"c1","node":{"id":"7","displayName":"Pokémon","viewersCount":2417}},` +
+		`{"cursor":"c2","node":{"id":"509658","displayName":"Just Chatting","viewersCount":363815,"boxArtURL":"https://x/3.jpg"}}],` +
+		`"pageInfo":{"hasNextPage":true}}}}`
+	followed, top, next, err := parse_categories_response(transmute([]byte)body)
+	testing.expect_value(t, err, Twitch_Error.None)
+	testing.expect_value(t, len(followed), 2)
+	// Most viewers first, whatever order Twitch gave.
+	testing.expect_value(t, followed[0].name, "Deadlock")
+	testing.expect_value(t, followed[1].viewers, 50)
+	testing.expect_value(t, len(top), 2)
+	testing.expect_value(t, top[0].id, "509658")
+	// The next page starts after the last edge as Twitch sent them.
+	testing.expect_value(t, next, "c2")
+
+	last := `{"data":{"games":{"edges":[{"cursor":"c9","node":{"id":"9","displayName":"Q","viewersCount":null}}],"pageInfo":{"hasNextPage":false}}}}`
+	_, last_top, last_next, last_err := parse_categories_response(transmute([]byte)last)
+	testing.expect_value(t, last_err, Twitch_Error.None)
+	testing.expect_value(t, last_next, "")
+	testing.expect_value(t, last_top[0].viewers, 0)
+
+	_, _, _, gql_err := parse_categories_response(transmute([]byte)string(`{"errors":[{"message":"bad"}]}`))
+	testing.expect_value(t, gql_err, Twitch_Error.Bad_Status)
+}
