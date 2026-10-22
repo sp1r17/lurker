@@ -22,6 +22,7 @@ Event_Id :: enum c.int {
 	End_File           = 7,
 	File_Loaded        = 8,
 	Idle               = 11,
+	Playback_Restart   = 21,
 }
 
 Event :: struct {

@@ -127,9 +127,8 @@ watch_stop :: proc(app: ^App) {
 	w := &app.watch
 	player_command(&app.player, {"stop"})
 	streamlink_stop(&w.streamlink)
-	// Clears the video texture to black, so the next channel doesn't start on
-	// this one's last frame.
-	player_render(&app.player)
+	// So the next channel doesn't start on this one's last frame.
+	player_clear(&app.player)
 	user_card_close(app)
 	box_unfocus(app)
 	for p in w.panes {
@@ -396,9 +395,13 @@ watch_player_events :: proc(app: ^App, events: Player_Events) {
 	if app.screen != .Watch {
 		return
 	}
-	if .File_Loaded in events {
+	// Also sent after mpv catches up (as after a seek): only the first time shows
+	// the controls.
+	if .Playing in events && w.status == .Starting {
 		w.status = .Playing
 		w.controls_until = app.assets.now_ms + CONTROLS_START_MS
+		// The first frame is ready: draw it now rather than on mpv's next redraw.
+		w.new_video_frame = true
 	}
 	if .Ended in events {
 		switch streamlink_outcome(&w.streamlink) {

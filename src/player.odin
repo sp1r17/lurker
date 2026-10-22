@@ -113,8 +113,9 @@ player_command :: proc(p: ^Player, args: []cstring) {
 
 Player_Event :: enum {
 	Shutdown,
-	// The stream started playing.
-	File_Loaded,
+	// The stream's first frame is ready to show. ("file-loaded" comes before
+	// that: the texture would still hold the last stream's frame.)
+	Playing,
 	// The stream reached its end, or failed (the reason is logged).
 	Ended,
 }
@@ -130,8 +131,8 @@ player_handle_events :: proc(p: ^Player) -> (events: Player_Events) {
 		case .Shutdown:
 			events += {.Shutdown}
 			return
-		case .File_Loaded:
-			events += {.File_Loaded}
+		case .Playback_Restart:
+			events += {.Playing}
 		case .Log_Message:
 			m := (^mpv.Event_Log_Message)(e.data)
 			log.warnf("mpv %s: %s", m.prefix, strings.trim_right_space(string(m.text)))
@@ -176,6 +177,19 @@ player_resize :: proc(p: ^Player, size: [2]i32) {
 	gl.BindFramebuffer(gl.FRAMEBUFFER, 0)
 	p.target_size = size
 	player_render(p)
+}
+
+// Clears the player's texture to black. Rendering can't do it when a stream stops:
+// mpv takes "stop" asynchronously, so it would draw the stopped stream's last
+// frame again.
+player_clear :: proc(p: ^Player) {
+	if p.texture == 0 {
+		return
+	}
+	gl.BindFramebuffer(gl.FRAMEBUFFER, p.fbo)
+	gl.ClearColor(0, 0, 0, 1)
+	gl.Clear(gl.COLOR_BUFFER_BIT)
+	gl.BindFramebuffer(gl.FRAMEBUFFER, 0)
 }
 
 // Draws mpv's current frame into the player's texture.
