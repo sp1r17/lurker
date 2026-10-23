@@ -33,6 +33,11 @@ Chat_Pane :: struct {
 	messages_rect: Rect,
 	input_rect:    Rect,
 	search_rect:   Rect,
+	// The emote picker (emote_picker.odin): the chosen row, the ":word" Esc closed
+	// it for (where it starts + 1; 0 for none), and its rows from the last draw.
+	picker_selected:  int,
+	picker_dismissed: int,
+	picker_rows:      [dynamic]Rect,
 }
 
 // The two text boxes in a chat pane.
@@ -77,6 +82,7 @@ pane_destroy :: proc(app: ^App, p: ^Chat_Pane) {
 	}
 	delete(p.room_id)
 	delete(p.channel)
+	delete(p.picker_rows)
 	free(p)
 }
 
@@ -160,6 +166,7 @@ draw_pane :: proc(app: ^App, p: ^Chat_Pane, focused: bool) {
 		hint = "Send a message (Enter)" if app.signed_in else "Sign in to chat"
 	}
 	draw_box(app, p, .Chat, p.input_rect, hint)
+	draw_emote_picker(app, p)
 	if p.searching {
 		draw_box(app, p, .Search, p.search_rect, "" if filter != "" else "Search, or from:name")
 		if filter != "" {
@@ -279,6 +286,9 @@ search_close :: proc(app: ^App, p: ^Chat_Pane) {
 
 // Handles a click inside the pane.
 pane_click :: proc(app: ^App, p: ^Chat_Pane, x, y: f32) {
+	if emote_picker_click(app, p, x, y) {
+		return
+	}
 	if in_rect(p.input_rect, x, y) {
 		box_focus(app, p, .Chat)
 		return
@@ -299,6 +309,7 @@ pane_click :: proc(app: ^App, p: ^Chat_Pane, x, y: f32) {
 pane_text_input :: proc(app: ^App, text: string) {
 	if p, box, typing := focused_box(app); typing {
 		input_insert(&p.boxes[box], text)
+		p.picker_selected = 0
 		if box == .Search {
 			p.view.scroll = 0
 		}
@@ -312,6 +323,9 @@ pane_input_key :: proc(app: ^App, key: sdl.KeyboardEvent) {
 		return
 	}
 	ti := &p.boxes[box]
+	if box == .Chat && emote_picker_key(app, p, key) {
+		return
+	}
 	ctrl := key.mod & sdl.KMOD_CTRL != {}
 	shift := key.mod & sdl.KMOD_SHIFT != {}
 	before := len(ti.text)
@@ -351,8 +365,11 @@ pane_input_key :: proc(app: ^App, key: sdl.KeyboardEvent) {
 	case:
 		text_box_key(ti, key)
 	}
-	if box == .Search && len(ti.text) != before {
-		p.view.scroll = 0
+	if len(ti.text) != before {
+		p.picker_selected = 0
+		if box == .Search {
+			p.view.scroll = 0
+		}
 	}
 }
 

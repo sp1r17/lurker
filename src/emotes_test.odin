@@ -114,3 +114,25 @@ badges_parse :: proc(t: ^testing.T) {
 	testing.expect_value(t, list[0].badge.url_2x, "u2")
 	testing.expect_value(t, list[0].badge.title, "1-Year Subscriber")
 }
+
+@(test)
+picker_lists_prefix_matches_first :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	// Only read, so the maps can borrow constant strings.
+	channel, global: Emotes
+	channel.sets[.Channel_7TV] = make(map[string]Emote, context.temp_allocator)
+	global.sets[.Global_BTTV] = make(map[string]Emote, context.temp_allocator)
+	channel.sets[.Channel_7TV]["catJAM"] = {url_1x = "c7"}
+	channel.sets[.Channel_7TV]["xddCat"] = {}
+	global.sets[.Global_BTTV]["catJAM"] = {url_1x = "gb"}
+	global.sets[.Global_BTTV]["Catdance"] = {}
+	global.sets[.Global_BTTV]["KEKW"] = {}
+	matches := emote_picker_matches(&channel, &global, "CAT")
+	testing.expect_value(t, len(matches), 3)
+	// Prefix matches, shortest first, then the rest.
+	testing.expect_value(t, matches[0].name, "catJAM")
+	testing.expect_value(t, matches[0].emote.url_1x, "c7")
+	testing.expect_value(t, matches[0].source, Emote_Source.Channel_7TV)
+	testing.expect_value(t, matches[1].name, "Catdance")
+	testing.expect_value(t, matches[2].name, "xddCat")
+}
