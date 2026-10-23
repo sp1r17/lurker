@@ -76,6 +76,29 @@ irc_tag :: proc(msg: Irc_Message, key: string) -> (value: string, found: bool) {
 	return "", false
 }
 
+// A tag value as IRC writes it: the inverse of unescape_tag. Allocated with the
+// temp allocator.
+escape_tag :: proc(value: string) -> string {
+	sb := strings.builder_make(context.temp_allocator)
+	for i in 0 ..< len(value) {
+		switch value[i] {
+		case ';':
+			strings.write_string(&sb, "\\:")
+		case ' ':
+			strings.write_string(&sb, "\\s")
+		case '\\':
+			strings.write_string(&sb, "\\\\")
+		case '\r':
+			strings.write_string(&sb, "\\r")
+		case '\n':
+			strings.write_string(&sb, "\\n")
+		case:
+			strings.write_byte(&sb, value[i])
+		}
+	}
+	return strings.to_string(sb)
+}
+
 @(private = "file")
 unescape_tag :: proc(value: string) -> string {
 	if strings.index_byte(value, '\\') < 0 {

@@ -185,7 +185,7 @@ draw_emote_picker :: proc(app: ^App, p: ^Chat_Pane) {
 	row_h := max(emote_h, lh) + pad
 	p.picker_selected = min(p.picker_selected, len(matches) - 1)
 
-	box := p.input_rect
+	box := p.reply_rect if p.reply_rect.w > 0 else p.input_rect
 	panel := Rect{box.x, box.y - 4 * scale - f32(len(matches)) * row_h - pad, box.w, f32(len(matches)) * row_h + pad}
 	draw_rect(r, panel, PICKER_BACKGROUND)
 	pixel_scale: f32 = 2 if scale * r.text_scale > 1 else 1

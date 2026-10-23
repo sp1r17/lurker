@@ -648,6 +648,18 @@ watch_click :: proc(app: ^App, x, y: f32) {
 	pane_click(app, p, x, y)
 }
 
+// A right-click: on a chat message, starts a reply to it.
+watch_right_click :: proc(app: ^App, x, y: f32) {
+	p, i := pane_at(app, x, y)
+	if p == nil || !in_rect(p.messages_rect, x, y) {
+		return
+	}
+	if m, found := chat_view_message_at(&p.view, x, y); found {
+		app.watch.focus = i
+		pane_reply_start(app, p, m)
+	}
+}
+
 // The wheel scrolls a chat, or over the video, changes the volume as in mpv.
 watch_scroll :: proc(app: ^App, x, y, wheel_y: f32) {
 	if p, _ := pane_at(app, x, y); p != nil {

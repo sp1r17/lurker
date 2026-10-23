@@ -60,8 +60,10 @@ Chat_View :: struct {
 	max_scroll: f32,
 	more_bar:   Rect,
 	name_hits:  [dynamic]Name_Hit,
-	// Badges and emotes on screen, for their tooltips.
-	image_hits: [dynamic]Image_Hit,
+	// Badges and emotes on screen, for their tooltips, and where each message is
+	// (an index into `messages`), for replying to it.
+	image_hits:   [dynamic]Image_Hit,
+	message_hits: [dynamic]Message_Hit,
 	// How many messages matched the filter.
 	matches:    int,
 }
@@ -77,6 +79,11 @@ Image_Hit :: struct {
 	item: Layout_Item,
 }
 
+Message_Hit :: struct {
+	rect:  Rect,
+	index: int,
+}
+
 chat_view_destroy :: proc(v: ^Chat_View) {
 	for m in v.messages {
 		destroy_chat_message(m)
@@ -84,6 +91,7 @@ chat_view_destroy :: proc(v: ^Chat_View) {
 	delete(v.messages)
 	delete(v.name_hits)
 	delete(v.image_hits)
+	delete(v.message_hits)
 }
 
 // Adds messages that have just arrived, taking ownership. Moderation messages fade
@@ -186,6 +194,16 @@ chat_view_name_at :: proc(v: ^Chat_View, x, y: f32) -> (login: string, found: bo
 	return "", false
 }
 
+// The message at (x, y), if one is drawn there.
+chat_view_message_at :: proc(v: ^Chat_View, x, y: f32) -> (m: ^Chat_Message, found: bool) {
+	for hit in v.message_hits {
+		if in_rect(hit.rect, x, y) && hit.index < len(v.messages) {
+			return &v.messages[hit.index], true
+		}
+	}
+	return nil, false
+}
+
 chat_view_scroll :: proc(v: ^Chat_View, wheel_y, scale: f32) {
 	v.scroll = clamp(v.scroll + wheel_y * CHAT_SCROLL_STEP * scale, 0, v.max_scroll)
 }
@@ -210,6 +228,7 @@ draw_chat_view :: proc(a: ^Assets, v: ^Chat_View, rect: Rect, scale: f32, filter
 
 	clear(&v.name_hits)
 	clear(&v.image_hits)
+	clear(&v.message_hits)
 	clip_begin(r, rect)
 	// Messages are laid out from the newest upwards; `bottom` is the next one's
 	// bottom edge.
@@ -233,6 +252,7 @@ draw_chat_view :: proc(a: ^Assets, v: ^Chat_View, rect: Rect, scale: f32, filter
 				draw_rect(r, {rect.x, top - gap / 2, rect.w, layout.height + gap}, CHAT_MENTION_BACKGROUND)
 			}
 			draw_message(a, v, m, layout, rect.x + pad, top)
+			append(&v.message_hits, Message_Hit{{rect.x, top - gap / 2, rect.w, layout.height + gap}, i})
 		}
 		total += layout.height + gap
 		bottom = top - gap

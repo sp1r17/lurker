@@ -445,6 +445,12 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 			redraw^ = true
 			return true
 		}
+		// A right-click on a chat message replies to it.
+		if e.button.button == sdl.BUTTON_RIGHT && app.screen == .Watch {
+			watch_right_click(app, e.button.x * density, e.button.y * density)
+			redraw^ = true
+			return true
+		}
 		if e.button.button != sdl.BUTTON_LEFT {
 			return true
 		}

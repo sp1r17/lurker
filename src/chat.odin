@@ -34,7 +34,7 @@ Chat :: struct {
 	mutex:      sync.Mutex,
 	incoming:   [dynamic]Chat_Message,
 	// Messages to send, from chat_send. Guarded by mutex.
-	outgoing:   [dynamic]string,
+	outgoing:   [dynamic]Outgoing,
 	// The channel's user ID, from ROOMSTATE; "" until joined. Guarded by mutex.
 	room_id:    string,
 	// The tags of the last USERSTATE (our name, colour and badges in this channel),
@@ -53,13 +53,48 @@ chat_start :: proc(chat: ^Chat, channel: string, wake_event: u32, login := "", t
 	chat.thread = thread.create_and_start_with_poly_data(chat, chat_thread, context)
 }
 
-// Queues a message to send. Line breaks become spaces: one could otherwise end the
-// IRC line and smuggle in a command of its own.
-chat_send :: proc(chat: ^Chat, text: string) {
+// A message waiting to be sent. Owned.
+Outgoing :: struct {
+	text:     string,
+	// For a reply: the tag that threads it, and the tags that show our copy as a
+	// reply (see own_message). Empty otherwise.
+	reply_tag:  string,
+	reply_echo: string,
+}
+
+// What a message replies to: another message's ID, and its sender and text.
+Chat_Reply :: struct {
+	id, login, name, body: string,
+}
+
+// Queues a message to send, as a reply to `reply` if its ID isn't "". Line breaks
+// become spaces: one could otherwise end the IRC line and smuggle in a command of
+// its own.
+chat_send :: proc(chat: ^Chat, text: string, reply := Chat_Reply{}) {
 	line, _ := strings.replace_all(text, "\r", " ", context.temp_allocator)
 	line, _ = strings.replace_all(line, "\n", " ", context.temp_allocator)
+	out := Outgoing {
+		text = strings.clone(line),
+	}
+	// Twitch's message IDs are UUIDs; anything else isn't sent, so it can't add tags.
+	if reply.id != "" && strings.trim_left(reply.id, "0123456789abcdef-") == "" {
+		out.reply_tag = fmt.aprintf("@reply-parent-msg-id=%s ", reply.id)
+		out.reply_echo = fmt.aprintf(
+			"reply-parent-display-name=%s;reply-parent-user-login=%s;reply-parent-msg-body=%s",
+			escape_tag(reply.name),
+			escape_tag(reply.login),
+			escape_tag(reply.body),
+		)
+	}
 	sync.guard(&chat.mutex)
-	append(&chat.outgoing, strings.clone(line))
+	append(&chat.outgoing, out)
+}
+
+@(private = "file")
+destroy_outgoing :: proc(out: Outgoing) {
+	delete(out.text)
+	delete(out.reply_tag)
+	delete(out.reply_echo)
 }
 
 chat_stop :: proc(chat: ^Chat) {
@@ -70,8 +105,8 @@ chat_stop :: proc(chat: ^Chat) {
 		destroy_chat_message(m)
 	}
 	delete(chat.incoming)
-	for line in chat.outgoing {
-		delete(line)
+	for out in chat.outgoing {
+		destroy_outgoing(out)
 	}
 	delete(chat.outgoing)
 	delete(chat.room_id)
@@ -275,23 +310,27 @@ handle_payload :: proc(chat: ^Chat, h: ^curl.CURL, payload: string) -> bool {
 // messages back. Returns false if the connection failed.
 @(private = "file")
 send_outgoing :: proc(chat: ^Chat, h: ^curl.CURL) -> bool {
-	lines: [dynamic]string
+	lines: [dynamic]Outgoing
 	defer delete(lines)
 	{
 		sync.guard(&chat.mutex)
 		lines, chat.outgoing = chat.outgoing, {}
 	}
-	defer for line in lines {
-		delete(line)
+	defer for out in lines {
+		destroy_outgoing(out)
 	}
 	if chat.token == "" {
 		return true
 	}
-	for text in lines {
-		if !send_line(h, fmt.tprintf("PRIVMSG #%s :%s", chat.channel, text)) {
+	for out in lines {
+		if !send_line(h, fmt.tprintf("%sPRIVMSG #%s :%s", out.reply_tag, chat.channel, out.text)) {
 			return false
 		}
-		chat_post(chat, own_message(chat.login, chat.channel, chat.user_tags, text))
+		tags := chat.user_tags
+		if out.reply_echo != "" {
+			tags = strings.join({chat.user_tags, out.reply_echo}, ";", context.temp_allocator) if tags != "" else out.reply_echo
+		}
+		chat_post(chat, own_message(chat.login, chat.channel, tags, out.text))
 	}
 	return true
 }

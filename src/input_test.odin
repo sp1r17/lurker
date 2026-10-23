@@ -1,6 +1,7 @@
 package app
 
 import "core:strings"
+import "core:fmt"
 import "core:testing"
 
 @(test)
@@ -95,4 +96,18 @@ selection_replaces_and_deletes :: proc(t: ^testing.T) {
 	input_move(&ti, .Char, forward = false)
 	testing.expect_value(t, ti.cursor, 0)
 	testing.expect_value(t, input_selected_text(&ti), "")
+}
+
+@(test)
+own_replies_show_what_they_answer :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	echo := fmt.tprintf(
+		"color=#00FF00;display-name=Me;reply-parent-display-name=%s;reply-parent-user-login=foo;reply-parent-msg-body=%s",
+		escape_tag("Foo"),
+		escape_tag(`is it; live? \o/`),
+	)
+	m := own_message("me", "chan", echo, "@Foo yes")
+	defer destroy_chat_message(m)
+	testing.expect_value(t, m.reply, `Replying to @Foo: is it; live? \o/`)
+	testing.expect_value(t, m.fragments[0].text, "yes")
 }

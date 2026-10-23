@@ -38,6 +38,12 @@ Chat_Pane :: struct {
 	picker_selected:  int,
 	picker_dismissed: int,
 	picker_rows:      [dynamic]Rect,
+	// The message being replied to (right-click), shown above the chat box: its ID
+	// is "" when not replying. Owned. And from the last draw, the bar and its
+	// close button.
+	reply:            Chat_Reply,
+	reply_rect:       Rect,
+	reply_close:      Rect,
 }
 
 // The two text boxes in a chat pane.
@@ -83,6 +89,7 @@ pane_destroy :: proc(app: ^App, p: ^Chat_Pane) {
 	delete(p.room_id)
 	delete(p.channel)
 	delete(p.picker_rows)
+	pane_reply_cancel(p)
 	free(p)
 }
 
@@ -135,7 +142,14 @@ pane_layout :: proc(app: ^App, p: ^Chat_Pane, rect: Rect) {
 		p.search_rect = {}
 	}
 	p.input_rect = {rect.x + pad, rect.y + rect.h - pad - box_h, rect.w - 2 * pad, box_h}
-	p.messages_rect = {rect.x, top, rect.w, p.input_rect.y - pad - top}
+	bottom := p.input_rect.y - pad
+	p.reply_rect = {}
+	if p.reply.id != "" {
+		reply_h := line_height(&app.assets.renderer, .Regular, CHAT_FONT_SIZE * scale) + pad
+		p.reply_rect = {p.input_rect.x, p.input_rect.y - reply_h, p.input_rect.w, reply_h}
+		bottom = p.reply_rect.y - pad / 2
+	}
+	p.messages_rect = {rect.x, top, rect.w, bottom - top}
 }
 
 draw_pane :: proc(app: ^App, p: ^Chat_Pane, focused: bool) {
@@ -164,7 +178,11 @@ draw_pane :: proc(app: ^App, p: ^Chat_Pane, focused: bool) {
 	hint := "Channel name, then Enter (Esc to cancel)"
 	if p.channel != "" {
 		hint = "Send a message (Enter)" if app.signed_in else "Sign in to chat"
+		if p.reply.id != "" {
+			hint = "Reply (Enter, or Esc to cancel)"
+		}
 	}
+	draw_reply_bar(app, p)
 	draw_box(app, p, .Chat, p.input_rect, hint)
 	draw_emote_picker(app, p)
 	if p.searching {
@@ -289,6 +307,14 @@ pane_click :: proc(app: ^App, p: ^Chat_Pane, x, y: f32) {
 	if emote_picker_click(app, p, x, y) {
 		return
 	}
+	if p.reply_close.w > 0 && in_rect(p.reply_close, x, y) {
+		pane_reply_cancel(p)
+		return
+	}
+	if p.reply_rect.w > 0 && in_rect(p.reply_rect, x, y) {
+		box_focus(app, p, .Chat)
+		return
+	}
 	if in_rect(p.input_rect, x, y) {
 		box_focus(app, p, .Chat)
 		return
@@ -332,6 +358,9 @@ pane_input_key :: proc(app: ^App, key: sdl.KeyboardEvent) {
 	switch key.key {
 	case sdl.K_ESCAPE:
 		switch {
+		case box == .Chat && p.reply.id != "":
+			// Stops replying, still typing.
+			pane_reply_cancel(p)
 		case box == .Search:
 			search_close(app, p)
 		case p.channel == "":
@@ -513,8 +542,77 @@ pane_send :: proc(app: ^App, p: ^Chat_Pane) {
 		return
 	}
 	append(&w.sent_at, now)
-	chat_send(p.chat, line)
+	if p.reply.id != "" && !strings.has_prefix(line, "\x01") {
+		// As twitch.tv does, for chats that don't show replies.
+		mention := strings.concatenate({"@", p.reply.name, " "}, context.temp_allocator)
+		if !strings.has_prefix(strings.to_lower(line, context.temp_allocator), strings.to_lower(mention, context.temp_allocator)) {
+			line = strings.concatenate({mention, line}, context.temp_allocator)
+		}
+	}
+	chat_send(p.chat, line, p.reply)
+	pane_reply_cancel(p)
 	input_clear(&p.boxes[.Chat])
+}
+
+// Starts a reply to `m` (on a right-click), if it can have one: it's from
+// someone else, with an ID, and there's a sign-in to chat with.
+pane_reply_start :: proc(app: ^App, p: ^Chat_Pane, m: ^Chat_Message) {
+	if !app.signed_in || p.channel == "" || m.id == "" || m.kind == .System || m.deleted {
+		return
+	}
+	pane_reply_cancel(p)
+	name := m.name
+	// "이름 (login)" replies as the login, which everyone can read.
+	if open := strings.index(name, " ("); open >= 0 {
+		name = m.login
+	}
+	body := strings.builder_make(context.temp_allocator)
+	for f in m.fragments {
+		if strings.builder_len(body) > 0 && !f.attached {
+			strings.write_byte(&body, ' ')
+		}
+		strings.write_string(&body, strings.trim_space(f.text))
+	}
+	p.reply = {
+		id    = strings.clone(m.id),
+		login = strings.clone(m.login),
+		name  = strings.clone(name),
+		body  = strings.clone(strings.to_string(body)),
+	}
+	box_focus(app, p, .Chat)
+}
+
+pane_reply_cancel :: proc(p: ^Chat_Pane) {
+	delete(p.reply.id)
+	delete(p.reply.login)
+	delete(p.reply.name)
+	delete(p.reply.body)
+	p.reply = {}
+}
+
+// "Replying to @name: their message" above the chat box, with × to stop.
+@(private = "file")
+draw_reply_bar :: proc(app: ^App, p: ^Chat_Pane) {
+	p.reply_close = {}
+	if p.reply.id == "" || p.reply_rect.w == 0 {
+		return
+	}
+	r := &app.assets.renderer
+	scale := app.scale
+	size := CHAT_FONT_SIZE * scale
+	pad := CHAT_PADDING * scale
+	bar := p.reply_rect
+	draw_rect(r, bar, CHAT_HEADER)
+	draw_rect(r, {bar.x, bar.y, 3 * scale, bar.h}, BROWSE_ACCENT)
+	p.reply_close = {bar.x + bar.w - bar.h, bar.y, bar.h, bar.h}
+	if in_rect(p.reply_close, app.mouse.x, app.mouse.y) {
+		draw_rect(r, p.reply_close, MENU_HOVER)
+	}
+	draw_centered(r, .Bold, size, p.reply_close, "×", CHAT_TEXT)
+	lh := line_height(r, .Regular, size)
+	label := fmt.tprintf("Replying to @%s: %s", p.reply.name, p.reply.body)
+	tx := bar.x + pad
+	draw_text(r, .Regular, size, tx, bar.y + (bar.h - lh) / 2, fit_text(r, .Regular, size, label, p.reply_close.x - tx - pad / 2), CHAT_SYSTEM_TEXT)
 }
 
 // Shows a message from the app in the pane's chat.
