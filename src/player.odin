@@ -1,5 +1,6 @@
 package app
 
+import "core:fmt"
 import "core:log"
 import "core:strings"
 import "mpv"
@@ -101,6 +102,25 @@ player_load :: proc(p: ^Player, url: string, low_latency := false) {
 	} else {
 		player_command(p, {"loadfile", curl})
 	}
+}
+
+// Plays `url` from `start` seconds in (for a past broadcast).
+player_load_at :: proc(p: ^Player, url: string, start: f64) {
+	curl := strings.clone_to_cstring(url, context.temp_allocator)
+	options := strings.clone_to_cstring(fmt.tprintf("start=%.1f", start), context.temp_allocator)
+	player_command(p, {"loadfile", curl, "replace", "-1", options})
+}
+
+// A number mpv knows about what's playing ("time-pos", "duration"), if it has one.
+player_number :: proc(p: ^Player, name: cstring) -> (value: f64, ok: bool) {
+	ok = mpv.get_property(p.handle, name, .Double, &value) >= 0
+	return
+}
+
+// Whether mpv is paused.
+player_paused :: proc(p: ^Player) -> bool {
+	flag: i32
+	return mpv.get_property(p.handle, "pause", .Flag, &flag) >= 0 && flag != 0
 }
 
 player_command :: proc(p: ^Player, args: []cstring) {

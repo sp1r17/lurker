@@ -87,6 +87,15 @@ Watch :: struct {
 	follow_pending:   bool,
 	unfollow_armed:   bool,
 	follow_button:    Rect,
+	// The channel's last broadcast (owned), looked up once it's offline; whether
+	// it's what's playing, and whether its address is being looked up. From the
+	// last draw: the button to watch it, and its seek bar.
+	vod:              Vod,
+	vod_state:        Vod_State,
+	playing_vod:      bool,
+	vod_pending:      bool,
+	vod_button:       Rect,
+	seek_bar:         Rect,
 	// From the last draw, in pixels: the video, the header button that hides the
 	// chats, and the tab that shows them again (zero size when not shown).
 	video_rect:      Rect,
@@ -154,6 +163,7 @@ watch_stop :: proc(app: ^App) {
 	}
 	delete(w.channel)
 	delete(w.channel_id)
+	destroy_vod(w.vod)
 	w^ = {}
 	app.session += 1
 	set_title(app, "")
@@ -250,6 +260,11 @@ watch_toggle_low_latency :: proc(app: ^App) {
 
 @(private = "file")
 restart_stream :: proc(app: ^App) {
+	if app.watch.playing_vod {
+		// Picks up where it was, in the new quality.
+		watch_play_vod(app, vod_position(app))
+		return
+	}
 	player_command(&app.player, {"stop"})
 	streamlink_stop(&app.watch.streamlink)
 	start_stream(app, signed = app.signed_in)
@@ -282,6 +297,9 @@ on_controls :: proc(app: ^App, x, y: f32) -> bool {
 	if w.follow_button.w > 0 && in_rect(w.follow_button, x, y) {
 		return true
 	}
+	if (w.seek_bar.w > 0 && in_rect(w.seek_bar, x, y)) || (w.vod_button.w > 0 && in_rect(w.vod_button, x, y)) {
+		return true
+	}
 	if w.quality_menu {
 		for item in w.quality_items {
 			if in_rect(item, x, y) {
@@ -300,6 +318,9 @@ on_controls :: proc(app: ^App, x, y: f32) -> bool {
 @(private = "file")
 controls_click :: proc(app: ^App, x, y: f32) -> bool {
 	w := &app.watch
+	if !w.quality_menu && vod_click(app, x, y) {
+		return true
+	}
 	if w.quality_menu {
 		for item, q in w.quality_items {
 			if in_rect(item, x, y) {
@@ -364,6 +385,7 @@ draw_controls :: proc(app: ^App) {
 	stroke := max(1.5, 2 * scale * r.text_scale)
 	draw_line(r, ax, ay, ax + arrow / 2, ay + arrow / 2, stroke, BROWSE_TEXT)
 	draw_line(r, ax + arrow / 2, ay + arrow / 2, ax + arrow, ay, stroke, BROWSE_TEXT)
+	draw_vod_seek(app, w.quality_button.x)
 	if !w.quality_menu {
 		return
 	}
@@ -450,8 +472,10 @@ watch_stream_ended :: proc(app: ^App) -> bool {
 	switch outcome {
 	case .None, .Ended:
 		w.status = .Ended
+		vod_lookup(app)
 	case .Offline:
 		w.status = .Offline
+		vod_lookup(app)
 	case .Streamlink_Failed:
 		if w.signed_stream && w.status == .Starting {
 			// Twitch may refuse the sign-in for playback; watching without it beats
@@ -523,9 +547,13 @@ watch_key :: proc(app: ^App, key: sdl.KeyboardEvent) -> bool {
 	case sdl.K_C:
 		watch_show_chat(app, !w.show_chat)
 	case sdl.K_RETURN, sdl.K_KP_ENTER:
-		box_focus(app, focused, .Chat)
+		if (w.status == .Offline || w.status == .Ended) && w.vod_state == .Found {
+			watch_play_vod(app)
+		} else {
+			box_focus(app, focused, .Chat)
+		}
 	case:
-		return false
+		return vod_key(app, key)
 	}
 	return true
 }
@@ -709,16 +737,23 @@ draw_watch :: proc(app: ^App) {
 			draw_image(&a.renderer, app.player.texture, video)
 		}
 	case .Starting:
-		draw_centered(&a.renderer, .Regular, text_size, video, fmt.tprintf("Loading %s...", w.channel), BROWSE_DIM_TEXT)
+		loading := "Loading the last broadcast..." if w.playing_vod else fmt.tprintf("Loading %s...", w.channel)
+		draw_centered(&a.renderer, .Regular, text_size, video, loading, BROWSE_DIM_TEXT)
 	case .Ended:
-		draw_centered(&a.renderer, .Regular, text_size, video, "The stream has ended. Esc to go back.", BROWSE_DIM_TEXT)
+		ended := "That's the end of the broadcast. Esc to go back." if w.playing_vod else "The stream has ended. Esc to go back."
+		draw_centered(&a.renderer, .Regular, text_size, video, ended, BROWSE_DIM_TEXT)
+		draw_vod_offer(app, video)
 	case .Offline:
 		draw_centered(&a.renderer, .Regular, text_size, video, fmt.tprintf("%s is offline. Esc to go back.", w.channel), BROWSE_DIM_TEXT)
+		draw_vod_offer(app, video)
 	case .Failed:
 		draw_centered(&a.renderer, .Regular, text_size, video, "Couldn't load the stream. Esc to go back.", BROWSE_DIM_TEXT)
 	}
 	r := &a.renderer
 	scale := app.scale
+	if w.status != .Offline && w.status != .Ended {
+		w.vod_button = {}
+	}
 	draw_stream_info(app)
 	draw_volume(app)
 	draw_controls(app)

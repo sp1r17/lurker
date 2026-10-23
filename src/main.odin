@@ -536,6 +536,10 @@ finish_jobs :: proc(app: ^App) {
 			finish_follow_job(app, &p)
 		case Offline_Follows_Job:
 			finish_offline_follows_job(app, &p)
+		case Vod_Job:
+			finish_vod_job(app, &p)
+		case Vod_Url_Job:
+			finish_vod_url_job(app, &p)
 		case User_Emotes_Job:
 			finish_user_emotes_job(app, &p)
 		case Emoji_Job:

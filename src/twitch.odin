@@ -208,8 +208,12 @@ gql_post :: proc(client_id, token, query: string, variables: map[string]string =
 	}
 	headers := []string {
 		strings.concatenate({"Client-Id: ", client_id}, context.temp_allocator),
-		strings.concatenate({"Authorization: OAuth ", token}, context.temp_allocator),
 		"Content-Type: application/json",
+		strings.concatenate({"Authorization: OAuth ", token}, context.temp_allocator),
+	}
+	// Signed out, some lookups still work without it.
+	if token == "" {
+		headers = headers[:2]
 	}
 	res, ok := http_request(GQL_URL, headers, post_body = string(request), allocator = context.temp_allocator)
 	if !ok {
@@ -783,4 +787,85 @@ parse_channel_status_response :: proc(body: []byte) -> (channels: []Followed_Cha
 		append(&list, c)
 	}
 	return list[:], .None
+}
+
+// A past broadcast (VOD).
+Vod :: struct {
+	id:         string,
+	title:      string,
+	game:       string,
+	// RFC 3339.
+	created_at: string,
+	length:     int,
+}
+
+clone_vod :: proc(v: Vod) -> Vod {
+	return {strings.clone(v.id), strings.clone(v.title), strings.clone(v.game), strings.clone(v.created_at), v.length}
+}
+
+destroy_vod :: proc(v: Vod) {
+	delete(v.id)
+	delete(v.title)
+	delete(v.game)
+	delete(v.created_at)
+}
+
+// `login`'s most recent past broadcast, if it has one. Allocated with the temp
+// allocator.
+get_latest_vod :: proc(client_id, token, login: string) -> (vod: Vod, found: bool, err: Twitch_Error) {
+	variables := make(map[string]string, context.temp_allocator)
+	variables["login"] = login
+	body := gql_post(
+		client_id,
+		token,
+		"query($login: String!) { user(login: $login) { videos(first: 1, type: ARCHIVE, sort: TIME) { edges { node { id title lengthSeconds createdAt game { displayName } } } } } }",
+		variables,
+	) or_return
+	return parse_latest_vod_response(body)
+}
+
+parse_latest_vod_response :: proc(body: []byte) -> (vod: Vod, found: bool, err: Twitch_Error) {
+	r: struct {
+		data:   struct {
+			user: Maybe(struct {
+				videos: Maybe(struct {
+					edges: []struct {
+						node: struct {
+							id:            string,
+							title:         string,
+							lengthSeconds: int,
+							createdAt:     string,
+							game:          Maybe(struct {
+								displayName: string,
+							}),
+						},
+					},
+				}),
+			}),
+		},
+		errors: []struct {
+			message: string,
+		},
+	}
+	if json.unmarshal(body, &r, allocator = context.temp_allocator) != nil {
+		return {}, false, .Bad_Json
+	}
+	if len(r.errors) > 0 {
+		log.warnf("GraphQL error: %s", r.errors[0].message)
+		return {}, false, .Bad_Status
+	}
+	user, has_user := r.data.user.?
+	if !has_user {
+		return {}, false, .None
+	}
+	videos, has_videos := user.videos.?
+	if !has_videos || len(videos.edges) == 0 {
+		return {}, false, .None
+	}
+	n := videos.edges[0].node
+	vod = {id = n.id, title = n.title, created_at = n.createdAt, length = n.lengthSeconds}
+	if game, has_game := n.game.?; has_game {
+		vod.game = game.displayName
+	}
+	return vod, true, .None
 }

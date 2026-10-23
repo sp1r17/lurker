@@ -198,3 +198,19 @@ last_live_reads_naturally :: proc(t: ^testing.T) {
 	testing.expect_value(t, channels[0].login, "c")
 	testing.expect_value(t, channels[2].login, "a")
 }
+
+@(test)
+latest_vod_reads :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	body := `{"data":{"user":{"videos":{"edges":[{"node":{"id":"2908012950","title":"SLOPTOBER 21","lengthSeconds":24205,` +
+		`"createdAt":"2026-10-22T22:30:13Z","game":{"displayName":"Games + Demos"}}}]}}}}`
+	vod, found, err := parse_latest_vod_response(transmute([]byte)body)
+	testing.expect_value(t, err, Twitch_Error.None)
+	testing.expect(t, found)
+	testing.expect_value(t, vod.id, "2908012950")
+	testing.expect_value(t, vod.length, 24205)
+	testing.expect_value(t, vod.game, "Games + Demos")
+	_, found, err = parse_latest_vod_response(transmute([]byte)string(`{"data":{"user":{"videos":{"edges":[]}}}}`))
+	testing.expect_value(t, err, Twitch_Error.None)
+	testing.expect(t, !found)
+}

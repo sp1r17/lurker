@@ -28,6 +28,8 @@ Job_Payload :: union {
 	Follow_Job,
 	User_Emotes_Job,
 	Offline_Follows_Job,
+	Vod_Job,
+	Vod_Url_Job,
 	Emoji_Job,
 	Cache_Prune_Job,
 }
@@ -144,6 +146,10 @@ destroy_job :: proc(job: ^Job) {
 		destroy_user_emotes_job(&p)
 	case Offline_Follows_Job:
 		destroy_offline_follows_job(&p)
+	case Vod_Job:
+		destroy_vod_job(&p)
+	case Vod_Url_Job:
+		destroy_vod_url_job(&p)
 	case Emoji_Job:
 		destroy_emoji_job(&p)
 	case Cache_Prune_Job:

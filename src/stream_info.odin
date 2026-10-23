@@ -178,6 +178,15 @@ draw_stream_info :: proc(app: ^App) {
 	name := w.info.user_name if w.has_info && w.info.user_name != "" else w.channel
 	name = fit_text(r, .Bold, name_size, name, right - x)
 	x = draw_text(r, .Bold, name_size, x, bar.y + pad, name, BROWSE_TEXT)
+	title_x := w.back_button.x + w.back_button.w
+	if w.playing_vod {
+		when_ := format_last_live(w.vod.created_at, time.now())
+		past := fmt.tprintf("  ·  Past broadcast, %s", strings.to_lower(when_[len("Live "):], context.temp_allocator) if strings.has_prefix(when_, "Live ") else when_)
+		game_y := bar.y + pad + (name_h - lh) / 2
+		draw_text(r, .Regular, size, x, game_y, fit_text(r, .Regular, size, past, right - x), BROWSE_ACCENT)
+		draw_text_line(&app.assets, .Regular, size, title_x, bar.y + pad + name_h, w.vod.title, BROWSE_DIM_TEXT, right - title_x)
+		return
+	}
 	if !w.has_info {
 		return
 	}
@@ -186,6 +195,5 @@ draw_stream_info :: proc(app: ^App) {
 		game_y := bar.y + pad + (name_h - lh) / 2
 		draw_text(r, .Regular, size, x, game_y, fit_text(r, .Regular, size, game, right - x), BROWSE_ACCENT)
 	}
-	title_x := w.back_button.x + w.back_button.w
 	draw_text_line(&app.assets, .Regular, size, title_x, bar.y + pad + name_h, w.info.title, BROWSE_DIM_TEXT, right - title_x)
 }

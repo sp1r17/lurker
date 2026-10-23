@@ -11,6 +11,15 @@ Render_Context :: struct {}
 
 Error :: distinct c.int
 
+// The property formats used here (mpv_format).
+Format :: enum c.int {
+	None   = 0,
+	String = 1,
+	Flag   = 3,
+	Int64  = 4,
+	Double = 5,
+}
+
 Event_Id :: enum c.int {
 	None               = 0,
 	Shutdown           = 1,
@@ -95,6 +104,7 @@ foreign lib {
 	terminate_destroy :: proc(ctx: ^Handle) ---
 	set_option_string :: proc(ctx: ^Handle, name, data: cstring) -> Error ---
 	set_property_string :: proc(ctx: ^Handle, name, data: cstring) -> Error ---
+	get_property :: proc(ctx: ^Handle, name: cstring, format: Format, data: rawptr) -> Error ---
 	// args is a nil-terminated array.
 	command :: proc(ctx: ^Handle, args: [^]cstring) -> Error ---
 	command_async :: proc(ctx: ^Handle, reply_userdata: u64, args: [^]cstring) -> Error ---
