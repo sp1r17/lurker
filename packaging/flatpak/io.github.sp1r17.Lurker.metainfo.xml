@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.sp1r17.Lurker</id>
+  <name>Lurker</name>
+  <summary>Watch Twitch channels with their chat</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <developer id="io.github.sp1r17">
+    <name>spirit</name>
+  </developer>
+  <description>
+    <p>
+      A native desktop client for watching Twitch. Streams play through mpv,
+      without ads, alongside a chat with 7TV, BTTV and FFZ emotes.
+    </p>
+    <ul>
+      <li>Browse followed channels, top streams and categories</li>
+      <li>Open other channels' chats as splits beside the video</li>
+      <li>Watch past broadcasts with seeking and chat replay</li>
+      <li>Choose the quality, or switch to low latency</li>
+    </ul>
+    <p>Lurker is not affiliated with or endorsed by Twitch.</p>
+  </description>
+  <launchable type="desktop-id">io.github.sp1r17.Lurker.desktop</launchable>
+  <url type="homepage">https://github.com/sp1r17/lurker</url>
+  <url type="bugtracker">https://github.com/sp1r17/lurker/issues</url>
+  <content_rating type="oars-1.1">
+    <content_attribute id="social-chat">intense</content_attribute>
+  </content_rating>
+  <categories>
+    <category>AudioVideo</category>
+    <category>Video</category>
+  </categories>
+  <releases>
+    <release version="0.1.0" date="2026-10-23"/>
+  </releases>
+</component>

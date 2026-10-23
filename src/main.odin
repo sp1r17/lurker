@@ -141,8 +141,10 @@ App :: struct {
 
 // Opens the window on the browse screen, or watching `channel` if it's not "".
 run :: proc(channels: []string, config: Config) -> bool {
-	// Matches the installed lurker.desktop, so the desktop finds its icon and name.
-	sdl.SetHint(sdl.HINT_APP_ID, APP_ID)
+	// Matches the installed desktop file, so the desktop finds its icon and name:
+	// lurker.desktop, or in a Flatpak the one named after its ID.
+	app_id := os.get_env("FLATPAK_ID", context.temp_allocator)
+	sdl.SetHint(sdl.HINT_APP_ID, strings.clone_to_cstring(app_id if app_id != "" else APP_ID, context.temp_allocator))
 	if !sdl.Init({.VIDEO}) {
 		log.errorf("SDL init failed: %s", sdl.GetError())
 		return false

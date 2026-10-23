@@ -1,0 +1,148 @@
+id: io.github.sp1r17.Lurker
+runtime: org.freedesktop.Platform
+runtime-version: '25.08'
+sdk: org.freedesktop.Sdk
+sdk-extensions:
+  # Odin compiles with LLVM, and links with clang.
+  - org.freedesktop.Sdk.Extension.llvm22
+command: lurker
+
+finish-args:
+  - --share=network
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --socket=pulseaudio
+  - --device=dri
+
+cleanup:
+  - /include
+  - /lib/pkgconfig
+  - /lib/cmake
+  - /share/man
+  - /share/doc
+  - '*.a'
+  - '*.la'
+
+modules:
+  # The compiler, only for building Lurker below; removed from the package.
+  - name: odin
+    buildsystem: simple
+    build-options:
+      append-path: /usr/lib/sdk/llvm22/bin
+      prepend-ld-library-path: /usr/lib/sdk/llvm22/lib
+    build-commands:
+      - ./build_odin.sh release
+      - cd vendor/stb/src && sh build_stb.sh
+      - mkdir -p ${FLATPAK_DEST}/odin
+      - cp -r odin base core vendor ${FLATPAK_DEST}/odin/
+    cleanup:
+      - '*'
+    sources:
+      - type: git
+        url: https://github.com/odin-lang/Odin.git
+        tag: dev-2026-10
+        commit: 84bc3fc2100b0f7880a3af37f71bccdcda41c6f9
+      # The SDK's LLVM has no AArch64 or RISC-V backend, and only x86-64 is
+      # built here.
+      - type: patch
+        path: odin-x86-only.patch
+
+  # Newer than the runtime's SDL3 (3.2), which Lurker is written against.
+  - name: sdl3
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DSDL_TESTS=OFF
+      - -DSDL_EXAMPLES=OFF
+    sources:
+      - type: archive
+        url: https://github.com/libsdl-org/SDL/releases/download/release-3.4.18/SDL3-3.4.18.tar.gz
+        sha256: 9c75cf16330322c217dedd2e0609f1124f1b54b8633e763467b4684d0f4334a3
+
+  - name: sdl3-image
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DSDLIMAGE_VENDORED=OFF
+      - -DSDLIMAGE_SAMPLES=OFF
+      - -DSDLIMAGE_TESTS=OFF
+      - -DSDLIMAGE_AVIF=OFF
+      - -DSDLIMAGE_JXL=OFF
+    sources:
+      - type: archive
+        url: https://github.com/libsdl-org/SDL_image/releases/download/release-3.4.8/SDL3_image-3.4.8.tar.gz
+        sha256: e8223b424bc7541cf84ffff5cf7e4f24ec3711c60462cb1bd6dc1d7bd7f25477
+
+  # mpv: libass for subtitles, libplacebo for rendering. Video decoding uses the
+  # runtime's FFmpeg, with H.264 and AAC from its codecs-extra extension.
+  - name: libass
+    buildsystem: meson
+    config-opts:
+      - -Ddefault_library=shared
+    sources:
+      - type: archive
+        url: https://github.com/libass/libass/releases/download/0.17.5/libass-0.17.5.tar.xz
+        sha256: 2dca25c0e0c837ddf00b52011b3f82cac1e4ddd3ad018227806b0c2288864acc
+
+  # Generates libplacebo's OpenGL loader; removed from the package.
+  - python3-jinja2.json
+
+  - name: libplacebo
+    buildsystem: meson
+    config-opts:
+      - -Dvulkan=disabled
+      - -Dopengl=enabled
+      - -Dd3d11=disabled
+      - -Dshaderc=disabled
+      - -Dglslang=disabled
+      - -Ddemos=false
+      - -Dtests=false
+    cleanup:
+      - /lib/python3*
+    sources:
+      - type: git
+        url: https://github.com/haasn/libplacebo.git
+        tag: v7.360.1
+        commit: cee9b076f2c63104ccfd497fa79c39a867293ec4
+
+  - name: mpv
+    buildsystem: meson
+    config-opts:
+      - -Dlibmpv=true
+      - -Dcplayer=false
+      - -Dlua=disabled
+      - -Djavascript=disabled
+      - -Dvulkan=disabled
+      - -Dmanpage-build=disabled
+      - -Dhtml-build=disabled
+      - -Dpdf-build=disabled
+    sources:
+      - type: archive
+        url: https://github.com/mpv-player/mpv/archive/refs/tags/v0.41.0.tar.gz
+        sha256: ee21092a5ee427353392360929dc64645c54479aefdb5babc5cfbb5fad626209
+
+  - python3-streamlink.json
+
+  - name: lurker
+    buildsystem: simple
+    build-options:
+      append-path: /usr/lib/sdk/llvm22/bin:/app/odin
+      prepend-ld-library-path: /usr/lib/sdk/llvm22/lib
+    build-commands:
+      - odin build src -out:lurker -o:speed -no-bounds-check -disable-assert -extra-linker-flags:"-L/app/lib"
+      - install -Dm755 lurker ${FLATPAK_DEST}/bin/lurker
+      - sed -e "s/^Icon=lurker/Icon=${FLATPAK_ID}/" -e "s/^StartupWMClass=lurker/StartupWMClass=${FLATPAK_ID}/"
+        assets/install/lurker.desktop > ${FLATPAK_ID}.desktop
+      - install -Dm644 ${FLATPAK_ID}.desktop ${FLATPAK_DEST}/share/applications/${FLATPAK_ID}.desktop
+      - install -Dm644 assets/install/lurker.svg ${FLATPAK_DEST}/share/icons/hicolor/scalable/apps/${FLATPAK_ID}.svg
+      - install -Dm644 assets/install/lurker.png ${FLATPAK_DEST}/share/icons/hicolor/256x256/apps/${FLATPAK_ID}.png
+      - install -Dm644 assets/install/lurker-24.png ${FLATPAK_DEST}/share/icons/hicolor/24x24/apps/${FLATPAK_ID}.png
+      - install -Dm644 assets/install/lurker-16.png ${FLATPAK_DEST}/share/icons/hicolor/16x16/apps/${FLATPAK_ID}.png
+      - install -Dm644 packaging/flatpak/${FLATPAK_ID}.metainfo.xml ${FLATPAK_DEST}/share/metainfo/${FLATPAK_ID}.metainfo.xml
+    sources:
+      - type: dir
+        path: ../..
+        skip:
+          - build
+          - .flatpak-builder

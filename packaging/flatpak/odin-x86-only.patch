@@ -1,0 +1,43 @@
+--- a/build_odin.sh	2026-10-23 13:26:46.651597639 -0500
++++ b/build_odin.sh	2026-10-23 13:26:46.656462912 -0500
+@@ -125,7 +125,7 @@
+ 	;;
+ Linux)
+ 	CXXFLAGS="$CXXFLAGS $($LLVM_CONFIG --cxxflags --ldflags)"
+-	LDFLAGS="$LDFLAGS -lstdc++ -ldl $($LLVM_CONFIG --libs core native passes arm aarch64 x86 webassembly riscv --system-libs --libfiles)"
++	LDFLAGS="$LDFLAGS -lstdc++ -ldl $($LLVM_CONFIG --libs core native passes arm x86 webassembly --system-libs --libfiles)"
+ 	# Copy libLLVM*.so into current directory for linking
+ 	# NOTE: This is needed by the Linux release pipeline!
+ 	# cp $(readlink -f $($LLVM_CONFIG --libfiles)) ./
+--- a/src/llvm_backend.cpp	2026-10-23 13:26:46.653597649 -0500
++++ b/src/llvm_backend.cpp	2026-10-23 13:26:46.657497728 -0500
+@@ -3502,14 +3502,6 @@
+ 		LLVMInitializeX86AsmParser();
+ 		LLVMInitializeX86Disassembler();
+ 		break;
+-	case TargetArch_arm64:
+-		LLVMInitializeAArch64TargetInfo();
+-		LLVMInitializeAArch64Target();
+-		LLVMInitializeAArch64TargetMC();
+-		LLVMInitializeAArch64AsmPrinter();
+-		LLVMInitializeAArch64AsmParser();
+-		LLVMInitializeAArch64Disassembler();
+-		break;
+ 	case TargetArch_wasm32:
+ 	case TargetArch_wasm64p32:
+ 		LLVMInitializeWebAssemblyTargetInfo();
+@@ -3519,14 +3511,6 @@
+ 		LLVMInitializeWebAssemblyAsmParser();
+ 		LLVMInitializeWebAssemblyDisassembler();
+ 		break;
+-	case TargetArch_riscv64:
+-		LLVMInitializeRISCVTargetInfo();
+-		LLVMInitializeRISCVTarget();
+-		LLVMInitializeRISCVTargetMC();
+-		LLVMInitializeRISCVAsmPrinter();
+-		LLVMInitializeRISCVAsmParser();
+-		LLVMInitializeRISCVDisassembler();
+-		break;
+ 	case TargetArch_arm32:
+ 		LLVMInitializeARMTargetInfo();
+ 		LLVMInitializeARMTarget();
