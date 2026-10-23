@@ -131,6 +131,19 @@ chat_view_add :: proc(v: ^Chat_View, a: ^Assets, scale, width: f32, new_messages
 	return
 }
 
+// Forgets every message (for a past broadcast's chat starting over).
+chat_view_clear :: proc(v: ^Chat_View) {
+	for m in v.messages {
+		destroy_chat_message(m)
+	}
+	clear(&v.messages)
+	clear(&v.name_hits)
+	clear(&v.image_hits)
+	clear(&v.message_hits)
+	v.scroll = 0
+	v.max_scroll = 0
+}
+
 // A parsed chat filter: words the message must contain, and optionally whose it
 // must be ("from:name"). Lowercase, allocated with the temp allocator.
 Chat_Filter :: struct {

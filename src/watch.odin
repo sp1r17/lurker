@@ -96,6 +96,8 @@ Watch :: struct {
 	vod_pending:      bool,
 	vod_button:       Rect,
 	seek_bar:         Rect,
+	// The past broadcast's chat, in place of the live chat while it plays.
+	replay:           Chat_Replay,
 	// From the last draw, in pixels: the video, the header button that hides the
 	// chats, and the tab that shows them again (zero size when not shown).
 	video_rect:      Rect,
@@ -164,6 +166,7 @@ watch_stop :: proc(app: ^App) {
 	delete(w.channel)
 	delete(w.channel_id)
 	destroy_vod(w.vod)
+	replay_destroy(&w.replay)
 	w^ = {}
 	app.session += 1
 	set_title(app, "")

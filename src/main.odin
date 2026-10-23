@@ -244,7 +244,7 @@ run :: proc(channels: []string, config: Config) -> bool {
 		// Wake up for the next animation frame, browse refresh or sign-in poll,
 		// whichever is due first.
 		wait := a.next_frame_ms if a.next_frame_ms >= 0 else -1
-		dues := []int{-1, -1, volume_osd_wait(&app), controls_wait(&app), stream_info_tick(&app), stream_end_tick(&app), text_size_osd_wait(&app)}
+		dues := []int{-1, -1, volume_osd_wait(&app), controls_wait(&app), stream_info_tick(&app), stream_end_tick(&app), text_size_osd_wait(&app), replay_tick(&app)}
 		if app.screen == .Browse {
 			dues[0], dues[1] = browse_tick(&app), sign_in_tick(&app)
 		}
@@ -540,6 +540,8 @@ finish_jobs :: proc(app: ^App) {
 			finish_vod_job(app, &p)
 		case Vod_Url_Job:
 			finish_vod_url_job(app, &p)
+		case Vod_Chat_Job:
+			finish_vod_chat_job(app, &p)
 		case User_Emotes_Job:
 			finish_user_emotes_job(app, &p)
 		case Emoji_Job:

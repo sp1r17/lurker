@@ -158,6 +158,7 @@ finish_vod_url_job :: proc(app: ^App, p: ^Vod_Url_Job) {
 		return
 	}
 	player_load_at(&app.player, p.url, p.start)
+	replay_start(app, p.start)
 }
 
 // Where the past broadcast is, in seconds, for picking it up again after a

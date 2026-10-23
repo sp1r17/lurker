@@ -869,3 +869,142 @@ parse_latest_vod_response :: proc(body: []byte) -> (vod: Vod, found: bool, err: 
 	}
 	return vod, true, .None
 }
+
+// A message from a past broadcast's chat, as a chat message, and when in the
+// broadcast it was sent.
+Replay_Message :: struct {
+	offset:  int,
+	message: Chat_Message,
+}
+
+// A batch of past broadcast `vod_id`'s chat (about 30 seconds of it): from
+// `offset` seconds in, or after `cursor` if it isn't "". `next` is the cursor for
+// the batch after ("" at the end). The messages are owned; the rest is
+// allocated with the temp allocator.
+get_vod_comments :: proc(
+	client_id, token, vod_id: string,
+	offset: int,
+	cursor := "",
+) -> (
+	messages: [dynamic]Replay_Message,
+	next: string,
+	err: Twitch_Error,
+) {
+	FIELDS :: "edges { cursor node { id contentOffsetSeconds commenter { login displayName } message { userColor userBadges { setID version } fragments { text emote { emoteID } } } } } pageInfo { hasNextPage }"
+	variables := make(map[string]string, context.temp_allocator)
+	variables["id"] = vod_id
+	query: string
+	if cursor != "" {
+		variables["cursor"] = cursor
+		query = "query($id: ID!, $cursor: Cursor) { video(id: $id) { comments(after: $cursor) { " + FIELDS + " } } }"
+	} else {
+		// A number, so it can go into the query itself.
+		query = strings.concatenate(
+			{"query($id: ID!) { video(id: $id) { comments(contentOffsetSeconds: ", fmt.tprint(max(offset, 0)), ") { ", FIELDS, " } } }"},
+			context.temp_allocator,
+		)
+	}
+	body := gql_post(client_id, token, query, variables) or_return
+	return parse_vod_comments_response(body)
+}
+
+parse_vod_comments_response :: proc(body: []byte) -> (messages: [dynamic]Replay_Message, next: string, err: Twitch_Error) {
+	r: struct {
+		data:   struct {
+			video: Maybe(struct {
+				comments: Maybe(struct {
+					edges:    []struct {
+						cursor: string,
+						node:   struct {
+							id:                   string,
+							contentOffsetSeconds: int,
+							commenter:            Maybe(struct {
+								login:       string,
+								displayName: string,
+							}),
+							message:              struct {
+								userColor:  string,
+								userBadges: []struct {
+									setID:   string,
+									version: string,
+								},
+								fragments:  []struct {
+									text:  string,
+									emote: Maybe(struct {
+										emoteID: string,
+									}),
+								},
+							},
+						},
+					},
+					pageInfo: struct {
+						hasNextPage: bool,
+					},
+				}),
+			}),
+		},
+		errors: []struct {
+			message: string,
+		},
+	}
+	if json.unmarshal(body, &r, allocator = context.temp_allocator) != nil {
+		return nil, "", .Bad_Json
+	}
+	if len(r.errors) > 0 {
+		log.warnf("GraphQL error: %s", r.errors[0].message)
+		return nil, "", .Bad_Status
+	}
+	video, has_video := r.data.video.?
+	if !has_video {
+		return nil, "", .Bad_Status
+	}
+	comments, has_comments := video.comments.?
+	if !has_comments {
+		return nil, "", .Bad_Status
+	}
+	for e in comments.edges {
+		n := e.node
+		// A deleted account's messages have no sender.
+		commenter := n.commenter.? or_continue
+		name := commenter.displayName if commenter.displayName != "" else commenter.login
+		if strings.to_lower(name, context.temp_allocator) != commenter.login {
+			name = strings.concatenate({name, " (", commenter.login, ")"}, context.temp_allocator)
+		}
+		color, color_ok := parse_hex_color(n.message.userColor)
+		if !color_ok {
+			color = default_name_color(commenter.login)
+		}
+		m := Chat_Message {
+			kind  = .Chat,
+			name  = strings.clone(name),
+			color = readable_on_dark(color),
+			id    = strings.clone(n.id),
+			login = strings.clone(commenter.login),
+		}
+		for b in n.message.userBadges {
+			if b.setID != "" {
+				append(&m.badges, fmt.aprintf("%s/%s", b.setID, b.version))
+			}
+		}
+		for f in n.message.fragments {
+			if emote, is_emote := f.emote.?; is_emote && emote.emoteID != "" {
+				append(
+					&m.fragments,
+					Fragment {
+						kind = .Emote,
+						text = strings.clone(strings.trim_space(f.text)),
+						url_1x = fmt.aprintf(TWITCH_EMOTE_URL, emote.emoteID, "1.0"),
+						url_2x = fmt.aprintf(TWITCH_EMOTE_URL, emote.emoteID, "2.0"),
+					},
+				)
+			} else if f.text != "" {
+				append(&m.fragments, Fragment{kind = .Text, text = strings.clone(f.text)})
+			}
+		}
+		append(&messages, Replay_Message{n.contentOffsetSeconds, m})
+	}
+	if comments.pageInfo.hasNextPage && len(comments.edges) > 0 {
+		next = comments.edges[len(comments.edges) - 1].cursor
+	}
+	return messages, next, .None
+}

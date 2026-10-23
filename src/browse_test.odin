@@ -214,3 +214,31 @@ latest_vod_reads :: proc(t: ^testing.T) {
 	testing.expect_value(t, err, Twitch_Error.None)
 	testing.expect(t, !found)
 }
+
+@(test)
+vod_comments_become_chat_messages :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	body := `{"data":{"video":{"comments":{"edges":[` +
+		`{"cursor":"c1","node":{"id":"a","contentOffsetSeconds":3594,"commenter":{"login":"rocketpenguin","displayName":"rocketpenguin"},` +
+		`"message":{"userColor":"#00FF7F","userBadges":[{"setID":"subscriber","version":"12"},{"setID":"","version":""}],` +
+		`"fragments":[{"text":"hi ","emote":null},{"text":"Kappa","emote":{"emoteID":"25"}}]}}},` +
+		`{"cursor":"c2","node":{"id":"b","contentOffsetSeconds":3600,"commenter":null,"message":{"userColor":null,"userBadges":[],"fragments":[]}}}` +
+		`],"pageInfo":{"hasNextPage":true}}}}}`
+	messages, next, err := parse_vod_comments_response(transmute([]byte)body)
+	defer {
+		for m in messages {
+			destroy_chat_message(m.message)
+		}
+		delete(messages)
+	}
+	testing.expect_value(t, err, Twitch_Error.None)
+	// The deleted account's message is left out.
+	testing.expect_value(t, len(messages), 1)
+	testing.expect_value(t, next, "c2")
+	m := messages[0]
+	testing.expect_value(t, m.offset, 3594)
+	testing.expect_value(t, m.message.badges[0], "subscriber/12")
+	testing.expect_value(t, len(m.message.badges), 1)
+	testing.expect_value(t, m.message.fragments[1].kind, Fragment_Kind.Emote)
+	testing.expect_value(t, m.message.fragments[1].url_1x, "https://static-cdn.jtvnw.net/emoticons/v2/25/default/dark/1.0")
+}

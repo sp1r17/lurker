@@ -105,6 +105,13 @@ pane_chat_arrived :: proc(app: ^App, p: ^Chat_Pane) {
 	}
 	arrived := make([dynamic]Chat_Message, context.temp_allocator)
 	chat_take(p.chat, &arrived)
+	if pane_replaying(app, p) {
+		// A past broadcast's chat is showing instead.
+		for m in arrived {
+			destroy_chat_message(m)
+		}
+		clear(&arrived)
+	}
 	if len(arrived) > 0 {
 		added := chat_view_add(&p.view, &app.assets, app.scale, pane_text_width(app, p), arrived[:], app.auth.login if app.signed_in else "")
 		if !pane_seen(app, p) {
@@ -131,6 +138,12 @@ pane_chat_arrived :: proc(app: ^App, p: ^Chat_Pane) {
 // chats are showing and this one is at its newest messages.
 pane_seen :: proc(app: ^App, p: ^Chat_Pane) -> bool {
 	return app.window_focused && app.watch.show_chat && p.view.scroll == 0
+}
+
+// Whether `p` shows a past broadcast's chat (it's the main chat, during a replay),
+// which can't be sent to.
+pane_replaying :: proc(app: ^App, p: ^Chat_Pane) -> bool {
+	return app.watch.replay.active && len(app.watch.panes) > 0 && app.watch.panes[0] == p
 }
 
 // The width messages wrap to.
@@ -204,6 +217,9 @@ draw_pane :: proc(app: ^App, p: ^Chat_Pane, focused: bool) {
 		hint = "Send a message (Enter)" if app.signed_in else "Sign in to chat"
 		if p.reply.id != "" {
 			hint = "Reply (Enter, or Esc to cancel)"
+		}
+		if pane_replaying(app, p) {
+			hint = "Chat replay: sending is off"
 		}
 	}
 	draw_reply_bar(app, p)
@@ -287,8 +303,9 @@ box_focus :: proc(app: ^App, p: ^Chat_Pane, box: Box) {
 	if !app.watch.show_chat {
 		return
 	}
-	// Chatting needs a sign-in; naming a new split's channel doesn't.
-	if box == .Chat && p.channel != "" && !app.signed_in {
+	// Chatting needs a sign-in; naming a new split's channel doesn't. A replayed
+	// chat can't be sent to.
+	if box == .Chat && p.channel != "" && (!app.signed_in || pane_replaying(app, p)) {
 		return
 	}
 	if current, current_box, typing := focused_box(app); typing {
@@ -586,7 +603,7 @@ pane_send :: proc(app: ^App, p: ^Chat_Pane) {
 // Starts a reply to `m` (on a right-click), if it can have one: it's from
 // someone else, with an ID, and there's a sign-in to chat with.
 pane_reply_start :: proc(app: ^App, p: ^Chat_Pane, m: ^Chat_Message) {
-	if !app.signed_in || p.channel == "" || m.id == "" || m.kind == .System || m.deleted {
+	if pane_replaying(app, p) || !app.signed_in || p.channel == "" || m.id == "" || m.kind == .System || m.deleted {
 		return
 	}
 	pane_reply_cancel(p)
