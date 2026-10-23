@@ -97,8 +97,8 @@ chat_view_destroy :: proc(v: ^Chat_View) {
 // Adds messages that have just arrived, taking ownership. Moderation messages fade
 // what they remove; messages mentioning `self_login` are highlighted. When the view
 // is scrolled up, it moves by the new messages' height so the messages being read
-// stay put.
-chat_view_add :: proc(v: ^Chat_View, a: ^Assets, scale, width: f32, new_messages: []Chat_Message, self_login := "") {
+// stay put. Returns how many of them mention `self_login`.
+chat_view_add :: proc(v: ^Chat_View, a: ^Assets, scale, width: f32, new_messages: []Chat_Message, self_login := "") -> (mentions_added: int) {
 	for m in new_messages {
 		if m.clear != .None {
 			apply_clear(v, m)
@@ -115,6 +115,9 @@ chat_view_add :: proc(v: ^Chat_View, a: ^Assets, scale, width: f32, new_messages
 		apply_third_party_emotes(added, v.emotes, &a.emotes, &a.user_emotes if own else nil)
 		apply_emoji(added, &a.emoji)
 		added.mention = mentions(added, self_login)
+		if added.mention {
+			mentions_added += 1
+		}
 		if v.scroll > 0 {
 			v.scroll += message_layout(a, v.emotes, added, scale, width).height + CHAT_MESSAGE_GAP * scale
 		}
@@ -125,6 +128,7 @@ chat_view_add :: proc(v: ^Chat_View, a: ^Assets, scale, width: f32, new_messages
 		}
 		remove_range(&v.messages, 0, over)
 	}
+	return
 }
 
 // A parsed chat filter: words the message must contain, and optionally whose it

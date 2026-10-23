@@ -730,10 +730,18 @@ draw_watch :: proc(app: ^App) {
 		size := SHOW_CHAT_TAB * scale
 		tab := Rect{video.w - size.x, (video.h - size.y) / 2, size.x, size.y}
 		hovered := in_rect(tab, app.mouse.x, app.mouse.y)
-		if show_tab_hovered(app, video.w) && (controls_visible(app) || hovered) {
+		// Unread mentions keep it showing, with their count.
+		unread := 0
+		for p in w.panes {
+			unread += p.unread_mentions
+		}
+		if unread > 0 || (show_tab_hovered(app, video.w) && (controls_visible(app) || hovered)) {
 			w.show_tab = tab
 			draw_rect(r, w.show_tab, CHAT_TOGGLE_BACKGROUND)
 			draw_centered(r, .Bold, 20 * scale, w.show_tab, "«", BROWSE_TEXT if hovered else BROWSE_DIM_TEXT)
+			if unread > 0 {
+				draw_mention_badge(app, tab.x + tab.w, tab.y - 4 * scale - line_height(r, .Bold, BROWSE_CARD_TEXT_SIZE * scale) / 2, unread)
+			}
 		}
 		return
 	}

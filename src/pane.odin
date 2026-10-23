@@ -44,6 +44,10 @@ Chat_Pane :: struct {
 	reply:            Chat_Reply,
 	reply_rect:       Rect,
 	reply_close:      Rect,
+	// Messages that mentioned the user while they couldn't see them (see
+	// pane_seen), shown as a count on the header; and from the last draw, where.
+	unread_mentions:  int,
+	mention_badge:    Rect,
 }
 
 // The two text boxes in a chat pane.
@@ -102,7 +106,10 @@ pane_chat_arrived :: proc(app: ^App, p: ^Chat_Pane) {
 	arrived := make([dynamic]Chat_Message, context.temp_allocator)
 	chat_take(p.chat, &arrived)
 	if len(arrived) > 0 {
-		chat_view_add(&p.view, &app.assets, app.scale, pane_text_width(app, p), arrived[:], app.auth.login if app.signed_in else "")
+		added := chat_view_add(&p.view, &app.assets, app.scale, pane_text_width(app, p), arrived[:], app.auth.login if app.signed_in else "")
+		if !pane_seen(app, p) {
+			p.unread_mentions += added
+		}
 	}
 	if p.room_id != "" {
 		return
@@ -118,6 +125,12 @@ pane_chat_arrived :: proc(app: ^App, p: ^Chat_Pane) {
 	if app.signed_in {
 		emotes_request_badges(&app.assets.jobs, app.client_id, app.auth, room_id, p.id)
 	}
+}
+
+// Whether new messages in `p` are in front of the user: the window has focus, the
+// chats are showing and this one is at its newest messages.
+pane_seen :: proc(app: ^App, p: ^Chat_Pane) -> bool {
+	return app.window_focused && app.watch.show_chat && p.view.scroll == 0
 }
 
 // The width messages wrap to.
@@ -157,12 +170,23 @@ draw_pane :: proc(app: ^App, p: ^Chat_Pane, focused: bool) {
 	r := &a.renderer
 	scale := app.scale
 	draw_rect(r, p.rect, CHAT_BACKGROUND)
+	if pane_seen(app, p) {
+		p.unread_mentions = 0
+	}
 
-	// Header: the channel, with an accent line on the focused split.
+	// Header: the channel, with an accent line on the focused split, and how many
+	// mentions are unread at its right.
 	draw_rect(r, p.header_rect, CHAT_HEADER)
 	title := p.channel if p.channel != "" else "New split"
 	size := BROWSE_CARD_TEXT_SIZE * scale
-	draw_centered(r, .Bold, size, p.header_rect, fit_text(r, .Bold, size, title, p.header_rect.w - 16 * scale), CHAT_TEXT)
+	p.mention_badge = {}
+	title_room := p.header_rect.w - 16 * scale
+	if p.unread_mentions > 0 {
+		p.mention_badge = draw_mention_badge(app, p.header_rect.x + p.header_rect.w - 6 * scale, p.header_rect.y + p.header_rect.h / 2, p.unread_mentions)
+		// The title stays centred, clear of the badge.
+		title_room = 2 * (p.mention_badge.x - p.header_rect.x - p.header_rect.w / 2) - 8 * scale
+	}
+	draw_centered(r, .Bold, size, p.header_rect, fit_text(r, .Bold, size, title, title_room), CHAT_TEXT)
 	if focused && len(app.watch.panes) > 1 {
 		h := p.header_rect
 		draw_rect(r, {h.x, h.y + h.h - 2 * scale, h.w, 2 * scale}, BROWSE_ACCENT)
@@ -305,6 +329,11 @@ search_close :: proc(app: ^App, p: ^Chat_Pane) {
 // Handles a click inside the pane.
 pane_click :: proc(app: ^App, p: ^Chat_Pane, x, y: f32) {
 	if emote_picker_click(app, p, x, y) {
+		return
+	}
+	// Back to the newest messages, which marks the mentions read.
+	if p.mention_badge.w > 0 && in_rect(p.mention_badge, x, y) {
+		p.view.scroll = 0
 		return
 	}
 	if p.reply_close.w > 0 && in_rect(p.reply_close, x, y) {
@@ -620,4 +649,21 @@ draw_reply_bar :: proc(app: ^App, p: ^Chat_Pane) {
 notice :: proc(app: ^App, p: ^Chat_Pane, text: string) {
 	messages := []Chat_Message{system_message(text)}
 	chat_view_add(&p.view, &app.assets, app.scale, pane_text_width(app, p), messages)
+}
+
+MENTION_BADGE :: Color{0xd0, 0x3a, 0x5c, 255}
+
+// "@3": a count of unread mentions with its right edge at `right`, centred on
+// `mid_y`. Returns where it is.
+draw_mention_badge :: proc(app: ^App, right, mid_y: f32, count: int) -> Rect {
+	r := &app.assets.renderer
+	scale := app.scale
+	size := BROWSE_CARD_TEXT_SIZE * scale
+	label := fmt.tprintf("@%d", count) if count < 100 else "@99+"
+	w := text_width(r, .Bold, size, label) + 12 * scale
+	h := line_height(r, .Bold, size) + 2 * scale
+	badge := Rect{right - w, mid_y - h / 2, w, h}
+	draw_rect(r, badge, MENTION_BADGE)
+	draw_centered(r, .Bold, size, badge, label, BROWSE_TEXT)
+	return badge
 }

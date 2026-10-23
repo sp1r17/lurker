@@ -131,6 +131,9 @@ App :: struct {
 	// scrolling not yet a whole step.
 	text_size_osd_until: int,
 	text_size_wheel:     f32,
+	// Whether the window has the keyboard focus: mentions arriving without it
+	// count as unread.
+	window_focused:      bool,
 }
 
 // Opens the window on the browse screen, or watching `channel` if it's not "".
@@ -180,6 +183,7 @@ run :: proc(channels: []string, config: Config) -> bool {
 	}
 	app.client_id = config.client_id
 	app.browse.hovered = -1
+	app.window_focused = true
 	a := &app.assets
 	if !renderer_init(&a.renderer) {
 		return false
@@ -388,6 +392,9 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 			}
 			redraw^ = true
 		}
+	case e.type == .WINDOW_FOCUS_GAINED || e.type == .WINDOW_FOCUS_LOST:
+		app.window_focused = e.type == .WINDOW_FOCUS_GAINED
+		redraw^ = true
 	case e.type == .WINDOW_MOUSE_LEAVE:
 		// Hover states and the video's controls go with the mouse.
 		app.mouse = {-1, -1}
