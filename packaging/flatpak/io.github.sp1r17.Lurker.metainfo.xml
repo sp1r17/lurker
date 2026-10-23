@@ -4,6 +4,7 @@
   <name>Lurker</name>
   <summary>Watch Twitch channels with their chat</summary>
   <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
   <developer id="io.github.sp1r17">
     <name>spirit</name>
   </developer>

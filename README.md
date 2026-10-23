@@ -111,8 +111,12 @@ Some features use Twitch's internal GraphQL API, which Twitch can change without
 notice: following, followed categories, offline channels, past broadcasts and
 chat replay, and your own Twitch emotes in the picker.
 
-## Acknowledgements
+## License
+
+Lurker is released under the [MIT License](LICENSE). The Flatpak also contains
+mpv and other libraries under their own licenses, some of them GPL.
 
 Text is set in [Noto Sans](https://fonts.google.com/noto/specimen/Noto+Sans),
 licensed under the SIL Open Font License (`assets/fonts/noto_sans/OFL.txt`).
+
 Lurker is not affiliated with or endorsed by Twitch.
