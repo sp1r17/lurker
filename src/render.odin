@@ -12,23 +12,6 @@ FONT_REGULAR_DATA :: #load("../assets/fonts/noto_sans/NotoSans-Regular.ttf")
 FONT_BOLD_DATA :: #load("../assets/fonts/noto_sans/NotoSans-Bold.ttf")
 FONT_ATLAS_SIZE :: 1024
 
-// System fonts tried, in order, for characters Noto Sans lacks; missing ones are
-// skipped. stb_truetype can't read variable CJK fonts (Fedora's default
-// NotoSansCJK-VF.ttc) or colour emoji, so these are static and monochrome.
-FALLBACK_FONTS := [?]string {
-	"/usr/share/fonts/google-noto-emoji-fonts/NotoEmoji-Regular.ttf",
-	"/usr/share/fonts/google-noto/NotoSansSymbols2-Regular.ttf",
-	// CJK. Static Noto Sans CJK covers all of it: Fedora's google-noto-sans-cjk-fonts,
-	// Arch's noto-fonts-cjk, Debian's fonts-noto-cjk.
-	"/usr/share/fonts/google-noto-sans-cjk-fonts/NotoSansCJK-Regular.ttc",
-	"/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
-	"/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-	"/usr/share/fonts/wqy-microhei/wqy-microhei.ttc",
-	// Japanese and Chinese, but hardly any Korean; often installed already.
-	"/usr/share/fonts/google-droid-sans-fonts/DroidSansFallbackFull.ttf",
-	"/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
-}
-
 Font :: enum {
 	Regular,
 	Bold,
@@ -128,8 +111,10 @@ renderer_init :: proc(r: ^Renderer) -> bool {
 	fs.Init(&r.fonts, FONT_ATLAS_SIZE, FONT_ATLAS_SIZE, .TOPLEFT)
 	r.font_ids[.Regular] = fs.AddFontMem(&r.fonts, "regular", FONT_REGULAR_DATA, false)
 	r.font_ids[.Bold] = fs.AddFontMem(&r.fonts, "bold", FONT_BOLD_DATA, false)
-	for path in FALLBACK_FONTS {
-		add_fallback_font(r, path)
+	// For what Noto Sans lacks: emoji, symbols, CJK. Each platform picks its own
+	// (fonts_linux.odin).
+	for file in fallback_font_files() {
+		add_fallback_font(r, file)
 	}
 	fs.SetAlignVertical(&r.fonts, .TOP)
 	gl.GenTextures(1, &r.font_texture)
@@ -138,19 +123,21 @@ renderer_init :: proc(r: ^Renderer) -> bool {
 }
 
 @(private = "file")
-add_fallback_font :: proc(r: ^Renderer, path: string) {
-	data, err := os.read_entire_file(path, context.allocator)
+add_fallback_font :: proc(r: ^Renderer, file: Font_File) {
+	data, err := os.read_entire_file(file.path, context.allocator)
 	if err != nil {
 		return
 	}
 	// fontstash doesn't check that a font loads, and using one that didn't crashes.
 	info: stbtt.fontinfo
-	if !stbtt.InitFont(&info, raw_data(data), stbtt.GetFontOffsetForIndex(raw_data(data), 0)) {
-		log.warnf("can't use fallback font %s", path)
+	offset := stbtt.GetFontOffsetForIndex(raw_data(data), i32(file.index))
+	if offset < 0 || !stbtt.InitFont(&info, raw_data(data), offset) {
+		log.warnf("can't use fallback font %s", file.path)
 		delete(data)
 		return
 	}
-	id := fs.AddFontMem(&r.fonts, path, data, true)
+	log.infof("fallback font: %s", file.path)
+	id := fs.AddFontMem(&r.fonts, file.path, data, true, file.index)
 	for base in r.font_ids {
 		fs.AddFallbackFont(&r.fonts, base, id)
 	}
