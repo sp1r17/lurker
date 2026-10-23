@@ -3,19 +3,12 @@ package app
 import "core:testing"
 
 @(test)
-config_lowercases_channels_and_defaults_poll :: proc(t: ^testing.T) {
-	c, err := parse_config(transmute([]byte)string(`{"channels": ["Shroud", "lirik"]}`))
+config_reads_client_id :: proc(t: ^testing.T) {
+	c, err := parse_config(transmute([]byte)string(`{"client_id": "abc"}`))
 	defer destroy_config(c)
 	testing.expect_value(t, err, Config_Error.None)
-	testing.expect_value(t, c.channels[0], "shroud")
-	testing.expect_value(t, c.poll_seconds, 60)
-}
-
-@(test)
-config_rejects_bad_channels :: proc(t: ^testing.T) {
-	_, err := parse_config(transmute([]byte)string(`{"channels": ["a&first=1"]}`))
-	testing.expect_value(t, err, Config_Error.Bad_Channel)
-	_, err = parse_config(transmute([]byte)string(`{"channels": `))
+	testing.expect_value(t, c.client_id, "abc")
+	_, err = parse_config(transmute([]byte)string(`{"client_id": `))
 	testing.expect_value(t, err, Config_Error.Bad_Json)
 }
 
@@ -24,7 +17,6 @@ config_defaults_when_empty :: proc(t: ^testing.T) {
 	c, err := parse_config(transmute([]byte)string(`{}`))
 	defer destroy_config(c)
 	testing.expect_value(t, err, Config_Error.None)
-	testing.expect_value(t, len(c.channels), 0)
 	testing.expect_value(t, c.client_id, "")
 }
 

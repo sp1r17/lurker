@@ -17,9 +17,7 @@ DEFAULT_CLIENT_ID :: "ue6666qo983tsx6so1t0vnawi233wa"
 
 Config :: struct {
 	// The client ID for signing in and for Twitch's API.
-	client_id:    string,
-	channels:     []string,
-	poll_seconds: int,
+	client_id: string,
 }
 
 // config.json in the working directory, for running from the source tree, or
@@ -41,7 +39,6 @@ Config_Error :: enum {
 	None,
 	Read_Failed,
 	Bad_Json,
-	Bad_Channel,
 }
 
 // A missing config file means the defaults.
@@ -75,20 +72,6 @@ parse_config :: proc(data: []byte) -> (c: Config, err: Config_Error) {
 		destroy_config(c)
 		return {}, .Bad_Json
 	}
-	// Logins go straight into request URLs, so anything but Twitch's login
-	// characters is rejected. Twitch matches logins in lowercase.
-	for &channel in c.channels {
-		if !valid_login(channel) {
-			destroy_config(c)
-			return {}, .Bad_Channel
-		}
-		lower := strings.to_lower(channel)
-		delete(channel)
-		channel = lower
-	}
-	if c.poll_seconds <= 0 {
-		c.poll_seconds = 60
-	}
 	return c, .None
 }
 
@@ -108,8 +91,4 @@ valid_login :: proc(login: string) -> bool {
 
 destroy_config :: proc(c: Config) {
 	delete(c.client_id)
-	for channel in c.channels {
-		delete(channel)
-	}
-	delete(c.channels)
 }
