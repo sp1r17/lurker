@@ -78,3 +78,14 @@ live_set_reports_changes :: proc(t: ^testing.T) {
 	testing.expect_value(t, changes.went_offline[0], "a")
 	testing.expect_value(t, len(live), 2)
 }
+
+@(test)
+invisible_characters_are_not_drawn :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	testing.expect_value(t, visible_text("PEPW ͏"), "PEPW ")
+	testing.expect_value(t, visible_text("hi \U000E0000"), "hi ")
+	// Emoji sequences keep their joiners.
+	testing.expect_value(t, visible_text("👨‍👩"), "👨‍👩")
+	plain := "nothing to strip"
+	testing.expect(t, raw_data(visible_text(plain)) == raw_data(plain))
+}

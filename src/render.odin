@@ -3,6 +3,7 @@ package app
 import "core:log"
 import "core:math"
 import "core:os"
+import "core:strings"
 import fs "vendor:fontstash"
 import gl "vendor:OpenGL"
 import stbtt "vendor:stb/truetype"
@@ -330,7 +331,7 @@ set_font :: proc(r: ^Renderer, font: Font, size: f32) {
 draw_text :: proc(r: ^Renderer, font: Font, size: f32, x, y: f32, text: string, color: Color) -> f32 {
 	use(r, .Alpha_Texture, r.font_texture)
 	set_font(r, font, size)
-	iter := fs.TextIterInit(&r.fonts, x, y, text)
+	iter := fs.TextIterInit(&r.fonts, x, y, visible_text(text))
 	quad: fs.Quad
 	for fs.TextIterNext(&r.fonts, &iter, &quad) {
 		// Glyphs are rasterized unhinted; drawn at fractional positions, the texture
@@ -344,7 +345,38 @@ draw_text :: proc(r: ^Renderer, font: Font, size: f32, x, y: f32, text: string, 
 
 text_width :: proc(r: ^Renderer, font: Font, size: f32, text: string) -> f32 {
 	set_font(r, font, size)
-	return fs.TextBounds(&r.fonts, text)
+	return fs.TextBounds(&r.fonts, visible_text(text))
+}
+
+// `text` without the invisible characters fonts would draw anyway: Noto Sans
+// shows U+034F as a dotted box, and characters no font has show as boxes. Chat
+// tools add U+034F or U+E0000 to repeat a message past Twitch's duplicate check.
+// The same string when there are none, else allocated with the temp allocator.
+visible_text :: proc(text: string) -> string {
+	invisible :: proc(c: rune) -> bool {
+		switch c {
+		case 0x034F, 0x180E, 0x200B, 0x2060 ..= 0x2064, 0xFEFF, 0xE0000, 0xE0001:
+			return true
+		}
+		return false
+	}
+	found := false
+	for c in text {
+		if invisible(c) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return text
+	}
+	sb := strings.builder_make(context.temp_allocator)
+	for c in text {
+		if !invisible(c) {
+			strings.write_rune(&sb, c)
+		}
+	}
+	return strings.to_string(sb)
 }
 
 line_height :: proc(r: ^Renderer, font: Font, size: f32) -> f32 {
