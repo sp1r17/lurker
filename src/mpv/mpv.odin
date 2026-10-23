@@ -4,7 +4,12 @@ package mpv
 
 import "core:c"
 
-foreign import lib "system:mpv"
+// Windows names the import library itself (build.ps1 makes mpv.lib).
+when ODIN_OS == .Windows {
+	foreign import lib "system:mpv.lib"
+} else {
+	foreign import lib "system:mpv"
+}
 
 Handle :: struct {}
 Render_Context :: struct {}
