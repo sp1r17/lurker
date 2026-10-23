@@ -5,10 +5,13 @@ import "core:log"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
-import "core:sys/posix"
 
 // How long streamlink gets to exit by itself once mpv has reached the stream's end.
 STREAMLINK_EXIT_WAIT_MS :: 2000
+// Where streamlink serves the stream over HTTP (STREAMLINK_SERVES_HTTP): how long
+// it gets to start serving, and how often mpv tries it meanwhile.
+STREAMLINK_HTTP_WAIT_MS :: 15_000
+STREAMLINK_HTTP_RETRY_MS :: 500
 
 Stream_Error :: enum {
 	None,
@@ -18,15 +21,15 @@ Stream_Error :: enum {
 	Ended,
 }
 
-// A streamlink process writing the channel's stream into a pipe that mpv reads.
-// Going through streamlink rather than playing Twitch's URL directly is what skips
-// the ads: streamlink drops ad segments from the stream it passes on.
+// A streamlink process passing the channel's stream on to mpv, through a pipe or
+// a local HTTP server (stream_linux.odin, stream_windows.odin). Going through
+// streamlink rather than playing Twitch's URL directly is what skips the ads:
+// streamlink drops ad segments from the stream it passes on.
 Streamlink :: struct {
 	process: os.Process,
 	// The read end of streamlink's stderr, for why it stopped.
 	errors:  ^os.File,
-	// mpv's own copy of the stream pipe's read end; mpv closes it ("fdclose://").
-	mpv_fd:  posix.FD,
+	output:  Stream_Output,
 	running: bool,
 }
 
@@ -47,7 +50,7 @@ streamlink_start :: proc(
 	ok: bool,
 ) {
 	command := make([dynamic]string, context.temp_allocator)
-	append(&command, "streamlink", "--stdout", "--loglevel", "error")
+	append(&command, streamlink_program(), "--loglevel", "error")
 	if low_latency {
 		append(&command, "--twitch-low-latency")
 	}
@@ -58,44 +61,9 @@ streamlink_start :: proc(
 		}
 		append(&command, "--config", config)
 	}
+	output := stream_output_args(&command) or_return
 	append(&command, fmt.tprintf("https://twitch.tv/%s", channel), QUALITY_STREAMS[quality])
-
-	video_r, video_w, pipe_err := os.pipe()
-	if pipe_err != nil {
-		return {}, false
-	}
-	errors_r, errors_w, errors_err := os.pipe()
-	if errors_err != nil {
-		os.close(video_r)
-		os.close(video_w)
-		return {}, false
-	}
-	process, start_err := os.process_start(
-		{command = command[:], stdout = video_w, stderr = errors_w},
-	)
-	// The child has its own copies of the write ends.
-	os.close(video_w)
-	os.close(errors_w)
-	if start_err != nil {
-		log.errorf("can't run streamlink: %v", start_err)
-		os.close(video_r)
-		os.close(errors_r)
-		return {}, false
-	}
-
-	// mpv reads on its own threads and finishes with the pipe after we've moved on,
-	// so it gets a descriptor of its own to close, and ours closes now. Close-on-exec
-	// keeps it out of later child processes.
-	s.mpv_fd = posix.FD(posix.fcntl(posix.FD(os.fd(video_r)), .DUPFD_CLOEXEC, 0))
-	os.close(video_r)
-	s.process = process
-	s.errors = errors_r
-	s.running = true
-	if s.mpv_fd < 0 {
-		streamlink_stop(&s)
-		return {}, false
-	}
-	return s, true
+	return streamlink_spawn(command[:], output)
 }
 
 // Writes the sign-in for streamlink to a config file only the user can read:
@@ -129,7 +97,7 @@ write_streamlink_config :: proc(client_id, token: string) -> (path: string, ok: 
 // a `token`, subscriber-only broadcasts work too. Allocated with `allocator`.
 streamlink_vod_url :: proc(vod_id: string, quality: Quality, client_id := "", token := "", allocator := context.allocator) -> (url: string, ok: bool) {
 	command := make([dynamic]string, context.temp_allocator)
-	append(&command, "streamlink", "--stream-url", "--loglevel", "error")
+	append(&command, streamlink_program(), "--stream-url", "--loglevel", "error")
 	if token != "" {
 		config := write_streamlink_config(client_id, token) or_return
 		append(&command, "--config", config)
@@ -146,11 +114,6 @@ streamlink_vod_url :: proc(vod_id: string, quality: Quality, client_id := "", to
 		return "", false
 	}
 	return strings.clone(out, allocator), true
-}
-
-// What mpv should play.
-streamlink_url :: proc(s: ^Streamlink) -> string {
-	return fmt.tprintf("fdclose://%d", s.mpv_fd)
 }
 
 // Stops streamlink: asked first, then killed if it doesn't exit in time.

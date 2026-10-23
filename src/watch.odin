@@ -74,6 +74,8 @@ Watch :: struct {
 	// When mpv reached the stream's end (Assets.now_ms), while streamlink is still
 	// exiting; 0 otherwise.
 	ended_at:         int,
+	// When the stream was started, for STREAMLINK_SERVES_HTTP's retries.
+	started_at:       int,
 	quality_menu:     bool,
 	// From the last draw, in pixels (zero size when hidden).
 	quality_button:   Rect,
@@ -225,6 +227,7 @@ start_stream :: proc(app: ^App, signed: bool) {
 	w.status = .Starting
 	w.signed_stream = signed
 	w.ended_at = 0
+	w.started_at = app.assets.now_ms
 	s: Streamlink
 	ok: bool
 	l := &app.layout
@@ -463,6 +466,22 @@ watch_player_events :: proc(app: ^App, events: Player_Events) {
 watch_stream_ended :: proc(app: ^App) -> bool {
 	w := &app.watch
 	outcome, done := streamlink_outcome(&w.streamlink)
+	when STREAMLINK_SERVES_HTTP {
+		if !done && w.status == .Starting && !w.playing_vod && app.assets.now_ms - w.started_at < STREAMLINK_HTTP_WAIT_MS {
+			// mpv got there before streamlink's server was up: try again shortly.
+			if app.assets.now_ms - w.ended_at < STREAMLINK_HTTP_RETRY_MS {
+				return false
+			}
+			w.ended_at = 0
+			player_load(&app.player, streamlink_url(&w.streamlink), app.layout.low_latency)
+			return true
+		}
+		if !done && w.status == .Playing {
+			// The server outlives the broadcast; mpv reaching its end is the end.
+			streamlink_stop(&w.streamlink)
+			outcome, done = .Ended, true
+		}
+	}
 	if !done {
 		if app.assets.now_ms - w.ended_at < STREAMLINK_EXIT_WAIT_MS {
 			return false

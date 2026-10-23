@@ -12,6 +12,12 @@ FONT_REGULAR_DATA :: #load("../assets/fonts/noto_sans/NotoSans-Regular.ttf")
 FONT_BOLD_DATA :: #load("../assets/fonts/noto_sans/NotoSans-Bold.ttf")
 FONT_ATLAS_SIZE :: 1024
 
+// A font file, and which face in it (a .ttc holds several).
+Font_File :: struct {
+	path:  string,
+	index: int,
+}
+
 Font :: enum {
 	Regular,
 	Bold,

@@ -3,12 +3,6 @@ package app
 import "core:c"
 import "core:strings"
 
-// A font file, and which face in it (a .ttc holds several).
-Font_File :: struct {
-	path:  string,
-	index: int,
-}
-
 // What to ask fontconfig for, in order, for characters Noto Sans lacks: within a
 // group the first font that's installed is used. stb_truetype can't read colour
 // emoji or variable fonts (Fedora's default NotoSansCJK-VF.ttc), so these are
