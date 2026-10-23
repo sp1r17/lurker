@@ -23,10 +23,42 @@ jobs:
           run-tests: true
           cache-key: flatpak-builder-${{ github.sha }}
 
-  # A version tag (v1.2.3) publishes its Flatpak on a GitHub release.
+  windows:
+    name: Windows
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # lib.exe, dumpbin.exe and the linker, for build.ps1 and Odin.
+      - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+      - name: Install Odin and Inno Setup
+        run: |
+          Invoke-WebRequest https://github.com/odin-lang/Odin/releases/download/dev-2026-10/odin-windows-amd64-dev-2026-10.zip -OutFile odin.zip
+          Expand-Archive odin.zip "$env:RUNNER_TEMP\odin"
+          (Get-ChildItem "$env:RUNNER_TEMP\odin" -Recurse -Filter odin.exe)[0].DirectoryName >> $env:GITHUB_PATH
+          choco install innosetup -y --no-progress
+      - name: Build
+        run: |
+          $version = if ($env:GITHUB_REF_TYPE -eq "tag") { $env:GITHUB_REF_NAME.TrimStart("v") } else { "dev" }
+          packaging\windows\build.ps1 -Version $version
+      - name: Test
+        run: |
+          # The tests load the same DLLs as the app.
+          $env:PATH = "$PWD\build\windows\dist;$env:PATH"
+          odin test src "-extra-linker-flags:/LIBPATH:$PWD\build\windows\deps\mpv"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: lurker-windows-setup
+          path: build/windows/lurker-*-setup.exe
+
+  # A version tag (v1.2.3) publishes its Flatpak and Windows installer on a GitHub
+  # release.
   release:
     name: Release
-    needs: flatpak
+    needs: [flatpak, windows]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -35,17 +67,21 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: lurker-x86_64.flatpak
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: lurker-windows-setup
       - name: Upload to the release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
-          file="lurker-${TAG#v}-x86_64.flatpak"
-          mv lurker.flatpak "$file"
+          flatpak="lurker-${TAG#v}-x86_64.flatpak"
+          mv lurker.flatpak "$flatpak"
+          setup="lurker-${TAG#v}-x86_64-setup.exe"
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            gh release upload "$TAG" "$file" --clobber --repo "$GITHUB_REPOSITORY"
+            gh release upload "$TAG" "$flatpak" "$setup" --clobber --repo "$GITHUB_REPOSITORY"
           else
-            gh release create "$TAG" "$file" --repo "$GITHUB_REPOSITORY" --verify-tag \
+            gh release create "$TAG" "$flatpak" "$setup" --repo "$GITHUB_REPOSITORY" --verify-tag \
               --title "Lurker ${TAG#v}" \
-              --notes "Install with \`flatpak install --user $file\`. x86-64 only; updates are manual."
+              --notes "Linux: \`flatpak install --user $flatpak\`. Windows: run $setup. x86-64 only; updates are manual."
           fi
