@@ -127,6 +127,10 @@ App :: struct {
 	signed_in:       bool,
 	// Whether the mouse cursor is hidden over idle video (see update_cursor).
 	cursor_hidden:   bool,
+	// Until when (Assets.now_ms) the text size shows after a change, and Ctrl+wheel
+	// scrolling not yet a whole step.
+	text_size_osd_until: int,
+	text_size_wheel:     f32,
 }
 
 // Opens the window on the browse screen, or watching `channel` if it's not "".
@@ -234,7 +238,7 @@ run :: proc(channels: []string, config: Config) -> bool {
 		// Wake up for the next animation frame, browse refresh or sign-in poll,
 		// whichever is due first.
 		wait := a.next_frame_ms if a.next_frame_ms >= 0 else -1
-		dues := []int{-1, -1, volume_osd_wait(&app), controls_wait(&app), stream_info_tick(&app), stream_end_tick(&app)}
+		dues := []int{-1, -1, volume_osd_wait(&app), controls_wait(&app), stream_info_tick(&app), stream_end_tick(&app), text_size_osd_wait(&app)}
 		if app.screen == .Browse {
 			dues[0], dues[1] = browse_tick(&app), sign_in_tick(&app)
 		}
@@ -298,6 +302,8 @@ text_size_key :: proc(app: ^App, key: sdl.KeyboardEvent) -> bool {
 set_text_size :: proc(app: ^App, size: int) {
 	l := &app.layout
 	clamped := clamp(size, MIN_TEXT_SIZE, MAX_TEXT_SIZE)
+	// Shown even at a limit, which says why nothing changed.
+	app.text_size_osd_until = app.assets.now_ms + TEXT_SIZE_OSD_MS
 	if clamped == l.text_size {
 		return
 	}
@@ -404,6 +410,18 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 		}
 	case e.type == .MOUSE_WHEEL:
 		x, y := e.wheel.mouse_x * density, e.wheel.mouse_y * density
+		if sdl.GetModState() & sdl.KMOD_CTRL != {} {
+			// Ctrl+wheel sizes the text, a step per notch (touchpads scroll in
+			// fractions, which add up).
+			app.text_size_wheel += e.wheel.y
+			steps := int(app.text_size_wheel)
+			if steps != 0 {
+				app.text_size_wheel -= f32(steps)
+				set_text_size(app, app.layout.text_size + steps * TEXT_SIZE_STEP)
+			}
+			redraw^ = true
+			break
+		}
 		switch app.screen {
 		case .Watch:
 			watch_scroll(app, x, y, e.wheel.y)
@@ -557,6 +575,7 @@ draw :: proc(app: ^App) {
 		case .Watch:
 			draw_watch(app)
 		}
+		draw_text_size_osd(app, screen)
 		if renderer_end(&a.renderer) {
 			break
 		}
@@ -564,6 +583,37 @@ draw :: proc(app: ^App) {
 	sdl.GL_SwapWindow(app.window)
 	player_report_swap(&app.player)
 	update_cursor(app)
+}
+
+// The text size, in the middle of the window's top, for a moment after it
+// changes, with a bar from MIN_TEXT_SIZE to MAX_TEXT_SIZE.
+draw_text_size_osd :: proc(app: ^App, screen: Rect) {
+	if app.assets.now_ms >= app.text_size_osd_until {
+		return
+	}
+	r := &app.assets.renderer
+	scale := app.scale
+	size := BROWSE_CARD_TEXT_SIZE * scale
+	pad := 10 * scale
+	lh := line_height(r, .Bold, size)
+	label := fmt.tprintf("Text size %d%%", app.layout.text_size)
+	bar_w := max(VOLUME_BAR_WIDTH * scale, text_width(r, .Bold, size, label))
+	panel := Rect{screen.x + (screen.w - bar_w) / 2 - pad, screen.y + 72 * scale, bar_w + 2 * pad, lh + 14 * scale + 2 * pad}
+	draw_rect(r, panel, CHAT_TOGGLE_BACKGROUND)
+	draw_text(r, .Bold, size, panel.x + (panel.w - text_width(r, .Bold, size, label)) / 2, panel.y + pad, label, BROWSE_TEXT)
+	track := Rect{panel.x + pad, panel.y + pad + lh + 6 * scale, bar_w, 6 * scale}
+	draw_rect(r, track, INPUT_BACKGROUND)
+	level := track.w * f32(app.layout.text_size - MIN_TEXT_SIZE) / f32(MAX_TEXT_SIZE - MIN_TEXT_SIZE)
+	draw_rect(r, {track.x, track.y, level, track.h}, BROWSE_ACCENT)
+	// A tick at the normal size.
+	normal := track.w * f32(DEFAULT_TEXT_SIZE - MIN_TEXT_SIZE) / f32(MAX_TEXT_SIZE - MIN_TEXT_SIZE)
+	draw_rect(r, {track.x + normal - scale, track.y - 3 * scale, 2 * scale, track.h + 6 * scale}, BROWSE_TEXT)
+}
+
+// ms until the text size indicator hides, for the main loop's wait; -1 if it isn't showing.
+text_size_osd_wait :: proc(app: ^App) -> int {
+	left := app.text_size_osd_until - app.assets.now_ms
+	return left if left > 0 else -1
 }
 
 // Hides the mouse cursor over the video once it's been still long enough for the

@@ -14,6 +14,8 @@ DEFAULT_TEXT_SIZE :: 100
 MIN_TEXT_SIZE :: 70
 MAX_TEXT_SIZE :: 200
 TEXT_SIZE_STEP :: 10
+// How long the text size shows after a change.
+TEXT_SIZE_OSD_MS :: 1500
 
 // What's kept between runs: the splits last open with each watched channel, so
 // watching it again brings them back, the volume, the quality, whether the
