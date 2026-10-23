@@ -391,8 +391,10 @@ twitch_emote_fragments :: proc(text, emotes_tag: string, out: ^[dynamic]Fragment
 }
 
 // Replaces words in the message's text fragments that name a third-party emote,
-// the channel's (`channel`, may be nil) or global.
-apply_third_party_emotes :: proc(m: ^Chat_Message, channel, global: ^Emotes) {
+// the channel's (`channel`, may be nil) or global. For the user's own messages,
+// which come without Twitch's emote positions, `own` (may be nil) are the
+// user's Twitch emotes, tried first.
+apply_third_party_emotes :: proc(m: ^Chat_Message, channel, global: ^Emotes, own: ^User_Emotes = nil) {
 	if m.kind == .System {
 		return
 	}
@@ -412,7 +414,18 @@ apply_third_party_emotes :: proc(m: ^Chat_Message, channel, global: ^Emotes) {
 		}
 		rest := f.text
 		for word in strings.fields_iterator(&rest) {
-			if emote, source, found := emote_lookup(channel, global, word); found {
+			e: User_Emote
+			is_own := false
+			if own != nil {
+				e, is_own = own[word]
+			}
+			if is_own {
+				flush(&pending, &m.fragments)
+				append(
+					&m.fragments,
+					Fragment{kind = .Emote, text = strings.clone(word), url_1x = strings.clone(e.emote.url_1x), url_2x = strings.clone(e.emote.url_2x)},
+				)
+			} else if emote, source, found := emote_lookup(channel, global, word); found {
 				flush(&pending, &m.fragments)
 				append(
 					&m.fragments,

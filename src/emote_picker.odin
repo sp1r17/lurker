@@ -20,17 +20,19 @@ PICKER_SOURCE_LABELS := [Emote_Source]string {
 // Typing ":" and the start of an emote's name in the chat box lists the emotes it
 // could be, as on twitch.tv and in Chatterino; Tab, Enter or a click puts one in.
 Picker_Match :: struct {
-	// Point into the Emotes they're from, valid until those change.
-	name:   string,
-	emote:  Emote,
-	source: Emote_Source,
+	// Point into the emotes they're from, valid until those change.
+	name:  string,
+	emote: Emote,
+	// Where it's from: "7TV", "moonmoon".
+	label: string,
 }
 
-// The channel's and global emotes whose names start with `query`, then those
-// that contain it elsewhere, ignoring case; shorter names first, so the closest
-// match leads. Where the channel and global sets share a name, the one chat
-// shows wins. Allocated with the temp allocator.
-emote_picker_matches :: proc(channel, global: ^Emotes, query: string) -> []Picker_Match {
+// The user's Twitch emotes they can send in `channel_login`'s chat, then the
+// channel's and global third-party emotes, whose names start with `query`, then
+// those that contain it elsewhere, ignoring case; shorter names first, so the
+// closest match leads. Where sets share a name, the one that's sent wins.
+// Allocated with the temp allocator.
+emote_picker_matches :: proc(user: ^User_Emotes, channel_login: string, channel, global: ^Emotes, query: string) -> []Picker_Match {
 	lower_query := strings.to_lower(query, context.temp_allocator)
 	Ranked :: struct {
 		match:  Picker_Match,
@@ -38,6 +40,17 @@ emote_picker_matches :: proc(channel, global: ^Emotes, query: string) -> []Picke
 	}
 	found := make([dynamic]Ranked, context.temp_allocator)
 	seen := make(map[string]bool, context.temp_allocator)
+	if user != nil {
+		for name, e in user {
+			if !user_emote_usable(e, channel_login) {
+				continue
+			}
+			seen[name] = true
+			if at := strings.index(strings.to_lower(name, context.temp_allocator), lower_query); at >= 0 {
+				append(&found, Ranked{{name, e.emote, e.label}, at == 0})
+			}
+		}
+	}
 	for e in ([]^Emotes{channel, global}) {
 		if e == nil {
 			continue
@@ -53,7 +66,7 @@ emote_picker_matches :: proc(channel, global: ^Emotes, query: string) -> []Picke
 				if at < 0 {
 					continue
 				}
-				append(&found, Ranked{{name, emote, source}, at == 0})
+				append(&found, Ranked{{name, emote, PICKER_SOURCE_LABELS[source]}, at == 0})
 			}
 		}
 	}
@@ -100,7 +113,7 @@ picker_list :: proc(app: ^App, p: ^Chat_Pane) -> (matches: []Picker_Match, start
 	if !open {
 		return nil, 0
 	}
-	return emote_picker_matches(&p.emotes, &app.assets.emotes, query), at
+	return emote_picker_matches(&app.assets.user_emotes, p.channel, &p.emotes, &app.assets.emotes, query), at
 }
 
 // Puts match `i` in place of the ":word" being typed.
@@ -200,7 +213,7 @@ draw_emote_picker :: proc(app: ^App, p: ^Chat_Pane) {
 		ty := row.y + (row.h - lh) / 2
 		room := row.x + row.w - pad - tx
 		// Where it's from, at the right, if the name still fits beside it.
-		label := PICKER_SOURCE_LABELS[m.source]
+		label := m.label
 		label_w := text_width(r, .Regular, size, label) + pad
 		if text_width(r, .Bold, size, m.name) <= room - label_w {
 			draw_text(r, .Regular, size, row.x + row.w - pad - label_w + pad, ty, label, CHAT_SYSTEM_TEXT)

@@ -127,12 +127,32 @@ picker_lists_prefix_matches_first :: proc(t: ^testing.T) {
 	global.sets[.Global_BTTV]["catJAM"] = {url_1x = "gb"}
 	global.sets[.Global_BTTV]["Catdance"] = {}
 	global.sets[.Global_BTTV]["KEKW"] = {}
-	matches := emote_picker_matches(&channel, &global, "CAT")
-	testing.expect_value(t, len(matches), 3)
-	// Prefix matches, shortest first, then the rest.
-	testing.expect_value(t, matches[0].name, "catJAM")
-	testing.expect_value(t, matches[0].emote.url_1x, "c7")
-	testing.expect_value(t, matches[0].source, Emote_Source.Channel_7TV)
-	testing.expect_value(t, matches[1].name, "Catdance")
-	testing.expect_value(t, matches[2].name, "xddCat")
+	user := make(User_Emotes, context.temp_allocator)
+	user["catW"] = {label = "moonmoon"}
+	user["catFollow"] = {owner = "other", follower_only = true}
+	matches := emote_picker_matches(&user, "moonmoon", &channel, &global, "CAT")
+	testing.expect_value(t, len(matches), 4)
+	// Prefix matches, shortest first, then the rest; follower emotes only in
+	// their own channel.
+	testing.expect_value(t, matches[0].name, "catW")
+	testing.expect_value(t, matches[0].label, "moonmoon")
+	testing.expect_value(t, matches[1].name, "catJAM")
+	testing.expect_value(t, matches[1].emote.url_1x, "c7")
+	testing.expect_value(t, matches[1].label, "7TV")
+	testing.expect_value(t, matches[2].name, "Catdance")
+	testing.expect_value(t, matches[3].name, "xddCat")
+}
+
+@(test)
+user_emotes_parse :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	body := `{"data":{"currentUser":{"emoteSets":[` +
+		`{"owner":{"login":"moonmoon"},"emotes":[{"id":"1","token":"moon2L","type":"SUBSCRIPTIONS"}]},` +
+		`{"owner":null,"emotes":[{"id":"2","token":"Kappa","type":"GLOBALS"},{"id":"3","token":"\\:-?\\)","type":"SMILIES"}]}]}}}`
+	emotes, err := parse_user_emotes_response(transmute([]byte)body)
+	testing.expect_value(t, err, Twitch_Error.None)
+	testing.expect_value(t, len(emotes), 2)
+	testing.expect_value(t, emotes[0].owner, "moonmoon")
+	testing.expect_value(t, emotes[1].token, "Kappa")
+	testing.expect_value(t, emotes[1].owner, "")
 }

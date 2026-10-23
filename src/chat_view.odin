@@ -39,6 +39,8 @@ Assets :: struct {
 	images:        Images,
 	jobs:          Jobs,
 	emotes:        Emotes,
+	// The signed-in user's Twitch emotes.
+	user_emotes:   User_Emotes,
 	emoji:         Emoji_Table,
 	// Milliseconds since startup, for animations.
 	now_ms:        int,
@@ -100,7 +102,9 @@ chat_view_add :: proc(v: ^Chat_View, a: ^Assets, scale, width: f32, new_messages
 		}
 		append(&v.messages, m)
 		added := &v.messages[len(v.messages) - 1]
-		apply_third_party_emotes(added, v.emotes, &a.emotes)
+		// Our own messages are the only ones without an ID.
+		own := added.id == "" && added.kind != .System && self_login != "" && added.login == self_login
+		apply_third_party_emotes(added, v.emotes, &a.emotes, &a.user_emotes if own else nil)
 		apply_emoji(added, &a.emoji)
 		added.mention = mentions(added, self_login)
 		if v.scroll > 0 {

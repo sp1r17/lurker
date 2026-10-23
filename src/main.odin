@@ -193,6 +193,7 @@ run :: proc(channels: []string, config: Config) -> bool {
 
 	defer images_destroy(&a.images)
 	defer emotes_destroy(&a.emotes)
+	defer user_emotes_destroy(&a.user_emotes)
 	defer emoji_table_destroy(&a.emoji)
 	jobs_start(&a.jobs, sdl.RegisterEvents(1))
 	defer jobs_stop(&a.jobs)
@@ -209,6 +210,7 @@ run :: proc(channels: []string, config: Config) -> bool {
 	defer if app.signed_in {
 		destroy_auth(app.auth)
 	}
+	user_emotes_request(&app)
 
 	app.layout = layout_load()
 	apply_volume(&app)
@@ -516,6 +518,8 @@ finish_jobs :: proc(app: ^App) {
 			finish_stream_info_job(app, &p)
 		case Follow_Job:
 			finish_follow_job(app, &p)
+		case User_Emotes_Job:
+			finish_user_emotes_job(app, &p)
 		case Emoji_Job:
 			finish_emoji_job(a, &p)
 		case Cache_Prune_Job:

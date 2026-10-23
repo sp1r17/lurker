@@ -74,6 +74,7 @@ sign_out :: proc(app: ^App) {
 	destroy_auth(app.auth)
 	app.auth = {}
 	app.signed_in = false
+	user_emotes_clear(&app.assets.user_emotes)
 	delete_saved_auth()
 	browse_clear(app)
 }
@@ -194,6 +195,7 @@ finish_device_poll_job :: proc(app: ^App, p: ^Device_Poll_Job) {
 		app.signed_in = true
 		save_auth(app.auth)
 		browse_refresh(app)
+		user_emotes_request(app)
 	}
 }
 

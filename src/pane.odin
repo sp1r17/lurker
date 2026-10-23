@@ -453,11 +453,17 @@ paste :: proc(ti: ^Text_Input) {
 	input_insert(ti, text)
 }
 
-// Names Tab can complete: the channel's and global emotes, and everyone who has
+// Names Tab can complete: the user's Twitch emotes, the channel's and global
+// third-party emotes, and everyone who has
 // talked in this chat. Allocated with the temp allocator.
 @(private = "file")
 completion_names :: proc(app: ^App, p: ^Chat_Pane) -> (emote_names, user_names: []string) {
 	emotes := make([dynamic]string, context.temp_allocator)
+	for name, e in app.assets.user_emotes {
+		if user_emote_usable(e, p.channel) {
+			append(&emotes, name)
+		}
+	}
 	for e in ([]^Emotes{&p.emotes, &app.assets.emotes}) {
 		for &set in e.sets {
 			for name in set {

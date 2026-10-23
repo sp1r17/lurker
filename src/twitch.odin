@@ -564,3 +564,69 @@ parse_set_follow_response :: proc(body: []byte) -> Twitch_Error {
 	}
 	return .None
 }
+
+// An emote the signed-in user can use in chat, as GraphQL describes it: its
+// name, ID, type ("SUBSCRIPTIONS", "FOLLOWER", "GLOBALS", ...) and channel.
+Twitch_User_Emote :: struct {
+	token: string,
+	id:    string,
+	type:  string,
+	owner: string,
+}
+
+// The emotes the signed-in user can use: global ones, and those from their
+// subscriptions, follows and the like. Helix needs a scope the sign-in doesn't
+// ask for, so this uses GraphQL. Allocated with the temp allocator.
+get_user_emotes :: proc(client_id, token: string) -> (emotes: []Twitch_User_Emote, err: Twitch_Error) {
+	body := gql_post(client_id, token, "query { currentUser { emoteSets { owner { login } emotes { id token type } } } }") or_return
+	return parse_user_emotes_response(body)
+}
+
+parse_user_emotes_response :: proc(body: []byte) -> (emotes: []Twitch_User_Emote, err: Twitch_Error) {
+	r: struct {
+		data:   struct {
+			currentUser: Maybe(struct {
+				emoteSets: []struct {
+					owner:  Maybe(struct {
+						login: string,
+					}),
+					emotes: []struct {
+						id:    string,
+						token: string,
+						type:  string,
+					},
+				},
+			}),
+		},
+		errors: []struct {
+			message: string,
+		},
+	}
+	if json.unmarshal(body, &r, allocator = context.temp_allocator) != nil {
+		return nil, .Bad_Json
+	}
+	if len(r.errors) > 0 {
+		log.warnf("GraphQL error: %s", r.errors[0].message)
+		return nil, .Bad_Status
+	}
+	user, found := r.data.currentUser.?
+	if !found {
+		return nil, .Unauthorized
+	}
+	list := make([dynamic]Twitch_User_Emote, context.temp_allocator)
+	for set in user.emoteSets {
+		owner := ""
+		if o, has_owner := set.owner.?; has_owner {
+			owner = o.login
+		}
+		for e in set.emotes {
+			// The old smilies, like ":)", are named by patterns ("\:-?\)"): typing the
+			// pattern wouldn't send them.
+			if e.token == "" || strings.contains_rune(e.token, '\\') {
+				continue
+			}
+			append(&list, Twitch_User_Emote{e.token, e.id, e.type, owner})
+		}
+	}
+	return list[:], .None
+}
