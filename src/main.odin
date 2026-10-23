@@ -125,6 +125,8 @@ App :: struct {
 	client_id:       string,
 	auth:            Auth,
 	signed_in:       bool,
+	// Whether the mouse cursor is hidden over idle video (see update_cursor).
+	cursor_hidden:   bool,
 }
 
 // Opens the window on the browse screen, or watching `channel` if it's not "".
@@ -559,4 +561,23 @@ draw :: proc(app: ^App) {
 	}
 	sdl.GL_SwapWindow(app.window)
 	player_report_swap(&app.player)
+	update_cursor(app)
+}
+
+// Hides the mouse cursor over the video once it's been still long enough for the
+// controls to hide, as video players do; moving it brings both back.
+update_cursor :: proc(app: ^App) {
+	hide :=
+		app.screen == .Watch &&
+		!controls_visible(app) &&
+		in_rect(app.watch.video_rect, app.mouse.x, app.mouse.y)
+	if hide == app.cursor_hidden {
+		return
+	}
+	app.cursor_hidden = hide
+	if hide {
+		_ = sdl.HideCursor()
+	} else {
+		_ = sdl.ShowCursor()
+	}
 }
