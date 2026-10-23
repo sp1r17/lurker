@@ -58,6 +58,8 @@ Chat_View :: struct {
 	max_scroll: f32,
 	more_bar:   Rect,
 	name_hits:  [dynamic]Name_Hit,
+	// Badges and emotes on screen, for their tooltips.
+	image_hits: [dynamic]Image_Hit,
 	// How many messages matched the filter.
 	matches:    int,
 }
@@ -68,12 +70,18 @@ Name_Hit :: struct {
 	login: string,
 }
 
+Image_Hit :: struct {
+	rect: Rect,
+	item: Layout_Item,
+}
+
 chat_view_destroy :: proc(v: ^Chat_View) {
 	for m in v.messages {
 		destroy_chat_message(m)
 	}
 	delete(v.messages)
 	delete(v.name_hits)
+	delete(v.image_hits)
 }
 
 // Adds messages that have just arrived, taking ownership. Moderation messages fade
@@ -197,6 +205,7 @@ draw_chat_view :: proc(a: ^Assets, v: ^Chat_View, rect: Rect, scale: f32, filter
 	content_w := rect.w - 2 * pad
 
 	clear(&v.name_hits)
+	clear(&v.image_hits)
 	clip_begin(r, rect)
 	// Messages are laid out from the newest upwards; `bottom` is the next one's
 	// bottom edge.
@@ -262,6 +271,9 @@ draw_message :: proc(a: ^Assets, v: ^Chat_View, m: ^Chat_Message, layout: ^Messa
 		if item.is_name {
 			append(&v.name_hits, Name_Hit{rect, m.login})
 		}
+		if item.hint != .None {
+			append(&v.image_hits, Image_Hit{rect, item})
+		}
 		switch item.kind {
 		case .Text:
 			color := item.color
@@ -296,6 +308,17 @@ Layout_Item :: struct {
 	image:   ^Image,
 	// Part of the sender's name: clicking it opens their user card.
 	is_name: bool,
+	// A badge (`text` is its "set/version") or emote (`text` is its name), which
+	// shows a tooltip when hovered.
+	hint:        Item_Hint,
+	third_party: bool,
+	source:      Emote_Source,
+}
+
+Item_Hint :: enum {
+	None,
+	Badge,
+	Emote,
 }
 
 // A message laid out for one width, scale and text size. Images that finish loading can change
@@ -346,6 +369,7 @@ message_layout :: proc(a: ^Assets, channel: ^Emotes, m: ^Chat_Message, scale, wi
 			continue
 		}
 		put_image(&b, image, BADGE_HEIGHT, 0)
+		hint_last(&b, {hint = .Badge, text = key})
 		b.x += BADGE_GAP * scale
 	}
 
@@ -375,7 +399,8 @@ message_layout :: proc(a: ^Assets, channel: ^Emotes, m: ^Chat_Message, scale, wi
 			case image.state == .Failed:
 				put_words(&b, .Regular, text_color, f.text, f.attached)
 			case f.zero_width && overlay_last(&b, image):
-			// Drawn over the previous emote.
+				// Drawn over the previous emote.
+				hint_last(&b, {hint = .Emote, text = f.text, third_party = f.third_party, source = f.source})
 			case f.emoji:
 				if !f.attached {
 					space(&b, .Regular)
@@ -384,6 +409,7 @@ message_layout :: proc(a: ^Assets, channel: ^Emotes, m: ^Chat_Message, scale, wi
 			case:
 				space(&b, .Regular)
 				put_image(&b, image, EMOTE_HEIGHT, EMOTE_OVERHANG)
+				hint_last(&b, {hint = .Emote, text = f.text, third_party = f.third_party, source = f.source})
 			}
 		}
 	}
@@ -461,6 +487,14 @@ put_image :: proc(b: ^Builder, image: ^Image, height, overhang: f32) {
 	place(b, {kind = .Image, image = image}, size.x, size.y, overhang * b.scale)
 }
 
+// Gives the item just put what its tooltip shows.
+@(private = "file")
+hint_last :: proc(b: ^Builder, hint: Layout_Item) {
+	last := &b.l.items[len(b.l.items) - 1]
+	last.hint, last.text = hint.hint, hint.text
+	last.third_party, last.source = hint.third_party, hint.source
+}
+
 // Puts a zero-width emote over the previous emote on the line. False if there isn't one.
 @(private = "file")
 overlay_last :: proc(b: ^Builder, image: ^Image) -> bool {
@@ -524,4 +558,76 @@ put_word :: proc(b: ^Builder, font: Font, color: Color, word: string) {
 put_text :: proc(b: ^Builder, font: Font, color: Color, text: string) {
 	w := text_width(&b.a.renderer, font, b.size, text)
 	place(b, {kind = .Text, font = font, color = color, text = text, is_name = b.in_name}, w, b.text_h)
+}
+
+CHAT_TOOLTIP_BACKGROUND :: Color{0x0e, 0x0e, 0x10, 245}
+// How tall a hovered emote or badge shows in its tooltip, in logical pixels.
+TOOLTIP_EMOTE_HEIGHT :: 64
+TOOLTIP_BADGE_HEIGHT :: 36
+
+// The tooltip for the badge or emote under (x, y), if any: it bigger, with its
+// name and where it's from, above it (or below, without room), kept inside
+// `bounds`.
+draw_chat_tooltip :: proc(a: ^Assets, v: ^Chat_View, view_rect, bounds: Rect, x, y, scale: f32) {
+	if !in_rect(view_rect, x, y) {
+		return
+	}
+	hit: Image_Hit
+	found := false
+	// The last match is on top: a zero-width emote over the one it covers.
+	for h in v.image_hits {
+		if in_rect(h.rect, x, y) {
+			hit, found = h, true
+		}
+	}
+	if !found {
+		return
+	}
+	item := hit.item
+	title, detail: string
+	height: f32
+	switch item.hint {
+	case .None:
+		return
+	case .Badge:
+		badge, known := badge_lookup(v.emotes, &a.emotes, item.text)
+		title = badge.title if known && badge.title != "" else item.text
+		height = TOOLTIP_BADGE_HEIGHT
+	case .Emote:
+		title, detail = item.text, emote_source_label(item.third_party, item.source)
+		height = TOOLTIP_EMOTE_HEIGHT
+	}
+
+	r := &a.renderer
+	pad := 8 * scale
+	size := CHAT_FONT_SIZE * scale
+	lh := line_height(r, .Regular, size)
+	image_h := height * scale * r.text_scale
+	image_w := image_h * item.rect.w / max(item.rect.h, 1)
+	text_w := max(text_width(r, .Bold, size, title), text_width(r, .Regular, size, detail))
+	box_w := min(max(image_w, text_w) + 2 * pad, bounds.w)
+	lines: f32 = 2 if detail != "" else 1
+	box_h := pad + image_h + pad / 2 + lines * lh + pad
+	box := Rect{hit.rect.x + (hit.rect.w - box_w) / 2, hit.rect.y - box_h - 4 * scale, box_w, box_h}
+	if box.y < bounds.y {
+		box.y = hit.rect.y + hit.rect.h + 4 * scale
+	}
+	box.x = clamp(box.x, bounds.x, bounds.x + bounds.w - box.w)
+	box.y = clamp(box.y, bounds.y, bounds.y + bounds.h - box.h)
+
+	draw_rect(r, box, CHAT_TOOLTIP_BACKGROUND)
+	if item.image != nil && item.image.state == .Ready {
+		texture, next := image_frame(item.image, a.now_ms)
+		draw_image(r, texture, {box.x + (box.w - image_w) / 2, box.y + pad, image_w, image_h})
+		if next >= 0 && (a.next_frame_ms < 0 || next < a.next_frame_ms) {
+			a.next_frame_ms = next
+		}
+	}
+	ty := box.y + pad + image_h + pad / 2
+	inner := box.w - 2 * pad
+	title = fit_text(r, .Bold, size, title, inner)
+	draw_text(r, .Bold, size, box.x + (box.w - text_width(r, .Bold, size, title)) / 2, ty, title, CHAT_TEXT)
+	if detail != "" {
+		draw_text(r, .Regular, size, box.x + (box.w - text_width(r, .Regular, size, detail)) / 2, ty + lh, detail, CHAT_SYSTEM_TEXT)
+	}
 }

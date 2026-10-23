@@ -26,6 +26,8 @@ Emote :: struct {
 Badge :: struct {
 	url_1x: string,
 	url_2x: string,
+	// "Subscriber", "6-Month Subscriber": shown when it's hovered.
+	title:  string,
 }
 
 // Badge lists in lookup order: a channel's own badges (its subscriber badges)
@@ -70,6 +72,7 @@ clear_badges :: proc(badges: ^map[string]Badge) {
 		delete(key)
 		delete(badge.url_1x)
 		delete(badge.url_2x)
+		delete(badge.title)
 	}
 	clear(badges)
 }
@@ -91,18 +94,40 @@ badge_lookup :: proc(channel, global: ^Emotes, key: string) -> (badge: Badge, fo
 
 // Looks in the channel's emotes, then the global ones, each in Emote_Source order.
 // `channel` may be nil.
-emote_lookup :: proc(channel, global: ^Emotes, name: string) -> (emote: Emote, found: bool) {
+emote_lookup :: proc(channel, global: ^Emotes, name: string) -> (emote: Emote, source: Emote_Source, found: bool) {
 	for e in ([]^Emotes{channel, global}) {
 		if e == nil {
 			continue
 		}
-		for &set in e.sets {
+		for &set, s in e.sets {
 			if emote, found = set[name]; found {
-				return
+				return emote, s, true
 			}
 		}
 	}
 	return
+}
+
+// "7TV channel emote", "Twitch emote": where an emote in chat is from.
+emote_source_label :: proc(third_party: bool, source: Emote_Source) -> string {
+	if !third_party {
+		return "Twitch emote"
+	}
+	switch source {
+	case .Channel_7TV:
+		return "7TV channel emote"
+	case .Channel_BTTV:
+		return "BTTV channel emote"
+	case .Channel_FFZ:
+		return "FFZ channel emote"
+	case .Global_7TV:
+		return "7TV global emote"
+	case .Global_BTTV:
+		return "BTTV global emote"
+	case .Global_FFZ:
+		return "FFZ global emote"
+	}
+	return ""
 }
 
 emote_set_url :: proc(source: Emote_Source, room_id: string) -> string {
@@ -329,6 +354,7 @@ destroy_named_badges :: proc(list: ^[dynamic]Named_Badge) {
 		delete(b.key)
 		delete(b.badge.url_1x)
 		delete(b.badge.url_2x)
+		delete(b.badge.title)
 	}
 	delete(list^)
 }
@@ -383,6 +409,7 @@ parse_badges :: proc(body: []byte, out: ^[dynamic]Named_Badge) -> bool {
 				id:           string,
 				image_url_1x: string,
 				image_url_2x: string,
+				title:        string,
 			},
 		},
 	}
@@ -396,7 +423,7 @@ parse_badges :: proc(body: []byte, out: ^[dynamic]Named_Badge) -> bool {
 				out,
 				Named_Badge {
 					fmt.aprintf("%s/%s", set.set_id, v.id),
-					{strings.clone(v.image_url_1x), strings.clone(v.image_url_2x)},
+					{strings.clone(v.image_url_1x), strings.clone(v.image_url_2x), strings.clone(v.title)},
 				},
 			)
 		}
@@ -420,6 +447,7 @@ finish_badges_job :: proc(channel, global: ^Emotes, p: ^Badges_Job) {
 				delete(old_key)
 				delete(old.url_1x)
 				delete(old.url_2x)
+				delete(old.title)
 			}
 			badges[named.key] = named.badge
 		}

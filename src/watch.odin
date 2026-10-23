@@ -737,4 +737,13 @@ draw_watch :: proc(app: ^App) {
 	hovered := in_rect(w.hide_button, app.mouse.x, app.mouse.y)
 	draw_centered(r, .Bold, 18 * scale, w.hide_button, "»", BROWSE_TEXT if hovered else BROWSE_DIM_TEXT)
 	draw_user_card(app)
+	if !w.card.open {
+		// Over everything, so it can reach past its own split.
+		screen := Rect{0, 0, w.video_rect.w, w.video_rect.h}
+		for p in w.panes {
+			screen.w = max(screen.w, p.rect.x + p.rect.w)
+			screen.h = max(screen.h, p.rect.y + p.rect.h)
+			draw_chat_tooltip(&app.assets, &p.view, p.messages_rect, screen, app.mouse.x, app.mouse.y, scale)
+		}
+	}
 }

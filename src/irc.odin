@@ -133,6 +133,9 @@ Fragment :: struct {
 	url_1x:     string,
 	url_2x:     string,
 	zero_width: bool,
+	// For an emote, where it's from: Twitch, or `source` if third_party.
+	third_party: bool,
+	source:     Emote_Source,
 	// An emoji image, sized like text rather than like an emote.
 	emoji:      bool,
 	// No whitespace between this and the fragment before ("hi😀").
@@ -409,7 +412,7 @@ apply_third_party_emotes :: proc(m: ^Chat_Message, channel, global: ^Emotes) {
 		}
 		rest := f.text
 		for word in strings.fields_iterator(&rest) {
-			if emote, found := emote_lookup(channel, global, word); found {
+			if emote, source, found := emote_lookup(channel, global, word); found {
 				flush(&pending, &m.fragments)
 				append(
 					&m.fragments,
@@ -419,6 +422,8 @@ apply_third_party_emotes :: proc(m: ^Chat_Message, channel, global: ^Emotes) {
 						url_1x = strings.clone(emote.url_1x),
 						url_2x = strings.clone(emote.url_2x),
 						zero_width = emote.zero_width,
+						third_party = true,
+						source = source,
 					},
 				)
 			} else {
