@@ -1,6 +1,6 @@
 id: io.github.sp1r17.Lurker
 runtime: org.freedesktop.Platform
-runtime-version: '25.08'
+runtime-version: '26.08'
 sdk: org.freedesktop.Sdk
 sdk-extensions:
   # Odin compiles with LLVM, and links with clang.
@@ -48,32 +48,6 @@ modules:
       - type: patch
         path: odin-x86-only.patch
 
-  # Newer than the runtime's SDL3 (3.2), which Lurker is written against.
-  - name: sdl3
-    buildsystem: cmake-ninja
-    config-opts:
-      - -DCMAKE_BUILD_TYPE=Release
-      - -DSDL_TESTS=OFF
-      - -DSDL_EXAMPLES=OFF
-    sources:
-      - type: archive
-        url: https://github.com/libsdl-org/SDL/releases/download/release-3.4.18/SDL3-3.4.18.tar.gz
-        sha256: 9c75cf16330322c217dedd2e0609f1124f1b54b8633e763467b4684d0f4334a3
-
-  - name: sdl3-image
-    buildsystem: cmake-ninja
-    config-opts:
-      - -DCMAKE_BUILD_TYPE=Release
-      - -DSDLIMAGE_VENDORED=OFF
-      - -DSDLIMAGE_SAMPLES=OFF
-      - -DSDLIMAGE_TESTS=OFF
-      - -DSDLIMAGE_AVIF=OFF
-      - -DSDLIMAGE_JXL=OFF
-    sources:
-      - type: archive
-        url: https://github.com/libsdl-org/SDL_image/releases/download/release-3.4.8/SDL3_image-3.4.8.tar.gz
-        sha256: e8223b424bc7541cf84ffff5cf7e4f24ec3711c60462cb1bd6dc1d7bd7f25477
-
   # mpv: libass for subtitles, libplacebo for rendering. Video decoding uses the
   # runtime's FFmpeg, with H.264 and AAC from its codecs-extra extension.
   - name: libass
@@ -85,7 +59,7 @@ modules:
         url: https://github.com/libass/libass/releases/download/0.17.5/libass-0.17.5.tar.xz
         sha256: 2dca25c0e0c837ddf00b52011b3f82cac1e4ddd3ad018227806b0c2288864acc
 
-  # Generates libplacebo's OpenGL loader; removed from the package.
+  # Generates libplacebo's OpenGL loader; cleaned up after (see its file).
   - python3-jinja2.json
 
   - name: libplacebo
@@ -98,8 +72,6 @@ modules:
       - -Dglslang=disabled
       - -Ddemos=false
       - -Dtests=false
-    cleanup:
-      - /lib/python3*
     sources:
       - type: git
         url: https://github.com/haasn/libplacebo.git
