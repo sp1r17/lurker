@@ -19,8 +19,19 @@ pre-roll or mid-roll ads.
 
 ## Flatpak
 
-The Flatpak bundles everything Lurker needs, including mpv and streamlink. To
-build and install it:
+The Flatpak bundles everything Lurker needs, including mpv and streamlink.
+Download `lurker-<version>-x86_64.flatpak` from the
+[latest release](https://github.com/sp1r17/lurker/releases/latest) and install it:
+
+```sh
+flatpak install --user lurker-0.1.0-x86_64.flatpak
+flatpak run io.github.sp1r17.Lurker
+```
+
+Flatpak fetches the runtime it needs from Flathub. Updates aren't automatic:
+install a newer release's file the same way.
+
+To build and install it yourself instead:
 
 ```sh
 flatpak install --user flathub org.flatpak.Builder
