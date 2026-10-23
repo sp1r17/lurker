@@ -11,7 +11,7 @@ import sdl "vendor:sdl3"
 import img "vendor:sdl3/image"
 
 // The window's icon, for when no installed desktop entry gives it one.
-ICON_DATA :: #load("../assets/install/twitch-app.png")
+ICON_DATA :: #load("../assets/install/lurker.png")
 
 // Shortest wait between animation frames, so many emotes can't spin the CPU.
 MIN_ANIMATION_WAIT_MS :: 10
@@ -138,8 +138,8 @@ App :: struct {
 
 // Opens the window on the browse screen, or watching `channel` if it's not "".
 run :: proc(channels: []string, config: Config) -> bool {
-	// Matches the installed twitch-app.desktop, so the desktop finds its icon and name.
-	sdl.SetHint(sdl.HINT_APP_ID, "twitch-app")
+	// Matches the installed lurker.desktop, so the desktop finds its icon and name.
+	sdl.SetHint(sdl.HINT_APP_ID, APP_ID)
 	if !sdl.Init({.VIDEO}) {
 		log.errorf("SDL init failed: %s", sdl.GetError())
 		return false
@@ -150,7 +150,7 @@ run :: proc(channels: []string, config: Config) -> bool {
 	sdl.GL_SetAttribute(.CONTEXT_MINOR_VERSION, 3)
 	sdl.GL_SetAttribute(.CONTEXT_PROFILE_MASK, i32(transmute(u32)sdl.GL_CONTEXT_PROFILE_CORE))
 
-	window := sdl.CreateWindow("twitch-app", 1280 + CHAT_WIDTH, 720, {.OPENGL, .RESIZABLE, .HIGH_PIXEL_DENSITY, .BORDERLESS})
+	window := sdl.CreateWindow(APP_NAME, 1280 + CHAT_WIDTH, 720, {.OPENGL, .RESIZABLE, .HIGH_PIXEL_DENSITY, .BORDERLESS})
 	if window == nil {
 		log.errorf("can't create window: %s", sdl.GetError())
 		return false

@@ -11,7 +11,7 @@ cache_prune_drops_oldest :: proc(t: ^testing.T) {
 	defer free_all(context.temp_allocator)
 	tmp, tmp_err := os.temp_directory(context.temp_allocator)
 	testing.expect(t, tmp_err == nil)
-	base := fmt.tprintf("%s/twitch-app-cache-test-%d", tmp, time.now()._nsec)
+	base := fmt.tprintf("%s/lurker-cache-test-%d", tmp, time.now()._nsec)
 	old_env, had_env := os.lookup_env("XDG_CACHE_HOME", context.temp_allocator)
 	os.set_env("XDG_CACHE_HOME", base)
 	defer {

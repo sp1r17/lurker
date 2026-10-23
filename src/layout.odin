@@ -19,7 +19,7 @@ TEXT_SIZE_OSD_MS :: 1500
 
 // What's kept between runs: the splits last open with each watched channel, so
 // watching it again brings them back, the volume, the quality, whether the
-// chats are hidden and the text size. Saved in ~/.config/twitch-app/layout.json.
+// chats are hidden and the text size. Saved in ~/.config/lurker/layout.json.
 Layout :: struct {
 	// Watched channel -> the split channels, left to right. Owned.
 	splits: map[string][dynamic]string,

@@ -2,7 +2,7 @@
 set -e
 
 OUT_DIR="build"
-OUT_NAME="twitch-app"
+OUT_NAME="lurker"
 MODE="${1:-debug}"
 
 mkdir -p "$OUT_DIR"

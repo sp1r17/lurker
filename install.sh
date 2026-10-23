@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Builds the release and installs it for the current user (~/.local by default),
 # with an app-menu entry and icon. Settings and sign-in stay in
-# ~/.config/twitch-app and are never touched, even by --uninstall.
+# ~/.config/lurker and are never touched, even by --uninstall.
 set -e
 
 usage() {
   echo "Usage: $0 [--prefix <dir>] [--no-build] [--uninstall]"
   echo "  --prefix <dir>  install under <dir> (default: ~/.local; /usr/local needs sudo)"
-  echo "  --no-build      install the existing build/twitch-app instead of building"
+  echo "  --no-build      install the existing build/lurker instead of building"
   echo "  --uninstall     remove an installed copy"
   echo "DESTDIR is honoured, for packaging."
 }
@@ -32,10 +32,10 @@ done
 
 cd "$(dirname "$0")"
 ROOT="${DESTDIR}${PREFIX}"
-BIN="$ROOT/bin/twitch-app"
-DESKTOP="$ROOT/share/applications/twitch-app.desktop"
-ICON="$ROOT/share/icons/hicolor/scalable/apps/twitch-app.svg"
-ICON_PNG="$ROOT/share/icons/hicolor/256x256/apps/twitch-app.png"
+BIN="$ROOT/bin/lurker"
+DESKTOP="$ROOT/share/applications/lurker.desktop"
+ICON="$ROOT/share/icons/hicolor/scalable/apps/lurker.svg"
+ICON_PNG="$ROOT/share/icons/hicolor/256x256/apps/lurker.png"
 
 refresh_caches() {
   # Only for a live install; packagers' post-install scripts do this.
@@ -60,8 +60,8 @@ refresh_caches() {
 if [ "$UNINSTALL" = 1 ]; then
   rm -f "$BIN" "$DESKTOP" "$ICON" "$ICON_PNG"
   refresh_caches
-  echo "Removed twitch-app from $ROOT."
-  echo "Settings and sign-in are still in ~/.config/twitch-app; delete it to remove them."
+  echo "Removed Lurker from $ROOT."
+  echo "Settings and sign-in are still in ~/.config/lurker; delete it to remove them."
   exit 0
 fi
 
@@ -99,21 +99,21 @@ fi
 if [ "$BUILD" = 1 ]; then
   ./build.sh release
 fi
-[ -x build/twitch-app ] || { echo "No build/twitch-app; run without --no-build."; exit 1; }
+[ -x build/lurker ] || { echo "No build/lurker; run without --no-build."; exit 1; }
 
-install -Dm755 build/twitch-app "$BIN"
-install -Dm644 assets/install/twitch-app.svg "$ICON"
-install -Dm644 assets/install/twitch-app.png "$ICON_PNG"
+install -Dm755 build/lurker "$BIN"
+install -Dm644 assets/install/lurker.svg "$ICON"
+install -Dm644 assets/install/lurker.png "$ICON_PNG"
 # The menu entry runs the installed binary by its full path, so it works even
 # when $PREFIX/bin isn't on the PATH.
 mkdir -p "$(dirname "$DESKTOP")"
-sed "s|^Exec=twitch-app|Exec=$PREFIX/bin/twitch-app|" assets/install/twitch-app.desktop > "$DESKTOP"
+sed "s|^Exec=lurker|Exec=$PREFIX/bin/lurker|" assets/install/lurker.desktop > "$DESKTOP"
 chmod 644 "$DESKTOP"
 refresh_caches
 
-echo "Installed twitch-app to $ROOT."
+echo "Installed Lurker to $ROOT."
 case ":$PATH:" in
   *":$PREFIX/bin:"*) ;;
   *) echo "Note: $PREFIX/bin isn't on your PATH; the app menu entry still works." ;;
 esac
-echo "Sign in from the app, or with: twitch-app --login"
+echo "Sign in from the app, or with: lurker --login"

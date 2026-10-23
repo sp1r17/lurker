@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Lurker
+GenericName=Live Stream Player
+Comment=Watch the Twitch channels you follow, with their chat
+Exec=lurker
+Icon=lurker
+Terminal=false
+Categories=AudioVideo;Video;Player;
+Keywords=twitch;stream;live;chat;
+StartupWMClass=lurker

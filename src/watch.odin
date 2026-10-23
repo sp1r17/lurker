@@ -212,7 +212,7 @@ find_pane :: proc(app: ^App, id: int) -> ^Chat_Pane {
 }
 
 set_title :: proc(app: ^App, channel: string) {
-	title := fmt.tprintf("%s - twitch-app", channel) if channel != "" else "twitch-app"
+	title := fmt.tprintf("%s - %s", channel, APP_NAME) if channel != "" else APP_NAME
 	sdl.SetWindowTitle(app.window, strings.clone_to_cstring(title, context.temp_allocator))
 }
 

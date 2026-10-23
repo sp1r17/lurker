@@ -5,6 +5,11 @@ import "core:os"
 import "core:path/filepath"
 import "core:strings"
 
+// The app's name in its folders (~/.config/lurker, ~/.cache/lurker), app ID and
+// window title.
+APP_ID :: "lurker"
+APP_NAME :: "Lurker"
+
 // The client ID SmartTwitchTV signs in with (it belongs to Twitch's Android TV app),
 // so signing in needs no app registered on dev.twitch.tv. Twitch could restrict it
 // at any time; client_id in config.json or TWITCH_CLIENT_ID replaces it.
@@ -18,7 +23,7 @@ Config :: struct {
 }
 
 // config.json in the working directory, for running from the source tree, or
-// else ~/.config/twitch-app/config.json (beside auth.json), for an installed
+// else ~/.config/lurker/config.json (beside auth.json), for an installed
 // copy. Allocated with the temp allocator.
 config_path :: proc() -> string {
 	if os.exists("config.json") {

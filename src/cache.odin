@@ -12,7 +12,7 @@ import "core:time"
 
 // Downloads that never change for a given URL (emote, badge and emoji images,
 // avatars, the versioned emoji list: their URLs carry an ID or a version) are kept
-// in ~/.cache/twitch-app, one file per URL named by its SHA-256, so later runs
+// in ~/.cache/lurker, one file per URL named by its SHA-256, so later runs
 // don't fetch them again.
 CACHE_LIMIT_BYTES :: 300 * 1024 * 1024
 // Pruning stops once the cache is down to this share of the limit, so it doesn't
@@ -21,13 +21,13 @@ CACHE_PRUNE_TO :: 0.8
 // Temporary files older than this are from a run that died mid-write.
 CACHE_STALE_TEMP :: time.Minute
 
-// ~/.cache/twitch-app, allocated with the temp allocator.
+// ~/.cache/lurker, allocated with the temp allocator.
 cache_dir :: proc() -> (dir: string, ok: bool) {
 	base, err := os.user_cache_dir(context.temp_allocator)
 	if err != nil {
 		return "", false
 	}
-	joined, join_err := filepath.join({base, "twitch-app"}, context.temp_allocator)
+	joined, join_err := filepath.join({base, APP_ID}, context.temp_allocator)
 	return joined, join_err == nil
 }
 

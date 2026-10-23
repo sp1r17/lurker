@@ -71,7 +71,7 @@ http_request :: proc(
 	curl.easy_setopt(h, .NOSIGNAL, c.long(1))
 	curl.easy_setopt(h, .NOPROGRESS, c.long(0))
 	curl.easy_setopt(h, .XFERINFOFUNCTION, check_cancelled)
-	curl.easy_setopt(h, .USERAGENT, cstring("twitch-app"))
+	curl.easy_setopt(h, .USERAGENT, cstring(APP_ID))
 	// Empty means every encoding curl supports (gzip, brotli...).
 	curl.easy_setopt(h, .ACCEPT_ENCODING, cstring(""))
 

@@ -45,13 +45,13 @@ clone_auth :: proc(a: Auth) -> Auth {
 	}
 }
 
-// ~/.config/twitch-app/auth.json, allocated with the temp allocator.
+// ~/.config/lurker/auth.json, allocated with the temp allocator.
 auth_path :: proc() -> (path: string, ok: bool) {
 	dir, err := os.user_config_dir(context.temp_allocator)
 	if err != nil {
 		return "", false
 	}
-	joined, join_err := filepath.join({dir, "twitch-app", "auth.json"}, context.temp_allocator)
+	joined, join_err := filepath.join({dir, APP_ID, "auth.json"}, context.temp_allocator)
 	return joined, join_err == nil
 }
 
