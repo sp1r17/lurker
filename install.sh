@@ -81,6 +81,20 @@ if [ ${#missing[@]} -gt 0 ]; then
   echo "  Debian/Ubuntu: sudo apt install libmpv2 libsdl3-0 libsdl3-image0 libcurl4 libwayland-client0 streamlink"
   exit 1
 fi
+# Optional: without a CJK font the app can read, Japanese, Chinese and Korean
+# show as boxes. (The variable fonts most distros install by default won't do.)
+cjk=0
+for font in /usr/share/fonts/google-noto-sans-cjk-fonts/NotoSansCJK-Regular.ttc \
+  /usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc \
+  /usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc; do
+  [ -f "$font" ] && cjk=1
+done
+if [ "$cjk" = 0 ]; then
+  echo "Note: for Japanese, Chinese and Korean text, install Noto Sans CJK:"
+  echo "  Fedora: sudo dnf install google-noto-sans-cjk-fonts"
+  echo "  Arch:   sudo pacman -S noto-fonts-cjk"
+  echo "  Debian/Ubuntu: sudo apt install fonts-noto-cjk"
+fi
 
 if [ "$BUILD" = 1 ]; then
   ./build.sh release

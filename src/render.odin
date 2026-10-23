@@ -17,9 +17,15 @@ FONT_ATLAS_SIZE :: 1024
 FALLBACK_FONTS := [?]string {
 	"/usr/share/fonts/google-noto-emoji-fonts/NotoEmoji-Regular.ttf",
 	"/usr/share/fonts/google-noto/NotoSansSymbols2-Regular.ttf",
-	// CJK: google-noto-sans-cjk-fonts or wqy-microhei-fonts.
+	// CJK. Static Noto Sans CJK covers all of it: Fedora's google-noto-sans-cjk-fonts,
+	// Arch's noto-fonts-cjk, Debian's fonts-noto-cjk.
 	"/usr/share/fonts/google-noto-sans-cjk-fonts/NotoSansCJK-Regular.ttc",
+	"/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+	"/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
 	"/usr/share/fonts/wqy-microhei/wqy-microhei.ttc",
+	// Japanese and Chinese, but hardly any Korean; often installed already.
+	"/usr/share/fonts/google-droid-sans-fonts/DroidSansFallbackFull.ttf",
+	"/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
 }
 
 Font :: enum {
