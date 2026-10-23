@@ -1,0 +1,118 @@
+# Lurker
+
+A native Linux desktop client for watching Twitch. Streams play through mpv,
+alongside a Chatterino-style chat, with no browser involved.
+
+Video goes through streamlink, which drops ad segments, so streams play without
+pre-roll or mid-roll ads.
+
+## Features
+
+- Browse followed channels (live and offline), top streams and categories, and
+  search channels and categories
+- Chat with 7TV, BTTV and FFZ emotes, badges, replies, mentions and an emote
+  picker; open other channels' chats as splits beside the video
+- Past broadcasts for offline channels, with seeking and chat replay
+- Quality selection, low-latency mode, volume boost up to 130%
+- Follow and unfollow channels
+- Remembers volume, quality, splits, chat visibility and text size
+
+## Flatpak
+
+The Flatpak bundles everything Lurker needs, including mpv and streamlink. To
+build and install it:
+
+```sh
+flatpak install --user flathub org.flatpak.Builder
+flatpak run org.flatpak.Builder --user --install-deps-from=flathub --install \
+    --force-clean build/flatpak packaging/flatpak/io.github.sp1r17.Lurker.yml
+flatpak run io.github.sp1r17.Lurker
+```
+
+The first build compiles Odin, mpv and their dependencies, and takes a while.
+
+## Requirements
+
+To build and install without Flatpak:
+
+- [mpv](https://mpv.io) (libmpv), SDL3, SDL3_image, libcurl, fontconfig and Wayland
+- [streamlink](https://streamlink.github.io)
+- [Odin](https://odin-lang.org), a recent build, to compile
+
+On Fedora:
+
+```sh
+sudo dnf install mpv-libs SDL3 SDL3_image libcurl libwayland-client streamlink
+```
+
+For Japanese, Chinese and Korean text, install Noto Sans CJK
+(`google-noto-sans-cjk-fonts` on Fedora, `noto-fonts-cjk` on Arch,
+`fonts-noto-cjk` on Debian and Ubuntu).
+
+## Installing
+
+```sh
+./install.sh
+```
+
+This builds a release and installs it to `~/.local`, with an entry and icon in
+the application menu. Use `--prefix <dir>` to install elsewhere, or `--uninstall`
+to remove it.
+
+To build without installing, run `./build.sh release`. The binary is written to
+`build/lurker`.
+
+## Usage
+
+```sh
+lurker                      # browse the channels you follow
+lurker <channel>...         # watch a channel, with any others' chats as splits
+lurker --login              # sign in from the terminal
+```
+
+Signing in is optional, but needed for followed channels, chatting and
+following. It uses Twitch's device code flow: Lurker shows a code to enter at
+twitch.tv/activate, so no password is typed into the app. The sign-in is stored
+in `~/.config/lurker/auth.json`.
+
+## Keyboard shortcuts
+
+| Key | Action |
+| --- | --- |
+| Space | Pause |
+| M | Mute |
+| Up / Down | Volume |
+| Left / Right | Seek 10 seconds (past broadcasts) |
+| F, or double-click the video | Fullscreen |
+| C | Show or hide chat |
+| Enter | Chat in the focused split |
+| Ctrl+T / Ctrl+W | Open / close a chat split |
+| Ctrl+F | Search the chat, or channels when browsing |
+| / | Search channels |
+| R | Refresh |
+| Ctrl+= / Ctrl+- / Ctrl+0 | Text size |
+| Esc | Back |
+| Q | Quit |
+
+In chat, Tab completes emote and user names, `:` followed by part of a name opens
+the emote picker, and right-clicking a message replies to it.
+
+## Configuration
+
+By default Lurker signs in with the client ID of Twitch's Android TV app, so no
+application needs to be registered with Twitch. To use your own, set
+`TWITCH_CLIENT_ID` or add it to `~/.config/lurker/config.json`:
+
+```json
+{ "client_id": "your-client-id" }
+```
+
+Some features use Twitch's internal GraphQL API, which Twitch can change without
+notice: following, followed categories, offline channels, past broadcasts and
+chat replay, and your own Twitch emotes in the picker.
+
+## Acknowledgements
+
+Text is set in [Noto Sans](https://fonts.google.com/noto/specimen/Noto+Sans),
+licensed under the SIL Open Font License (`assets/fonts/noto_sans/OFL.txt`).
+Lurker is not affiliated with or endorsed by Twitch.
