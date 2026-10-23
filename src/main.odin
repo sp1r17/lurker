@@ -377,6 +377,9 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 					app.browse.skip_slash = true
 				case sdl.K_R:
 					browse_refresh(app)
+					if app.browse.view == .Following {
+						offline_refresh(app, force = true)
+					}
 				case sdl.K_L:
 					if !app.signed_in {
 						sign_in_start(app)
@@ -518,6 +521,8 @@ finish_jobs :: proc(app: ^App) {
 			finish_stream_info_job(app, &p)
 		case Follow_Job:
 			finish_follow_job(app, &p)
+		case Offline_Follows_Job:
+			finish_offline_follows_job(app, &p)
 		case User_Emotes_Job:
 			finish_user_emotes_job(app, &p)
 		case Emoji_Job:

@@ -630,3 +630,157 @@ parse_user_emotes_response :: proc(body: []byte) -> (emotes: []Twitch_User_Emote
 	}
 	return list[:], .None
 }
+
+// The logins of every channel the user follows, from Helix (GraphQL's list of
+// follows is refused). Allocated with the temp allocator.
+get_followed_logins :: proc(client_id, token, user_id: string) -> (logins: []string, err: Twitch_Error) {
+	all := make([dynamic]string, context.temp_allocator)
+	cursor := ""
+	for {
+		path := fmt.tprintf("/channels/followed?user_id=%s&first=100", user_id)
+		if cursor != "" {
+			path = fmt.tprintf("%s&after=%s", path, cursor)
+		}
+		body := helix_get(client_id, token, path) or_return
+		page: []string
+		page, cursor = parse_followed_logins_page(body) or_return
+		append(&all, ..page)
+		if cursor == "" || len(page) == 0 {
+			return all[:], .None
+		}
+	}
+}
+
+parse_followed_logins_page :: proc(body: []byte) -> (logins: []string, cursor: string, err: Twitch_Error) {
+	r: struct {
+		data:       []struct {
+			broadcaster_login: string,
+		},
+		pagination: struct {
+			cursor: string,
+		},
+	}
+	if json.unmarshal(body, &r, allocator = context.temp_allocator) != nil {
+		return nil, "", .Bad_Json
+	}
+	list := make([]string, len(r.data), context.temp_allocator)
+	for d, i in r.data {
+		list[i] = d.broadcaster_login
+	}
+	return list, r.pagination.cursor, .None
+}
+
+// A channel the user follows, live or not, and when it last streamed.
+Followed_Channel :: struct {
+	login:        string,
+	display_name: string,
+	avatar_url:   string,
+	live:         bool,
+	// RFC 3339 ("" if it never has), and what it streamed.
+	last_live:    string,
+	last_game:    string,
+}
+
+clone_followed_channel :: proc(c: Followed_Channel) -> Followed_Channel {
+	return {
+		login = strings.clone(c.login),
+		display_name = strings.clone(c.display_name),
+		avatar_url = strings.clone(c.avatar_url),
+		live = c.live,
+		last_live = strings.clone(c.last_live),
+		last_game = strings.clone(c.last_game),
+	}
+}
+
+destroy_followed_channel :: proc(c: Followed_Channel) {
+	delete(c.login)
+	delete(c.display_name)
+	delete(c.avatar_url)
+	delete(c.last_live)
+	delete(c.last_game)
+}
+
+// How many channels one GraphQL lookup asks about.
+CHANNEL_STATUS_BATCH :: 100
+
+// Whether each of `logins` is live, and when it last was, from GraphQL in
+// batches. Unknown or banned channels are left out. Allocated with the temp
+// allocator.
+get_channel_status :: proc(client_id, token: string, logins: []string) -> (channels: []Followed_Channel, err: Twitch_Error) {
+	all := make([dynamic]Followed_Channel, context.temp_allocator)
+	for start := 0; start < len(logins); start += CHANNEL_STATUS_BATCH {
+		batch := logins[start:min(start + CHANNEL_STATUS_BATCH, len(logins))]
+		// Logins go into the query itself (variables here are strings only), so
+		// only valid ones are sent.
+		quoted := make([dynamic]string, context.temp_allocator)
+		for login in batch {
+			if valid_login(login) {
+				append(&quoted, fmt.tprintf("\"%s\"", login))
+			}
+		}
+		if len(quoted) == 0 {
+			continue
+		}
+		query := strings.concatenate(
+			{
+				"query { users(logins: [",
+				strings.join(quoted[:], ",", context.temp_allocator),
+				"]) { login displayName profileImageURL(width: 70) stream { id } lastBroadcast { startedAt game { displayName } } } }",
+			},
+			context.temp_allocator,
+		)
+		body := gql_post(client_id, token, query) or_return
+		page := parse_channel_status_response(body) or_return
+		append(&all, ..page)
+	}
+	return all[:], .None
+}
+
+parse_channel_status_response :: proc(body: []byte) -> (channels: []Followed_Channel, err: Twitch_Error) {
+	r: struct {
+		data:   struct {
+			users: []Maybe(struct {
+				login:           string,
+				displayName:     string,
+				profileImageURL: string,
+				stream:          Maybe(struct {
+					id: string,
+				}),
+				lastBroadcast:   Maybe(struct {
+					startedAt: string,
+					game:      Maybe(struct {
+						displayName: string,
+					}),
+				}),
+			}),
+		},
+		errors: []struct {
+			message: string,
+		},
+	}
+	if json.unmarshal(body, &r, allocator = context.temp_allocator) != nil {
+		return nil, .Bad_Json
+	}
+	if len(r.errors) > 0 {
+		log.warnf("GraphQL error: %s", r.errors[0].message)
+		return nil, .Bad_Status
+	}
+	list := make([dynamic]Followed_Channel, context.temp_allocator)
+	for maybe_user in r.data.users {
+		u := maybe_user.? or_continue
+		c := Followed_Channel {
+			login        = u.login,
+			display_name = u.displayName,
+			avatar_url   = u.profileImageURL,
+		}
+		_, c.live = u.stream.?
+		if last, has_last := u.lastBroadcast.?; has_last {
+			c.last_live = last.startedAt
+			if game, has_game := last.game.?; has_game {
+				c.last_game = game.displayName
+			}
+		}
+		append(&list, c)
+	}
+	return list[:], .None
+}

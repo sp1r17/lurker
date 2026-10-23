@@ -97,6 +97,8 @@ Browse :: struct {
 	// Where Esc, or emptying the search box, goes back to from a search.
 	back_view:            Browse_View,
 	following, top:       Stream_List,
+	// Below the live channels on the Following tab.
+	offline:              Offline_Follows,
 	// The category the Category view shows (owned), and its streams.
 	category_id:          string,
 	category_name:        string,
@@ -156,6 +158,7 @@ Browse :: struct {
 }
 
 browse_destroy :: proc(b: ^Browse) {
+	offline_destroy(nil, &b.offline)
 	for l in ([]^Stream_List{&b.following, &b.top, &b.category}) {
 		for s in l.streams {
 			destroy_stream(s)
@@ -259,6 +262,7 @@ browse_clear :: proc(app: ^App) {
 	for l in ([]^Stream_List{&b.following, &b.top, &b.category}) {
 		stream_list_clear(app, l)
 	}
+	offline_clear(app, &b.offline)
 	for c in b.followed_categories {
 		destroy_category(c)
 	}
@@ -299,6 +303,9 @@ browse_refresh :: proc(app: ^App) {
 	}
 	switch b.view {
 	case .Following, .Top, .Category:
+		if b.view == .Following {
+			offline_refresh(app)
+		}
 		l := browse_list(b, b.view)
 		if l.state == .Loading {
 			return
@@ -971,6 +978,9 @@ browse_click :: proc(app: ^App, x, y: f32) -> bool {
 		l := browse_list(b, b.view)
 		if i < len(l.streams) {
 			watch_start(app, l.streams[i].user_login, info = &l.streams[i])
+		} else if offline := i - len(l.streams); b.view == .Following && offline < len(b.offline.channels) {
+			// Offline, but its chat is open.
+			watch_start(app, b.offline.channels[offline].login)
 		}
 	case .Categories:
 		if i < len(b.top_categories) {
@@ -1029,6 +1039,7 @@ draw_browse :: proc(app: ^App, screen: Rect) {
 			content,
 			"None of the channels you follow are live.",
 			"Couldn't load the channels you follow. Press R to try again.",
+			&b.offline,
 		)
 	case .Top:
 		draw_stream_list(app, &b.top, content, "Nobody is live right now.", "Couldn't load the top streams. Press R to try again.")
@@ -1116,7 +1127,7 @@ draw_browse_header :: proc(app: ^App, screen: Rect) {
 
 // Live streams as cards, in as many columns as fit, stretched to fill the width.
 @(private = "file")
-draw_stream_list :: proc(app: ^App, l: ^Stream_List, content: Rect, empty_message, failed_message: string) {
+draw_stream_list :: proc(app: ^App, l: ^Stream_List, content: Rect, empty_message, failed_message: string, offline: ^Offline_Follows = nil) {
 	a := &app.assets
 	r := &a.renderer
 	b := &app.browse
@@ -1133,7 +1144,9 @@ draw_stream_list :: proc(app: ^App, l: ^Stream_List, content: Rect, empty_messag
 	case len(l.streams) == 0:
 		message = empty_message
 	}
-	if message != "" {
+	// The offline channels go below the live ones, or the message.
+	has_offline := offline != nil && len(offline.channels) > 0
+	if message != "" && !has_offline {
 		draw_centered(r, .Regular, text_size, content, message, BROWSE_DIM_TEXT)
 		return
 	}
@@ -1149,6 +1162,14 @@ draw_stream_list :: proc(app: ^App, l: ^Stream_List, content: Rect, empty_messag
 	card_h := thumb_h + text_pad + lh_title + 2 * lh_text + text_pad
 	rows := (len(l.streams) + columns - 1) / columns
 	total_h := f32(rows) * card_h + f32(max(rows - 1, 0)) * gap + 2 * pad
+	// Where the offline section starts, below the cards (or the message).
+	offline_y := f32(rows) * (card_h + gap)
+	if message != "" {
+		offline_y = line_height(r, .Regular, text_size) + 2 * gap
+	}
+	if has_offline {
+		total_h = pad + offline_y + offline_section_height(app, content.w - 2 * pad) + pad
+	}
 	scroll := &b.scroll[b.view]
 	b.max_scroll[b.view] = max(0, total_h - content.h)
 	scroll^ = min(scroll^, b.max_scroll[b.view])
@@ -1204,6 +1225,12 @@ draw_stream_list :: proc(app: ^App, l: ^Stream_List, content: Rect, empty_messag
 		draw_text(r, .Regular, text_size, tx, ty, fit_text(r, .Regular, text_size, s.user_name, tw), BROWSE_ACCENT)
 		ty += lh_text
 		draw_text(r, .Regular, text_size, tx, ty, fit_text(r, .Regular, text_size, s.game_name, tw), BROWSE_DIM_TEXT)
+	}
+	if has_offline {
+		if message != "" {
+			draw_text(r, .Regular, text_size, content.x + pad, content.y + pad - scroll^, message, BROWSE_DIM_TEXT)
+		}
+		draw_offline_section(app, content.x + pad, content.y + pad - scroll^ + offline_y, content.w - 2 * pad, content)
 	}
 	clip_end(r)
 	draw_title_tooltip(app, tooltip, tooltip_title, content, .Bold, card_title_size, text_pad)

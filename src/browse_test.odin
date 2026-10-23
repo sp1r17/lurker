@@ -159,3 +159,42 @@ follows_read_several_channels :: proc(t: ^testing.T) {
 	testing.expect(t, followed["121059319"])
 	testing.expect(t, !followed["12826"])
 }
+
+@(test)
+followed_channels_read_status :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	logins, cursor, err := parse_followed_logins_page(
+		transmute([]byte)string(`{"total":2,"data":[{"broadcaster_login":"moonmoon"},{"broadcaster_login":"lirik"}],"pagination":{"cursor":"abc"}}`),
+	)
+	testing.expect_value(t, err, Twitch_Error.None)
+	testing.expect_value(t, len(logins), 2)
+	testing.expect_value(t, cursor, "abc")
+
+	body := `{"data":{"users":[` +
+		`{"login":"moonmoon","displayName":"MOONMOON","profileImageURL":"https://x/m.png","stream":null,` +
+		`"lastBroadcast":{"startedAt":"2026-10-23T05:13:48Z","game":{"displayName":"Games + Demos"}}},` +
+		`null,{"login":"lirik","displayName":"LIRIK","profileImageURL":"","stream":{"id":"1"},"lastBroadcast":null}]}}`
+	channels, status_err := parse_channel_status_response(transmute([]byte)body)
+	testing.expect_value(t, status_err, Twitch_Error.None)
+	testing.expect_value(t, len(channels), 2)
+	testing.expect(t, !channels[0].live)
+	testing.expect_value(t, channels[0].last_game, "Games + Demos")
+	testing.expect(t, channels[1].live)
+	testing.expect_value(t, channels[1].last_live, "")
+}
+
+@(test)
+last_live_reads_naturally :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	now, _ := time.rfc3339_to_time_utc("2026-10-23T12:00:00Z")
+	testing.expect_value(t, format_last_live("2026-10-23T11:59:30Z", now), "Live just now")
+	testing.expect_value(t, format_last_live("2026-10-23T07:00:00.696673Z", now), "Live 5 hours ago")
+	testing.expect_value(t, format_last_live("2026-10-22T11:00:00Z", now), "Live 1 day ago")
+	testing.expect_value(t, format_last_live("2026-06-01T00:00:00Z", now), "Live 4 months ago")
+	testing.expect_value(t, format_last_live("", now), "Not live recently")
+
+	channels := []Followed_Channel{{login = "a"}, {login = "b", last_live = "2026-10-01T00:00:00Z"}, {login = "c", last_live = "2026-10-20T00:00:00.123Z"}}
+	sort_by_last_live(channels)
+	testing.expect_value(t, channels[0].login, "c")
+	testing.expect_value(t, channels[2].login, "a")
+}
