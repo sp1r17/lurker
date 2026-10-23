@@ -225,32 +225,12 @@ finish_emoji_job :: proc(a: ^Assets, p: ^Emoji_Job) {
 }
 
 // Draws one line of text with emoji as images, cut short with "…" if it's wider
-// than max_w (for titles and bios). Returns the x after it.
-draw_text_line :: proc(a: ^Assets, font: Font, size, x, y: f32, text: string, color: Color, max_w: f32) -> f32 {
+// than max_w (for titles and bios). Returns the x after it, and whether it was cut.
+draw_text_line :: proc(a: ^Assets, font: Font, size, x, y: f32, text: string, color: Color, max_w: f32) -> (end: f32, cut: bool) {
 	r := &a.renderer
-	Segment :: struct {
-		text:  string,
-		image: string,
-	}
-	segments := make([dynamic]Segment, context.temp_allocator)
-	for pos := 0; pos < len(text); {
-		start, end, image, found := find_emoji(&a.emoji, text, pos)
-		if !found {
-			append(&segments, Segment{text = text[pos:]})
-			break
-		}
-		if start > pos {
-			append(&segments, Segment{text = text[pos:start]})
-		}
-		append(&segments, Segment{text = text[start:end], image = image})
-		pos = end
-	}
-
+	segments := emoji_segments(a, text)
 	emoji_h := size * r.text_scale * 1.25
 	lh := line_height(r, font, size)
-	width :: proc(r: ^Renderer, font: Font, size, emoji_h: f32, s: Segment) -> f32 {
-		return emoji_h if s.image != "" else text_width(r, font, size, s.text)
-	}
 	total: f32
 	for s in segments {
 		total += width(r, font, size, emoji_h, s)
@@ -259,7 +239,6 @@ draw_text_line :: proc(a: ^Assets, font: Font, size, x, y: f32, text: string, co
 	room := max_w if total <= max_w else max_w - text_width(r, font, size, ellipsis)
 
 	pen := x
-	cut := false
 	for s in segments {
 		w := width(r, font, size, emoji_h, s)
 		if pen + w - x > room {
@@ -290,7 +269,49 @@ draw_text_line :: proc(a: ^Assets, font: Font, size, x, y: f32, text: string, co
 	if cut {
 		pen = draw_text(r, font, size, pen, y, ellipsis, color)
 	}
-	return pen
+	return pen, cut
+}
+
+// How wide draw_text_line draws `text`, emoji included, when it isn't cut.
+text_line_width :: proc(a: ^Assets, font: Font, size: f32, text: string) -> f32 {
+	r := &a.renderer
+	emoji_h := size * r.text_scale * 1.25
+	total: f32
+	for s in emoji_segments(a, text) {
+		total += width(r, font, size, emoji_h, s)
+	}
+	return total
+}
+
+// Text with its emoji split out: runs of plain text, and single emoji with the
+// image to draw for each.
+@(private = "file")
+Segment :: struct {
+	text:  string,
+	image: string,
+}
+
+@(private = "file")
+emoji_segments :: proc(a: ^Assets, text: string) -> []Segment {
+	segments := make([dynamic]Segment, context.temp_allocator)
+	for pos := 0; pos < len(text); {
+		start, end, image, found := find_emoji(&a.emoji, text, pos)
+		if !found {
+			append(&segments, Segment{text = text[pos:]})
+			break
+		}
+		if start > pos {
+			append(&segments, Segment{text = text[pos:start]})
+		}
+		append(&segments, Segment{text = text[start:end], image = image})
+		pos = end
+	}
+	return segments[:]
+}
+
+@(private = "file")
+width :: proc(r: ^Renderer, font: Font, size, emoji_h: f32, s: Segment) -> f32 {
+	return emoji_h if s.image != "" else text_width(r, font, size, s.text)
 }
 
 // The longest start of `text` no wider than max_w, on a character boundary.

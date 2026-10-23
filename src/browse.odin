@@ -24,6 +24,8 @@ THUMBNAIL_SIZE :: [2]int{440, 248}
 // Twitch refreshes thumbnails every few minutes; the list shown is checked every
 // minute while browsing.
 BROWSE_REFRESH_MS :: 60_000
+// How long the mouse rests on a card before its full title shows.
+TOOLTIP_DELAY_MS :: 400
 // Categories change slowly, and refreshing them drops the pages loaded by
 // scrolling, so they're refreshed less often.
 CATEGORIES_REFRESH_MS :: 5 * 60_000
@@ -137,6 +139,10 @@ Browse :: struct {
 	// rows), the tabs, the search box, the category's back button and the header.
 	cards:                [dynamic]Rect,
 	hovered:              int,
+	// The card whose title tooltip is pending or shown, and since when it's been
+	// hovered (Assets.now_ms).
+	tooltip_card:         int,
+	tooltip_since:        int,
 	tabs:                 [Browse_View]Rect,
 	// The Categories tab's two section buttons.
 	section_buttons:      [2]Rect,
@@ -1124,6 +1130,9 @@ draw_stream_list :: proc(app: ^App, l: ^Stream_List, content: Rect, empty_messag
 	b.max_scroll[b.view] = max(0, total_h - content.h)
 	scroll^ = min(scroll^, b.max_scroll[b.view])
 
+	// The hovered card's title, if it's cut short.
+	tooltip: Rect
+	tooltip_title: string
 	clip_begin(r, content)
 	for s, i in l.streams {
 		col := i % columns
@@ -1165,13 +1174,80 @@ draw_stream_list :: proc(app: ^App, l: ^Stream_List, content: Rect, empty_messag
 		tx := card.x + text_pad
 		tw := card.w - 2 * text_pad
 		ty := thumb.y + thumb.h + text_pad
-		draw_text_line(a, .Bold, card_title_size, tx, ty, s.title, BROWSE_TEXT, tw)
+		if _, cut := draw_text_line(a, .Bold, card_title_size, tx, ty, s.title, BROWSE_TEXT, tw); cut && i == b.hovered {
+			tooltip, tooltip_title = {tx, ty, tw, card.y + card.h - ty}, s.title
+		}
 		ty += lh_title
 		draw_text(r, .Regular, text_size, tx, ty, fit_text(r, .Regular, text_size, s.user_name, tw), BROWSE_ACCENT)
 		ty += lh_text
 		draw_text(r, .Regular, text_size, tx, ty, fit_text(r, .Regular, text_size, s.game_name, tw), BROWSE_DIM_TEXT)
 	}
 	clip_end(r)
+	draw_title_tooltip(app, tooltip, tooltip_title, content)
+}
+
+// The full title of the hovered card, over its cut-short one, after the mouse
+// has rested on the card for TOOLTIP_DELAY_MS. `at` is the card's text, from the
+// title down, which the tooltip covers at least.
+@(private = "file")
+draw_title_tooltip :: proc(app: ^App, at: Rect, title: string, content: Rect) {
+	a := &app.assets
+	b := &app.browse
+	if b.hovered != b.tooltip_card {
+		b.tooltip_card = b.hovered
+		b.tooltip_since = a.now_ms
+	}
+	if title == "" {
+		return
+	}
+	if left := b.tooltip_since + TOOLTIP_DELAY_MS - a.now_ms; left > 0 {
+		if a.next_frame_ms < 0 || left < a.next_frame_ms {
+			a.next_frame_ms = left
+		}
+		return
+	}
+	r := &a.renderer
+	size := BROWSE_CARD_TITLE_SIZE * app.scale
+	pad := 8 * app.scale
+	lh := line_height(r, .Bold, size)
+	lines := wrap_words(a, .Bold, size, title, at.w)
+	box := Rect{at.x - pad, at.y - pad, at.w + 2 * pad, max(f32(len(lines)) * lh + 2 * pad, at.h + pad)}
+	// Kept on screen: moved up if it would run off the bottom.
+	box.y = max(content.y, min(box.y, content.y + content.h - box.h))
+	draw_rect(r, box, MENU_HOVER)
+	for line, i in lines {
+		draw_text_line(a, .Bold, size, box.x + pad, box.y + pad + f32(i) * lh, line, BROWSE_TEXT, at.w)
+	}
+}
+
+// Splits `text` into lines no wider than max_w, between words. A word wider
+// than that gets a line of its own.
+@(private = "file")
+wrap_words :: proc(a: ^Assets, font: Font, size: f32, text: string, max_w: f32) -> []string {
+	lines := make([dynamic]string, context.temp_allocator)
+	start, end := -1, 0
+	for i := 0; i <= len(text); i += 1 {
+		if i < len(text) && text[i] != ' ' {
+			if start < 0 {
+				start = i
+			}
+			continue
+		}
+		// Once per run of spaces.
+		if start < 0 || text[i - 1] == ' ' {
+			continue
+		}
+		// text[start:i] runs to the end of the word at i.
+		if end > start && text_line_width(a, font, size, text[start:i]) > max_w {
+			append(&lines, text[start:end])
+			for start = end; start < i && text[start] == ' '; start += 1 {}
+		}
+		end = i
+	}
+	if start >= 0 && end > start {
+		append(&lines, text[start:end])
+	}
+	return lines[:]
 }
 
 // One category: a heading with a back button, then its live streams.
