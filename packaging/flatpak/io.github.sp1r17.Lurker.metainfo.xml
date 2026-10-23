@@ -21,6 +21,20 @@
     </ul>
     <p>Lurker is not affiliated with or endorsed by Twitch.</p>
   </description>
+  <screenshots>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/sp1r17/lurker/v0.1.0/packaging/screenshots/watch.png</image>
+      <caption>A live stream with its chat</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/sp1r17/lurker/v0.1.0/packaging/screenshots/categories.png</image>
+      <caption>Browsing categories</caption>
+    </screenshot>
+  </screenshots>
+  <branding>
+    <color type="primary" scheme_preference="light">#4fc4a0</color>
+    <color type="primary" scheme_preference="dark">#262a42</color>
+  </branding>
   <launchable type="desktop-id">io.github.sp1r17.Lurker.desktop</launchable>
   <url type="homepage">https://github.com/sp1r17/lurker</url>
   <url type="bugtracker">https://github.com/sp1r17/lurker/issues</url>
@@ -32,6 +46,10 @@
     <category>Video</category>
   </categories>
   <releases>
-    <release version="0.1.0" date="2026-10-23"/>
+    <release version="0.1.0" date="2026-10-23">
+      <description>
+        <p>The first release.</p>
+      </description>
+    </release>
   </releases>
 </component>
