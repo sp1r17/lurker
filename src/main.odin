@@ -134,6 +134,9 @@ App :: struct {
 	// Whether the window has the keyboard focus: mentions arriving without it
 	// count as unread.
 	window_focused:      bool,
+	// Whether the window is, or has been asked to go, fullscreen (see
+	// toggle_fullscreen).
+	fullscreen:          bool,
 }
 
 // Opens the window on the browse screen, or watching `channel` if it's not "".
@@ -392,6 +395,13 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 			}
 			redraw^ = true
 		}
+	case e.type == .WINDOW_ENTER_FULLSCREEN || e.type == .WINDOW_LEAVE_FULLSCREEN:
+		// Also from the compositor (a keyboard shortcut, say), not only from us.
+		app.fullscreen = e.type == .WINDOW_ENTER_FULLSCREEN
+		redraw^ = true
+	case e.type == .WINDOW_MAXIMIZED || e.type == .WINDOW_RESTORED:
+		// The maximize button's icon follows.
+		redraw^ = true
 	case e.type == .WINDOW_FOCUS_GAINED || e.type == .WINDOW_FOCUS_LOST:
 		app.window_focused = e.type == .WINDOW_FOCUS_GAINED
 		redraw^ = true

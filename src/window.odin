@@ -18,7 +18,7 @@ DRAG_THRESHOLD :: 4
 window_hit_test :: proc "c" (window: ^sdl.Window, area: ^sdl.Point, data: rawptr) -> sdl.HitTestResult {
 	context = runtime.default_context()
 	app := (^App)(data)
-	if .FULLSCREEN in sdl.GetWindowFlags(window) {
+	if app.fullscreen {
 		return .NORMAL
 	}
 
@@ -80,9 +80,12 @@ draggable :: proc(app: ^App, x, y: f32) -> bool {
 	return false
 }
 
+// Goes fullscreen or back. Decided from what was last asked for, not the
+// window's flags: on Wayland those change only once the compositor has done it,
+// so a quick second toggle would ask for fullscreen again and stay stuck there.
 toggle_fullscreen :: proc(app: ^App) {
-	fullscreen := .FULLSCREEN in sdl.GetWindowFlags(app.window)
-	sdl.SetWindowFullscreen(app.window, !fullscreen)
+	app.fullscreen = !app.fullscreen
+	_ = sdl.SetWindowFullscreen(app.window, app.fullscreen)
 }
 
 // A left press at (x, y), in pixels: a double-click on the video toggles
@@ -103,7 +106,7 @@ window_press :: proc(app: ^App, x, y: f32, clicks: u8) {
 		}
 		return
 	}
-	if app.wayland_drag_ok && .FULLSCREEN not_in sdl.GetWindowFlags(app.window) {
+	if app.wayland_drag_ok && !app.fullscreen {
 		app.drag_armed = true
 		app.drag_from = {x, y}
 	}
@@ -140,7 +143,8 @@ draw_window_controls :: proc(app: ^App, right, top: f32) -> (left: f32) {
 	r := &app.assets.renderer
 	scale := app.scale
 	size := WINDOW_BUTTON * scale
-	maximized := .MAXIMIZED in sdl.GetWindowFlags(app.window)
+	// Fullscreen shows restore too, which leaves it.
+	maximized := app.fullscreen || .MAXIMIZED in sdl.GetWindowFlags(app.window)
 	x := right - size.x * len(Window_Control)
 	for control in Window_Control {
 		rect := Rect{x + f32(int(control)) * size.x, top, size.x, size.y}
@@ -210,7 +214,13 @@ window_controls_click :: proc(app: ^App, x, y: f32) -> bool {
 	return false
 }
 
+// Maximizes or restores the window; in fullscreen, leaves that instead (a
+// fullscreen window ignores both).
 toggle_maximized :: proc(app: ^App) {
+	if app.fullscreen {
+		toggle_fullscreen(app)
+		return
+	}
 	if .MAXIMIZED in sdl.GetWindowFlags(app.window) {
 		_ = sdl.RestoreWindow(app.window)
 	} else {
