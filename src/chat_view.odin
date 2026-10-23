@@ -363,6 +363,19 @@ message_layout :: proc(a: ^Assets, channel: ^Emotes, m: ^Chat_Message, scale, wi
 	b.line_h = b.text_h
 	pixel_scale: f32 = 2 if image_scale > 1 else 1
 
+	// A reply starts with what it replies to, on a line of its own, cut to fit.
+	if m.reply != "" {
+		if text_width(&a.renderer, .Regular, b.size, m.reply) <= width {
+			put_text(&b, .Regular, CHAT_SYSTEM_TEXT, m.reply)
+		} else {
+			ellipsis :: "…"
+			room := width - text_width(&a.renderer, .Regular, b.size, ellipsis)
+			put_text(&b, .Regular, CHAT_SYSTEM_TEXT, fit_prefix(&a.renderer, .Regular, b.size, m.reply, room))
+			put_text(&b, .Regular, CHAT_SYSTEM_TEXT, ellipsis)
+		}
+		end_line(&b)
+	}
+
 	for key in m.badges {
 		badge, found := badge_lookup(channel, &a.emotes, key)
 		if !found {

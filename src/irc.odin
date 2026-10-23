@@ -173,6 +173,10 @@ Chat_Message :: struct {
 	clear_target: string,
 	// "set/version" badge keys, e.g. "subscriber/12".
 	badges:    [dynamic]string,
+	// For a reply: "Replying to @name: their message", shown above it, and whose
+	// message it is.
+	reply:       string,
+	reply_login: string,
 	fragments: [dynamic]Fragment,
 	// Cached by the chat view.
 	layout:    Message_Layout,
@@ -184,6 +188,8 @@ destroy_chat_message :: proc(m: Chat_Message) {
 	delete(m.login)
 	delete(m.user_id)
 	delete(m.clear_target)
+	delete(m.reply)
+	delete(m.reply_login)
 	for b in m.badges {
 		delete(b)
 	}
@@ -256,7 +262,41 @@ privmsg_to_chat :: proc(msg: Irc_Message) -> Chat_Message {
 	}
 	emotes_tag, _ := irc_tag(msg, "emotes")
 	twitch_emote_fragments(text, emotes_tag, &m.fragments)
+	if parent, is_reply := irc_tag(msg, "reply-parent-display-name"); is_reply {
+		parent_login, _ := irc_tag(msg, "reply-parent-user-login")
+		body, _ := irc_tag(msg, "reply-parent-msg-body")
+		if parent == "" {
+			parent = parent_login
+		}
+		m.reply = fmt.aprintf("Replying to @%s: %s", parent, body)
+		m.reply_login = strings.clone(parent_login)
+		strip_reply_mention(&m, parent, parent_login)
+	}
 	return m
+}
+
+// Twitch starts a reply's text with "@name " for clients that don't show
+// replies; the reply line above it says that already.
+@(private = "file")
+strip_reply_mention :: proc(m: ^Chat_Message, names: ..string) {
+	if len(m.fragments) == 0 || m.fragments[0].kind != .Text {
+		return
+	}
+	f := &m.fragments[0]
+	for name in names {
+		mention := strings.concatenate({"@", name, " "}, context.temp_allocator)
+		if name == "" || len(f.text) < len(mention) || !strings.equal_fold(f.text[:len(mention)], mention) {
+			continue
+		}
+		rest := strings.clone(f.text[len(mention):])
+		delete(f.text)
+		f.text = rest
+		if rest == "" {
+			ordered_remove(&m.fragments, 0)
+			delete(rest)
+		}
+		return
+	}
 }
 
 // A CLEARCHAT or CLEARMSG as a message: the moderation to apply, and for timeouts
@@ -310,6 +350,10 @@ format_duration :: proc(seconds: int) -> string {
 mentions :: proc(m: ^Chat_Message, login: string) -> bool {
 	if login == "" || m.kind == .System || m.login == login {
 		return false
+	}
+	// A reply to us: its "@name" is gone (strip_reply_mention).
+	if m.reply_login != "" && strings.equal_fold(m.reply_login, login) {
+		return true
 	}
 	for f in m.fragments {
 		if f.kind != .Text {

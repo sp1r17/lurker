@@ -86,3 +86,19 @@ dark_colors_are_lightened :: proc(t: ^testing.T) {
 	_, bad := parse_hex_color("red")
 	testing.expect(t, !bad)
 }
+
+@(test)
+replies_show_what_they_answer :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	msg, _ := parse_irc(
+		"@display-name=Bar;reply-parent-display-name=Foo;reply-parent-user-login=foo;reply-parent-msg-body=is\\sit\\slive? :bar!bar@x PRIVMSG #chan :@Foo yes it is",
+	)
+	m := privmsg_to_chat(msg)
+	defer destroy_chat_message(m)
+	testing.expect_value(t, m.reply, "Replying to @Foo: is it live?")
+	// The "@Foo" Twitch adds is left out: the reply line says it.
+	testing.expect_value(t, len(m.fragments), 1)
+	testing.expect_value(t, m.fragments[0].text, "yes it is")
+	testing.expect(t, mentions(&m, "foo"))
+	testing.expect(t, !mentions(&m, "baz"))
+}

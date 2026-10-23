@@ -315,7 +315,6 @@ width :: proc(r: ^Renderer, font: Font, size, emoji_h: f32, s: Segment) -> f32 {
 }
 
 // The longest start of `text` no wider than max_w, on a character boundary.
-@(private = "file")
 fit_prefix :: proc(r: ^Renderer, font: Font, size: f32, text: string, max_w: f32) -> string {
 	end := 0
 	for i := 0; i < len(text); {
