@@ -6,10 +6,9 @@ import "core:os"
 import "core:path/filepath"
 import "core:strings"
 import "core:sys/posix"
-import "core:time"
 
 // How long streamlink gets to exit by itself once mpv has reached the stream's end.
-STREAMLINK_EXIT_WAIT :: 2 * time.Second
+STREAMLINK_EXIT_WAIT_MS :: 2000
 
 Stream_Error :: enum {
 	None,
@@ -145,16 +144,19 @@ streamlink_stop :: proc(s: ^Streamlink) {
 }
 
 // Why the stream stopped, once mpv has reached its end: streamlink's exit code and
-// error output tell an offline channel from an ended broadcast or a failure.
-streamlink_outcome :: proc(s: ^Streamlink) -> Stream_Error {
+// error output tell an offline channel from an ended broadcast or a failure. Doesn't
+// wait: `done` is false while streamlink is still running.
+streamlink_outcome :: proc(s: ^Streamlink) -> (outcome: Stream_Error, done: bool) {
 	if !s.running {
-		return .Ended
+		return .Ended, true
 	}
-	state, err := os.process_wait(s.process, STREAMLINK_EXIT_WAIT)
+	state, err := os.process_wait(s.process, 0)
+	if err == .Timeout {
+		return .None, false
+	}
 	if err != nil {
-		// Still running: mpv gave up on the stream, not streamlink.
 		streamlink_stop(s)
-		return .Streamlink_Failed
+		return .Streamlink_Failed, true
 	}
 	s.running = false
 	output, _ := os.read_entire_file(s.errors, context.temp_allocator)
@@ -162,11 +164,11 @@ streamlink_outcome :: proc(s: ^Streamlink) -> Stream_Error {
 	text := strings.trim_space(string(output))
 	switch {
 	case strings.contains(text, "No playable streams"):
-		return .Offline
+		return .Offline, true
 	case state.exit_code == 0:
-		return .Ended
+		return .Ended, true
 	case:
 		log.errorf("streamlink failed: %s", text)
-		return .Streamlink_Failed
+		return .Streamlink_Failed, true
 	}
 }

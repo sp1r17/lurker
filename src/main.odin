@@ -234,7 +234,7 @@ run :: proc(channels: []string, config: Config) -> bool {
 		// Wake up for the next animation frame, browse refresh or sign-in poll,
 		// whichever is due first.
 		wait := a.next_frame_ms if a.next_frame_ms >= 0 else -1
-		dues := []int{-1, -1, volume_osd_wait(&app), controls_wait(&app), stream_info_tick(&app)}
+		dues := []int{-1, -1, volume_osd_wait(&app), controls_wait(&app), stream_info_tick(&app), stream_end_tick(&app)}
 		if app.screen == .Browse {
 			dues[0], dues[1] = browse_tick(&app), sign_in_tick(&app)
 		}

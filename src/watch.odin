@@ -26,6 +26,8 @@ VOLUME_BAR_WIDTH :: 160
 CONTROLS_MS :: 2000
 // And this long when a stream starts, to show what's playing.
 CONTROLS_START_MS :: 3000
+// How often streamlink is checked for exiting once the stream has ended.
+STREAM_END_POLL_MS :: 50
 MENU_ITEM_HEIGHT :: 34
 MENU_WIDTH :: 160
 MENU_HOVER :: Color{0x3a, 0x3a, 0x44, 255}
@@ -69,6 +71,9 @@ Watch :: struct {
 	volume_osd_until: int,
 	// Until when the video's controls show; the quality menu is open.
 	controls_until:   int,
+	// When mpv reached the stream's end (Assets.now_ms), while streamlink is still
+	// exiting; 0 otherwise.
+	ended_at:         int,
 	quality_menu:     bool,
 	// From the last draw, in pixels (zero size when hidden).
 	quality_button:   Rect,
@@ -206,6 +211,7 @@ start_stream :: proc(app: ^App, signed: bool) {
 	w := &app.watch
 	w.status = .Starting
 	w.signed_stream = signed
+	w.ended_at = 0
 	s: Streamlink
 	ok: bool
 	l := &app.layout
@@ -419,23 +425,54 @@ watch_player_events :: proc(app: ^App, events: Player_Events) {
 		// The first frame is ready: draw it now rather than on mpv's next redraw.
 		w.new_video_frame = true
 	}
-	if .Ended in events {
-		switch streamlink_outcome(&w.streamlink) {
-		case .None, .Ended:
-			w.status = .Ended
-		case .Offline:
-			w.status = .Offline
-		case .Streamlink_Failed:
-			if w.signed_stream && w.status == .Starting {
-				// Twitch may refuse the sign-in for playback; watching without it beats
-				// not watching (streamlink still cuts the ads).
-				log.warn("streamlink failed with the sign-in; trying without it")
-				start_stream(app, signed = false)
-				return
-			}
-			w.status = .Failed
-		}
+	if .Ended in events && w.ended_at == 0 {
+		w.ended_at = max(app.assets.now_ms, 1)
+		watch_stream_ended(app)
 	}
+}
+
+// After mpv reaches the stream's end: says why, once streamlink has exited, which
+// takes a moment. Checked without waiting, so the window doesn't freeze meanwhile;
+// returns false while it's still running.
+@(private = "file")
+watch_stream_ended :: proc(app: ^App) -> bool {
+	w := &app.watch
+	outcome, done := streamlink_outcome(&w.streamlink)
+	if !done {
+		if app.assets.now_ms - w.ended_at < STREAMLINK_EXIT_WAIT_MS {
+			return false
+		}
+		// Still running: mpv gave up on the stream, not streamlink.
+		streamlink_stop(&w.streamlink)
+		outcome = .Streamlink_Failed
+	}
+	w.ended_at = 0
+	switch outcome {
+	case .None, .Ended:
+		w.status = .Ended
+	case .Offline:
+		w.status = .Offline
+	case .Streamlink_Failed:
+		if w.signed_stream && w.status == .Starting {
+			// Twitch may refuse the sign-in for playback; watching without it beats
+			// not watching (streamlink still cuts the ads).
+			log.warn("streamlink failed with the sign-in; trying without it")
+			start_stream(app, signed = false)
+			return true
+		}
+		w.status = .Failed
+	}
+	return true
+}
+
+// ms until streamlink is next checked for exiting after the stream's end, for the
+// main loop's wait; 0 when it just has, to draw the outcome; -1 if not waiting.
+stream_end_tick :: proc(app: ^App) -> int {
+	w := &app.watch
+	if app.screen != .Watch || w.ended_at == 0 {
+		return -1
+	}
+	return 0 if watch_stream_ended(app) else STREAM_END_POLL_MS
 }
 
 // Takes new messages from every chat.
