@@ -128,6 +128,8 @@ stream_info_height :: proc(app: ^App) -> f32 {
 draw_stream_info :: proc(app: ^App) {
 	w := &app.watch
 	w.back_button = {}
+	w.follow_button = {}
+	w.unfollow_armed = w.unfollow_armed && controls_visible(app)
 	if !controls_visible(app) {
 		return
 	}
@@ -154,6 +156,9 @@ draw_stream_info :: proc(app: ^App) {
 	// Right side first, so the text on the left knows how much room it has: the
 	// window buttons, then viewers and uptime.
 	right := draw_window_controls(app, bar.x + bar.w, bar.y) - pad
+	if follow_left := draw_follow_button(app, right, bar.y + pad + name_h / 2); follow_left < right {
+		right = follow_left - 16 * scale
+	}
 	if w.has_info {
 		parts := make([dynamic]string, context.temp_allocator)
 		append(&parts, format_viewers(w.info.viewer_count))

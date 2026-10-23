@@ -120,3 +120,30 @@ channel_label_adds_login_when_name_differs :: proc(t: ^testing.T) {
 	testing.expect_value(t, channel_label({broadcaster_login = "moondogs_celestial", display_name = "幻月_"}), "幻月_ (moondogs_celestial)")
 	testing.expect_value(t, channel_label({broadcaster_login = "lirik"}), "lirik")
 }
+
+@(test)
+follow_reads_following_and_not :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	yes := `{"data":{"user":{"id":"121059319","self":{"follower":{"followedAt":"2017-10-16T23:04:35Z"}}}}}`
+	id, following, err := parse_follow_response(transmute([]byte)yes)
+	testing.expect_value(t, err, Twitch_Error.None)
+	testing.expect_value(t, id, "121059319")
+	testing.expect(t, following)
+	no := `{"data":{"user":{"id":"5","self":{"follower":null}}}}`
+	_, following, err = parse_follow_response(transmute([]byte)no)
+	testing.expect_value(t, err, Twitch_Error.None)
+	testing.expect(t, !following)
+	_, _, err = parse_follow_response(transmute([]byte)string(`{"data":{"user":null}}`))
+	testing.expect_value(t, err, Twitch_Error.Bad_Status)
+}
+
+@(test)
+set_follow_reports_errors :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	ok := `{"data":{"followUser":{"error":null}}}`
+	testing.expect_value(t, parse_set_follow_response(transmute([]byte)ok), Twitch_Error.None)
+	unfollowed := `{"data":{"unfollowUser":{"follow":null}}}`
+	testing.expect_value(t, parse_set_follow_response(transmute([]byte)unfollowed), Twitch_Error.None)
+	failed := `{"data":{"followUser":{"error":{"code":"TOO_MANY_FOLLOWS"}}}}`
+	testing.expect_value(t, parse_set_follow_response(transmute([]byte)failed), Twitch_Error.Bad_Status)
+}

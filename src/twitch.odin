@@ -423,3 +423,81 @@ parse_channels_response :: proc(body: []byte) -> (channels: []Channel, err: Twit
 	}
 	return r.data, .None
 }
+
+// Whether the signed-in user follows `login`, and the channel's user ID, which
+// set_follow needs. Helix can't follow or unfollow, so this and set_follow use
+// GraphQL.
+get_follow :: proc(client_id, token, login: string) -> (user_id: string, following: bool, err: Twitch_Error) {
+	variables := make(map[string]string, context.temp_allocator)
+	variables["login"] = login
+	body := gql_post(client_id, token, "query($login: String!) { user(login: $login) { id self { follower { followedAt } } } }", variables) or_return
+	return parse_follow_response(body)
+}
+
+parse_follow_response :: proc(body: []byte) -> (user_id: string, following: bool, err: Twitch_Error) {
+	r: struct {
+		data:   struct {
+			user: Maybe(struct {
+				id:   string,
+				self: struct {
+					follower: Maybe(struct {
+						followedAt: string,
+					}),
+				},
+			}),
+		},
+		errors: []struct {
+			message: string,
+		},
+	}
+	if json.unmarshal(body, &r, allocator = context.temp_allocator) != nil {
+		return "", false, .Bad_Json
+	}
+	if len(r.errors) > 0 {
+		log.warnf("GraphQL error: %s", r.errors[0].message)
+		return "", false, .Bad_Status
+	}
+	user, found := r.data.user.?
+	if !found {
+		return "", false, .Bad_Status
+	}
+	_, following = user.self.follower.?
+	return user.id, following, .None
+}
+
+// Follows or unfollows the channel with user ID `user_id`.
+set_follow :: proc(client_id, token, user_id: string, follow: bool) -> Twitch_Error {
+	variables := make(map[string]string, context.temp_allocator)
+	variables["id"] = user_id
+	query :=
+		"mutation($id: ID!) { followUser(input: {targetID: $id, disableNotifications: false}) { error { code } } }" if follow else "mutation($id: ID!) { unfollowUser(input: {targetID: $id}) { follow { followedAt } } }"
+	body := gql_post(client_id, token, query, variables) or_return
+	return parse_set_follow_response(body)
+}
+
+parse_set_follow_response :: proc(body: []byte) -> Twitch_Error {
+	r: struct {
+		data:   struct {
+			followUser: struct {
+				error: Maybe(struct {
+					code: string,
+				}),
+			},
+		},
+		errors: []struct {
+			message: string,
+		},
+	}
+	if json.unmarshal(body, &r, allocator = context.temp_allocator) != nil {
+		return .Bad_Json
+	}
+	if len(r.errors) > 0 {
+		log.warnf("GraphQL error: %s", r.errors[0].message)
+		return .Bad_Status
+	}
+	if e, failed := r.data.followUser.error.?; failed {
+		log.warnf("following failed: %s", e.code)
+		return .Bad_Status
+	}
+	return .None
+}

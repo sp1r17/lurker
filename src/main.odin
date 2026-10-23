@@ -496,6 +496,8 @@ finish_jobs :: proc(app: ^App) {
 			finish_user_job(app, &p)
 		case Stream_Info_Job:
 			finish_stream_info_job(app, &p)
+		case Follow_Job:
+			finish_follow_job(app, &p)
 		case Emoji_Job:
 			finish_emoji_job(a, &p)
 		case Cache_Prune_Job:

@@ -75,6 +75,13 @@ Watch :: struct {
 	quality_items:    [Quality]Rect,
 	latency_item:     Rect,
 	back_button:      Rect,
+	// Whether the user follows the channel, and its user ID for changing that;
+	// whether a lookup or change is running, and whether a click would unfollow.
+	follow:           Follow_State,
+	channel_id:       string,
+	follow_pending:   bool,
+	unfollow_armed:   bool,
+	follow_button:    Rect,
 	// From the last draw, in pixels: the video, the header button that hides the
 	// chats, and the tab that shows them again (zero size when not shown).
 	video_rect:      Rect,
@@ -103,6 +110,7 @@ watch_start :: proc(app: ^App, channel: string, restore := true, info: ^Stream =
 		w.info_at = max(app.assets.now_ms, 1)
 	}
 	start_stream(app, signed = app.signed_in)
+	follow_lookup(app)
 	p := pane_new(app)
 	pane_join(app, p, w.channel)
 	append(&w.panes, p)
@@ -140,6 +148,7 @@ watch_stop :: proc(app: ^App) {
 		destroy_stream(w.info)
 	}
 	delete(w.channel)
+	delete(w.channel_id)
 	w^ = {}
 	app.session += 1
 	set_title(app, "")
@@ -264,6 +273,9 @@ on_controls :: proc(app: ^App, x, y: f32) -> bool {
 	if w.back_button.w > 0 && in_rect(w.back_button, x, y) {
 		return true
 	}
+	if w.follow_button.w > 0 && in_rect(w.follow_button, x, y) {
+		return true
+	}
 	if w.quality_menu {
 		for item in w.quality_items {
 			if in_rect(item, x, y) {
@@ -300,6 +312,10 @@ controls_click :: proc(app: ^App, x, y: f32) -> bool {
 	}
 	if w.back_button.w > 0 && in_rect(w.back_button, x, y) {
 		watch_stop(app)
+		return true
+	}
+	if w.follow_button.w > 0 && in_rect(w.follow_button, x, y) {
+		follow_click(app)
 		return true
 	}
 	if w.quality_menu {
