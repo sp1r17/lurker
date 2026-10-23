@@ -1,0 +1,51 @@
+name: Build
+
+on:
+  push:
+    branches: [development, main]
+    tags: ['v*']
+  pull_request:
+
+jobs:
+  flatpak:
+    name: Flatpak
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-26.08
+      options: --privileged
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Builds the Flatpak (with Odin, mpv and streamlink) and runs the tests.
+      - uses: flathub-infra/flatpak-github-actions/flatpak-builder@933e9e8ca36e85046ebca8e211f0785c6becac40
+        with:
+          manifest-path: packaging/flatpak/io.github.sp1r17.Lurker.yml
+          bundle: lurker.flatpak
+          run-tests: true
+          cache-key: flatpak-builder-${{ github.sha }}
+
+  # A version tag (v1.2.3) publishes its Flatpak on a GitHub release.
+  release:
+    name: Release
+    needs: flatpak
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: lurker-x86_64.flatpak
+      - name: Upload to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          file="lurker-${TAG#v}-x86_64.flatpak"
+          mv lurker.flatpak "$file"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$TAG" "$file" --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" "$file" --repo "$GITHUB_REPOSITORY" --verify-tag \
+              --title "Lurker ${TAG#v}" \
+              --notes "Install with \`flatpak install --user $file\`. x86-64 only; updates are manual."
+          fi
