@@ -42,9 +42,20 @@ flatpak run io.github.sp1r17.Lurker
 
 The first build compiles Odin, mpv and their dependencies, and takes a while.
 
+## Windows
+
+Download `lurker-<version>-x86_64-setup.exe` from the
+[latest release](https://github.com/sp1r17/lurker/releases/latest) and run it. It
+includes mpv and streamlink, and installs for the current user unless you choose
+otherwise.
+
+To build it, run `packaging\windows\build.ps1` from an "x64 Native Tools" prompt
+with Odin on the PATH. It downloads libmpv and streamlink, and makes the installer
+if Inno Setup is installed.
+
 ## Requirements
 
-To build and install without Flatpak:
+To build and install on Linux without Flatpak:
 
 - [mpv](https://mpv.io) (libmpv), SDL3, SDL3_image, libcurl, fontconfig and Wayland
 - [streamlink](https://streamlink.github.io)
