@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <!-- lurker.svg with bolder shapes, for 16 and 24 px -->
+  <rect x="8" y="8" width="112" height="112" rx="28" fill="#262a42"/>
+  <ellipse cx="42" cy="60" rx="22" ry="25" fill="#f5f1e8"/>
+  <ellipse cx="86" cy="60" rx="22" ry="25" fill="#f5f1e8"/>
+  <circle cx="50" cy="66" r="12" fill="#171a28"/>
+  <circle cx="94" cy="66" r="12" fill="#171a28"/>
+  <path d="M26 76 h76 a14 14 0 0 1 14 14 v8 a14 14 0 0 1 -14 14 h-48 l-16 10 v-10 h-12 a14 14 0 0 1 -14 -14 v-8 a14 14 0 0 1 14 -14 z" fill="#4fc4a0"/>
+</svg>

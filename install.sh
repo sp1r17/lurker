@@ -36,6 +36,9 @@ BIN="$ROOT/bin/lurker"
 DESKTOP="$ROOT/share/applications/lurker.desktop"
 ICON="$ROOT/share/icons/hicolor/scalable/apps/lurker.svg"
 ICON_PNG="$ROOT/share/icons/hicolor/256x256/apps/lurker.png"
+# Drawn bolder, for panels and trays.
+ICON_16="$ROOT/share/icons/hicolor/16x16/apps/lurker.png"
+ICON_24="$ROOT/share/icons/hicolor/24x24/apps/lurker.png"
 
 refresh_caches() {
   # Only for a live install; packagers' post-install scripts do this.
@@ -58,7 +61,7 @@ refresh_caches() {
 }
 
 if [ "$UNINSTALL" = 1 ]; then
-  rm -f "$BIN" "$DESKTOP" "$ICON" "$ICON_PNG"
+  rm -f "$BIN" "$DESKTOP" "$ICON" "$ICON_PNG" "$ICON_16" "$ICON_24"
   refresh_caches
   echo "Removed Lurker from $ROOT."
   echo "Settings and sign-in are still in ~/.config/lurker; delete it to remove them."
@@ -104,6 +107,8 @@ fi
 install -Dm755 build/lurker "$BIN"
 install -Dm644 assets/install/lurker.svg "$ICON"
 install -Dm644 assets/install/lurker.png "$ICON_PNG"
+install -Dm644 assets/install/lurker-16.png "$ICON_16"
+install -Dm644 assets/install/lurker-24.png "$ICON_24"
 # The menu entry runs the installed binary by its full path, so it works even
 # when $PREFIX/bin isn't on the PATH.
 mkdir -p "$(dirname "$DESKTOP")"
