@@ -6,7 +6,6 @@ import "core:log"
 import "core:math/rand"
 import "core:strings"
 import "core:sync"
-import "core:sys/posix"
 import "core:thread"
 import "core:time"
 import "vendor:curl"
@@ -160,6 +159,35 @@ chat_thread :: proc(chat: ^Chat) {
 	}
 }
 
+// Runs the connection added to `multi`, checking for a stop every
+// CHAT_STOP_CHECK_MS meanwhile: connecting can take until the timeout, and leaving
+// a channel mustn't wait for it. (curl's progress callback, tried first, wasn't
+// called while connecting everywhere.) Returns false if it didn't connect.
+@(private = "file")
+chat_connect :: proc(chat: ^Chat, multi: ^curl.CURLM) -> bool {
+	for {
+		running: c.int
+		curl.multi_perform(multi, &running)
+		if running == 0 {
+			break
+		}
+		if stopping(chat) {
+			return false
+		}
+		curl.multi_poll(multi, nil, 0, CHAT_STOP_CHECK_MS, nil)
+	}
+	queued: c.int
+	msg := curl.multi_info_read(multi, &queued)
+	if msg == nil || msg.msg != .DONE {
+		return false
+	}
+	if msg.data.result != .E_OK {
+		log.warnf("chat: can't connect: %s", curl.easy_strerror(msg.data.result))
+		return false
+	}
+	return true
+}
+
 // Connects, joins the channel and reads until the connection drops, Twitch asks for
 // a reconnect, or the chat is stopped.
 @(private = "file")
@@ -176,18 +204,15 @@ chat_session :: proc(chat: ^Chat) {
 	// 2 = connect, do the WebSocket upgrade, then hand the socket to ws_send/ws_recv.
 	curl.easy_setopt(h, .CONNECT_ONLY, c.long(2))
 	curl.easy_setopt(h, .CONNECTTIMEOUT, c.long(10))
-	// Connecting can take until that timeout; checking for a stop while it does keeps
-	// leaving a channel from waiting on it.
-	curl.easy_setopt(h, .NOPROGRESS, c.long(0))
-	curl.easy_setopt(h, .XFERINFODATA, chat)
-	curl.easy_setopt(h, .XFERINFOFUNCTION, proc "c" (chat: rawptr, _, _, _, _: curl.off_t) -> c.int {
-		return 1 if sync.atomic_load(&(^Chat)(chat).stop) else 0
-	})
-	if rc := curl.easy_perform(h); rc != .E_OK {
-		if rc == .E_ABORTED_BY_CALLBACK {
-			return
-		}
-		log.warnf("chat: can't connect: %s", curl.easy_strerror(rc))
+	// The WebSocket stays with the multi handle that connected it, until the end.
+	multi := curl.multi_init()
+	if multi == nil {
+		return
+	}
+	defer curl.multi_cleanup(multi)
+	curl.multi_add_handle(multi, h)
+	defer curl.multi_remove_handle(multi, h)
+	if !chat_connect(chat, multi) {
 		return
 	}
 
@@ -249,8 +274,7 @@ chat_session :: proc(chat: ^Chat) {
 		if !send_outgoing(chat, h) {
 			return
 		}
-		fds := [1]posix.pollfd{{fd = posix.FD(sock), events = {.IN}}}
-		posix.poll(&fds[0], 1, CHAT_STOP_CHECK_MS)
+		wait_readable(sock, CHAT_STOP_CHECK_MS)
 	}
 }
 
