@@ -143,6 +143,10 @@ Browse :: struct {
 	// hovered (Assets.now_ms).
 	tooltip_card:         int,
 	tooltip_since:        int,
+	// Each search result's follow button (zero size for none), and which one
+	// is waiting for a second click to unfollow (its index + 1; 0 for none).
+	follow_buttons:       [dynamic]Rect,
+	unfollow_armed:       int,
 	tabs:                 [Browse_View]Rect,
 	// The Categories tab's two section buttons.
 	section_buttons:      [2]Rect,
@@ -184,6 +188,7 @@ browse_destroy :: proc(b: ^Browse) {
 	}
 	delete(b.results)
 	delete(b.cards)
+	delete(b.follow_buttons)
 }
 
 // The stream list `view` shows, or nil if it doesn't show one.
@@ -590,7 +595,17 @@ run_search_job :: proc(job: ^Job) {
 		switch p.kind {
 		case .Channels:
 			channels := search_channels(p.client_id, p.auth.access_token, p.query) or_return
+			// Which are followed, for their follow buttons; without it they have none.
+			ids := make([dynamic]string, context.temp_allocator)
 			for c in channels {
+				append(&ids, c.id)
+			}
+			followed, follows_err := get_follows(p.client_id, p.auth.access_token, ids[:])
+			for c in channels {
+				c := c
+				if follows_err == .None {
+					c.follow = .Following if followed[c.id] else .Not_Following
+				}
 				append(&p.channels, clone_channel(c))
 			}
 		case .Categories:
@@ -628,6 +643,7 @@ finish_search_job :: proc(app: ^App, p: ^Search_Job) {
 	b.category_results, p.categories = p.categories, {}
 	b.search_state = .Loaded
 	b.selected = 0
+	b.unfollow_armed = 0
 }
 
 // Forgets the search results, releasing their pictures: new ones come with every
@@ -940,6 +956,12 @@ browse_click :: proc(app: ^App, x, y: f32) -> bool {
 			return true
 		}
 	}
+	for button, result in b.follow_buttons {
+		if button.w > 0 && in_rect(button, x, y) {
+			follow_click_result(app, result)
+			return true
+		}
+	}
 	i := browse_card_at(b, x, y)
 	if i < 0 {
 		return false
@@ -991,6 +1013,7 @@ draw_browse :: proc(app: ^App, screen: Rect) {
 	draw_browse_header(app, screen)
 
 	clear(&b.cards)
+	clear(&b.follow_buttons)
 	b.back_button = {}
 	b.section_buttons = {}
 	content := Rect{0, b.header_h, screen.w, screen.h - b.header_h}
@@ -1183,14 +1206,15 @@ draw_stream_list :: proc(app: ^App, l: ^Stream_List, content: Rect, empty_messag
 		draw_text(r, .Regular, text_size, tx, ty, fit_text(r, .Regular, text_size, s.game_name, tw), BROWSE_DIM_TEXT)
 	}
 	clip_end(r)
-	draw_title_tooltip(app, tooltip, tooltip_title, content)
+	draw_title_tooltip(app, tooltip, tooltip_title, content, .Bold, card_title_size, text_pad)
 }
 
-// The full title of the hovered card, over its cut-short one, after the mouse
-// has rested on the card for TOOLTIP_DELAY_MS. `at` is the card's text, from the
-// title down, which the tooltip covers at least.
+// The full title of the hovered card or search row, over its cut-short one, after
+// the mouse has rested on it for TOOLTIP_DELAY_MS. `at` is the text, from the
+// title down, which the tooltip covers at least; `top` is how far above the text
+// it starts, no more than there's room for.
 @(private = "file")
-draw_title_tooltip :: proc(app: ^App, at: Rect, title: string, content: Rect) {
+draw_title_tooltip :: proc(app: ^App, at: Rect, title: string, content: Rect, font: Font, size, top: f32) {
 	a := &app.assets
 	b := &app.browse
 	if b.hovered != b.tooltip_card {
@@ -1207,16 +1231,15 @@ draw_title_tooltip :: proc(app: ^App, at: Rect, title: string, content: Rect) {
 		return
 	}
 	r := &a.renderer
-	size := BROWSE_CARD_TITLE_SIZE * app.scale
 	pad := 8 * app.scale
-	lh := line_height(r, .Bold, size)
-	lines := wrap_words(a, .Bold, size, title, at.w)
-	box := Rect{at.x - pad, at.y - pad, at.w + 2 * pad, max(f32(len(lines)) * lh + 2 * pad, at.h + pad)}
+	lh := line_height(r, font, size)
+	lines := wrap_words(a, font, size, title, at.w)
+	box := Rect{at.x - pad, at.y - top, at.w + 2 * pad, max(f32(len(lines)) * lh + top + pad, at.h + top)}
 	// Kept on screen: moved up if it would run off the bottom.
 	box.y = max(content.y, min(box.y, content.y + content.h - box.h))
 	draw_rect(r, box, MENU_HOVER)
 	for line, i in lines {
-		draw_text_line(a, .Bold, size, box.x + pad, box.y + pad + f32(i) * lh, line, BROWSE_TEXT, at.w)
+		draw_text_line(a, font, size, box.x + pad, box.y + pad + f32(i) * lh, line, BROWSE_TEXT, at.w)
 	}
 }
 
@@ -1507,6 +1530,9 @@ draw_search :: proc(app: ^App, content: Rect) {
 	scroll^ = clamp(scroll^, 0, b.max_scroll[.Search])
 
 	list_w := min(content.w - 2 * pad, BROWSE_RESULTS_WIDTH * scale * r.text_scale)
+	resize(&b.follow_buttons, len(b.results))
+	tooltip: Rect
+	tooltip_text: string
 	clip_begin(r, content)
 	y := content.y + pad - scroll^
 	for i in 0 ..< rows {
@@ -1534,7 +1560,19 @@ draw_search :: proc(app: ^App, content: Rect) {
 			draw_text(r, .Regular, text_size, tx, ty + lh_name, "Open the channel by its name", BROWSE_DIM_TEXT)
 			continue
 		}
-		c := b.results[i - 1 if has_go_to else i]
+		result := i - 1 if has_go_to else i
+		c := b.results[result]
+		// "Follow" only on the row under the mouse or selected, so the list isn't a
+		// column of buttons; "Following" always, to show which are.
+		follow := c.follow
+		if follow == .Not_Following && i != b.hovered && i != b.selected {
+			follow = .Unknown
+		}
+		button := draw_follow_pill(app, row.x + row.w - row_pad, row.y + row.h / 2, follow, c.follow_pending, b.unfollow_armed == result + 1)
+		b.follow_buttons[result] = button
+		if button.w > 0 {
+			tw = button.x - 12 * scale - tx
+		}
 		image := image_get(&a.images, &a.jobs, c.thumbnail_url, 1) if c.thumbnail_url != "" else nil
 		if image != nil && image.state == .Ready {
 			texture, _ := image_frame(image, a.now_ms)
@@ -1552,12 +1590,21 @@ draw_search :: proc(app: ^App, content: Rect) {
 			draw_text(r, .Bold, text_size, x + dot + 5 * scale, ty + (lh_name - lh_text) / 2, "LIVE", LIVE_RED)
 			detail = c.title if c.game_name == "" else fmt.tprintf("%s  ·  %s", c.game_name, c.title)
 		}
-		draw_text_line(a, .Regular, text_size, tx, ty + lh_name, detail, BROWSE_DIM_TEXT if !c.is_live else BROWSE_TEXT, tw)
+		detail_color := BROWSE_DIM_TEXT if !c.is_live else BROWSE_TEXT
+		if _, cut := draw_text_line(a, .Regular, text_size, tx, ty + lh_name, detail, detail_color, tw); cut && i == b.hovered {
+			tooltip, tooltip_text = {tx, ty + lh_name, tw, row.y + row.h - row_pad - (ty + lh_name)}, detail
+		}
 	}
 	if status != "" {
 		draw_text(r, .Regular, text_size, content.x + pad, y + pad / 2, status, BROWSE_DIM_TEXT)
 	}
 	clip_end(r)
+	// Unfollowing waits for a second click only while the mouse stays on it.
+	if armed := b.unfollow_armed - 1; armed >= 0 && (armed >= len(b.follow_buttons) || !in_rect(b.follow_buttons[armed], app.mouse.x, app.mouse.y)) {
+		b.unfollow_armed = 0
+	}
+	// Right under the name, which stays readable.
+	draw_title_tooltip(app, tooltip, tooltip_text, content, .Regular, text_size, scale)
 }
 
 draw_centered :: proc(r: ^Renderer, font: Font, size: f32, area: Rect, text: string, color: Color) {

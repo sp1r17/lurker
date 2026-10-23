@@ -2,6 +2,10 @@ package app
 
 import "core:strings"
 
+// "Following" stands out from both the stream info bar and a hovered search row.
+FOLLOWING_BUTTON :: Color{0x3a, 0x3a, 0x44, 255}
+FOLLOWING_BUTTON_HOVER :: Color{0x4a, 0x4a, 0x56, 255}
+
 Follow_State :: enum {
 	// Not looked up yet, or signed out: no button.
 	Unknown,
@@ -10,7 +14,7 @@ Follow_State :: enum {
 }
 
 // Looks up whether the user follows the watched channel, or (with `set`)
-// follows or unfollows it.
+// follows or unfollows it, or a channel in the search results (`from_search`).
 Follow_Job :: struct {
 	client_id: string,
 	// A copy; the job may refresh it.
@@ -19,6 +23,7 @@ Follow_Job :: struct {
 	// Set by a lookup, given to a change. Owned.
 	user_id:   string,
 	set:       bool,
+	from_search: bool,
 	// What to change it to, or what a lookup found.
 	following: bool,
 	// The watch it's for; dropped if that's over.
@@ -48,7 +53,9 @@ follow_start :: proc(app: ^App, p: Follow_Job) {
 	p.client_id = strings.clone(app.client_id)
 	p.auth = clone_auth(app.auth)
 	p.session = app.session
-	app.watch.follow_pending = true
+	if !p.from_search {
+		app.watch.follow_pending = true
+	}
 	jobs_add(&app.assets.jobs, run_follow_job, p)
 }
 
@@ -83,6 +90,22 @@ follow_request :: proc(p: ^Follow_Job) -> Twitch_Error {
 
 finish_follow_job :: proc(app: ^App, p: ^Follow_Job) {
 	apply_auth_check(app, p.check, p.auth)
+	if p.set && p.ok {
+		// The browse screen's Following list is out of date now.
+		app.browse.following.last_refresh = -BROWSE_REFRESH_MS
+	}
+	if p.from_search {
+		// The results may have changed since; the channel may still be there.
+		for &c in app.browse.results {
+			if c.broadcaster_login == p.login {
+				c.follow_pending = false
+				if p.ok {
+					c.follow = .Following if p.following else .Not_Following
+				}
+			}
+		}
+		return
+	}
 	w := &app.watch
 	if app.screen != .Watch || p.session != app.session {
 		return
@@ -95,23 +118,14 @@ finish_follow_job :: proc(app: ^App, p: ^Follow_Job) {
 	if !p.set {
 		delete(w.channel_id)
 		w.channel_id, p.user_id = p.user_id, ""
-	} else {
-		// The browse screen's Following list is out of date now.
-		app.browse.following.last_refresh = -BROWSE_REFRESH_MS
 	}
 	w.follow = .Following if p.following else .Not_Following
 }
 
-// A click on the follow button: follows at once, but unfollowing takes a second
-// click, since it loses the follow's date.
+// A click on the watched channel's follow button.
 follow_click :: proc(app: ^App) {
 	w := &app.watch
-	switch {
-	case w.follow_pending || w.follow == .Unknown:
-	case w.follow == .Following && !w.unfollow_armed:
-		w.unfollow_armed = true
-	case:
-		w.unfollow_armed = false
+	if follow_click_starts(w.follow, w.follow_pending, &w.unfollow_armed) {
 		follow_start(
 			app,
 			Follow_Job {
@@ -124,13 +138,61 @@ follow_click :: proc(app: ^App) {
 	}
 }
 
-// Draws the follow button with its right edge at `right`, centred on `mid_y`.
-// Returns its left edge, or `right` if there's no button.
+// A click on the follow button of search result `i` (an index into
+// Browse.results).
+follow_click_result :: proc(app: ^App, i: int) {
+	b := &app.browse
+	c := &b.results[i]
+	armed := b.unfollow_armed == i + 1
+	starts := follow_click_starts(c.follow, c.follow_pending, &armed)
+	b.unfollow_armed = i + 1 if armed else 0
+	if starts {
+		c.follow_pending = true
+		follow_start(
+			app,
+			Follow_Job {
+				login = strings.clone(c.broadcaster_login),
+				user_id = strings.clone(c.id),
+				set = true,
+				following = c.follow == .Not_Following,
+				from_search = true,
+			},
+		)
+	}
+}
+
+// Whether a click on a follow button should change the follow now: following is
+// at once, but unfollowing takes a second click (which `armed` waits for),
+// since it loses the follow's date.
+@(private = "file")
+follow_click_starts :: proc(state: Follow_State, pending: bool, armed: ^bool) -> bool {
+	switch {
+	case pending || state == .Unknown:
+		return false
+	case state == .Following && !armed^:
+		armed^ = true
+		return false
+	}
+	armed^ = false
+	return true
+}
+
+// Draws the watched channel's follow button with its right edge at `right`,
+// centred on `mid_y`. Returns its left edge, or `right` if there's no button.
 draw_follow_button :: proc(app: ^App, right, mid_y: f32) -> f32 {
 	w := &app.watch
-	w.follow_button = {}
-	if w.follow == .Unknown {
-		return right
+	w.follow_button = draw_follow_pill(app, right, mid_y, w.follow, w.follow_pending, w.unfollow_armed)
+	// Unfollowing waits for a second click only while the mouse stays on it.
+	w.unfollow_armed &&= in_rect(w.follow_button, app.mouse.x, app.mouse.y)
+	return w.follow_button.x if w.follow_button.w > 0 else right
+}
+
+// A follow button with its right edge at `right`, centred on `mid_y`: "Follow",
+// "Following", or "Unfollow?" while `armed`. Returns where it is, or zero size if
+// `state` is Unknown.
+draw_follow_pill :: proc(app: ^App, right, mid_y: f32, state: Follow_State, pending, armed: bool) -> Rect {
+	if state == .Unknown {
+		return {}
 	}
 	r := &app.assets.renderer
 	scale := app.scale
@@ -143,20 +205,17 @@ draw_follow_button :: proc(app: ^App, right, mid_y: f32) -> f32 {
 	}
 	bw := tw + 24 * scale
 	bh := line_height(r, .Bold, size) + 12 * scale
-	w.follow_button = {right - bw, mid_y - bh / 2, bw, bh}
-	hovered := in_rect(w.follow_button, app.mouse.x, app.mouse.y)
-	if !hovered {
-		w.unfollow_armed = false
-	}
+	button := Rect{right - bw, mid_y - bh / 2, bw, bh}
+	hovered := in_rect(button, app.mouse.x, app.mouse.y)
 	label := labels[0]
 	background := SIGN_IN_BUTTON_HOVER if hovered else SIGN_IN_BUTTON
 	switch {
-	case w.unfollow_armed:
+	case armed:
 		label, background = labels[2], LIVE_RED
-	case w.follow == .Following:
-		label, background = labels[1], MENU_HOVER if hovered else BROWSE_CARD_HOVER
+	case state == .Following:
+		label, background = labels[1], FOLLOWING_BUTTON_HOVER if hovered else FOLLOWING_BUTTON
 	}
-	draw_rect(r, w.follow_button, background)
-	draw_centered(r, .Bold, size, w.follow_button, label, BROWSE_DIM_TEXT if w.follow_pending else BROWSE_TEXT)
-	return w.follow_button.x
+	draw_rect(r, button, background)
+	draw_centered(r, .Bold, size, button, label, BROWSE_DIM_TEXT if pending else BROWSE_TEXT)
+	return button
 }

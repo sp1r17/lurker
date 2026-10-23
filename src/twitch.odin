@@ -378,6 +378,7 @@ sort_by_viewers :: proc(categories: []Category) {
 
 // A channel found by searching: live or not.
 Channel :: struct {
+	id:                string,
 	broadcaster_login: string,
 	display_name:      string,
 	game_name:         string,
@@ -385,20 +386,28 @@ Channel :: struct {
 	is_live:           bool,
 	// The channel's profile picture.
 	thumbnail_url:     string,
+	// Not from Helix: whether the user follows it (looked up with get_follows),
+	// and whether following or unfollowing it is under way.
+	follow:            Follow_State,
+	follow_pending:    bool,
 }
 
 clone_channel :: proc(c: Channel) -> Channel {
 	return {
+		id = strings.clone(c.id),
 		broadcaster_login = strings.clone(c.broadcaster_login),
 		display_name = strings.clone(c.display_name),
 		game_name = strings.clone(c.game_name),
 		title = strings.clone(c.title),
 		is_live = c.is_live,
 		thumbnail_url = strings.clone(c.thumbnail_url),
+		follow = c.follow,
+		follow_pending = c.follow_pending,
 	}
 }
 
 destroy_channel :: proc(c: Channel) {
+	delete(c.id)
 	delete(c.broadcaster_login)
 	delete(c.display_name)
 	delete(c.game_name)
@@ -463,6 +472,60 @@ parse_follow_response :: proc(body: []byte) -> (user_id: string, following: bool
 	}
 	_, following = user.self.follower.?
 	return user.id, following, .None
+}
+
+// Which of the channels with user IDs `ids` the signed-in user follows, in one
+// request. Allocated with the temp allocator.
+get_follows :: proc(client_id, token: string, ids: []string) -> (followed: map[string]bool, err: Twitch_Error) {
+	// The IDs go into the query itself (variables here are strings only), so only
+	// numeric ones are sent.
+	list := make([dynamic]string, context.temp_allocator)
+	for id in ids {
+		if id != "" && strings.trim_left(id, "0123456789") == "" {
+			append(&list, fmt.tprintf("\"%s\"", id))
+		}
+	}
+	if len(list) == 0 {
+		return make(map[string]bool, context.temp_allocator), .None
+	}
+	query := strings.concatenate(
+		{"query { users(ids: [", strings.join(list[:], ",", context.temp_allocator), "]) { id self { follower { followedAt } } } }"},
+		context.temp_allocator,
+	)
+	body := gql_post(client_id, token, query) or_return
+	return parse_follows_response(body)
+}
+
+parse_follows_response :: proc(body: []byte) -> (followed: map[string]bool, err: Twitch_Error) {
+	r: struct {
+		data:   struct {
+			users: []Maybe(struct {
+				id:   string,
+				self: struct {
+					follower: Maybe(struct {
+						followedAt: string,
+					}),
+				},
+			}),
+		},
+		errors: []struct {
+			message: string,
+		},
+	}
+	if json.unmarshal(body, &r, allocator = context.temp_allocator) != nil {
+		return nil, .Bad_Json
+	}
+	if len(r.errors) > 0 {
+		log.warnf("GraphQL error: %s", r.errors[0].message)
+		return nil, .Bad_Status
+	}
+	followed = make(map[string]bool, context.temp_allocator)
+	for maybe_user in r.data.users {
+		// A banned or deleted channel is null.
+		user := maybe_user.? or_continue
+		_, followed[user.id] = user.self.follower.?
+	}
+	return followed, .None
 }
 
 // Follows or unfollows the channel with user ID `user_id`.

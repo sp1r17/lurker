@@ -147,3 +147,15 @@ set_follow_reports_errors :: proc(t: ^testing.T) {
 	failed := `{"data":{"followUser":{"error":{"code":"TOO_MANY_FOLLOWS"}}}}`
 	testing.expect_value(t, parse_set_follow_response(transmute([]byte)failed), Twitch_Error.Bad_Status)
 }
+
+@(test)
+follows_read_several_channels :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	body := `{"data":{"users":[{"id":"121059319","self":{"follower":{"followedAt":"2017-10-16T23:04:35Z"}}},` +
+		`null,{"id":"12826","self":{"follower":null}}]}}`
+	followed, err := parse_follows_response(transmute([]byte)body)
+	testing.expect_value(t, err, Twitch_Error.None)
+	testing.expect_value(t, len(followed), 2)
+	testing.expect(t, followed["121059319"])
+	testing.expect(t, !followed["12826"])
+}
