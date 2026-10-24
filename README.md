@@ -14,7 +14,9 @@ pre-roll or mid-roll ads.
   other channels' chats as splits beside the video
 - Mentions are highlighted, with a count of unread ones on each chat
 - Hover a stream card for its full title, or an emote or badge for its name
-- Past broadcasts for offline channels, with seeking and chat replay
+- Each channel's past broadcasts, highlights, uploads and clips, with chat replay,
+  chapters, seek-bar previews, playback speed, and resuming where you left off
+- Watch a live stream from its start, then jump back to live
 - Quality selection, low-latency mode, volume boost up to 130%
 - Follow and unfollow channels
 - Remembers volume, quality, splits, chat visibility and text size
@@ -94,6 +96,7 @@ To build without installing, run `./build.sh release`. The binary is written to
 ```sh
 lurker                      # browse the channels you follow
 lurker <channel>...         # watch a channel, with any others' chats as splits
+lurker <video or clip link> # e.g. https://twitch.tv/videos/123?t=1h2m
 lurker --login              # sign in from the terminal
 ```
 
@@ -109,7 +112,10 @@ settings are stored in `~/.config/lurker` (`%APPDATA%\lurker` on Windows).
 | Space | Pause |
 | M | Mute |
 | Up / Down | Volume |
-| Left / Right | Seek 10 seconds (past broadcasts) |
+| Left / Right | Seek 10 seconds (videos) |
+| [ / ] | Slower / faster (videos) |
+| Page Up / Page Down | Previous / next chapter |
+| Home | Start a resumed video over |
 | F, or double-click the video | Fullscreen |
 | C | Show or hide chat |
 | Enter | Chat in the focused split, or play an offline channel's last broadcast |

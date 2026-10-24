@@ -1,5 +1,6 @@
 package app
 
+import "core:fmt"
 import "core:testing"
 import "core:time"
 
@@ -200,21 +201,52 @@ last_live_reads_naturally :: proc(t: ^testing.T) {
 }
 
 @(test)
-latest_vod_reads :: proc(t: ^testing.T) {
+channel_videos_read :: proc(t: ^testing.T) {
 	defer free_all(context.temp_allocator)
-	body := `{"data":{"user":{"videos":{"edges":[{"node":{"id":"2908012950","title":"SLOPTOBER 21","lengthSeconds":24205,` +
-		`"createdAt":"2026-10-22T22:30:13Z","game":{"displayName":"Games + Demos"}}}]}}}}`
-	vod, found, err := parse_latest_vod_response(transmute([]byte)body)
+	body := `{"data":{"user":{"videos":{"edges":[{"cursor":"c1","node":{"id":"2909463658","title":"WORLDS","lengthSeconds":24912,` +
+		`"createdAt":"2026-10-24T13:48:38Z","viewCount":5,"status":"RECORDING","broadcastType":"ARCHIVE","previewThumbnailURL":"https://x/t.jpg",` +
+		`"seekPreviewsURL":"https://x/info.json","game":{"displayName":"League of Legends"},"owner":{"login":"caedrel","displayName":"Caedrel"}}},` +
+		`{"cursor":"c2","node":{"id":"2","title":"Best of","lengthSeconds":60,"createdAt":"","viewCount":9,"status":"RECORDED",` +
+		`"broadcastType":"HIGHLIGHT","game":null,"owner":null}}],"pageInfo":{"hasNextPage":true}}}}}`
+	videos, next, err := parse_channel_videos_response(transmute([]byte)body, .Broadcast)
 	testing.expect_value(t, err, Twitch_Error.None)
-	testing.expect(t, found)
-	testing.expect_value(t, vod.id, "2908012950")
-	testing.expect_value(t, vod.length, 24205)
-	testing.expect_value(t, vod.game, "Games + Demos")
-	_, found, err = parse_latest_vod_response(transmute([]byte)string(`{"data":{"user":{"videos":{"edges":[]}}}}`))
+	testing.expect_value(t, len(videos), 2)
+	testing.expect_value(t, next, "c2")
+	testing.expect(t, videos[0].recording)
+	testing.expect_value(t, videos[0].login, "caedrel")
+	testing.expect_value(t, videos[0].game, "League of Legends")
+	testing.expect_value(t, videos[1].kind, Video_Kind.Highlight)
+
+	clips := `{"data":{"user":{"clips":{"edges":[{"cursor":"MQ==","node":{"slug":"Funny-Clip","title":"MAAAAN","durationSeconds":16,` +
+		`"viewCount":813,"createdAt":"","thumbnailURL":"https://x/thumb-0000000000-1920x1080.jpg","game":null,"broadcaster":{"login":"moonmoon","displayName":"MOONMOON"},` +
+		`"video":{"id":"2906292713"},"videoOffsetSeconds":20159}}],` +
+		`"pageInfo":{"hasNextPage":false}}}}}`
+	videos, next, err = parse_channel_videos_response(transmute([]byte)clips, .Clip)
 	testing.expect_value(t, err, Twitch_Error.None)
-	testing.expect(t, !found)
+	testing.expect_value(t, next, "")
+	testing.expect_value(t, videos[0].kind, Video_Kind.Clip)
+	testing.expect_value(t, videos[0].id, "Funny-Clip")
+	// The small thumbnail, by name.
+	testing.expect_value(t, videos[0].thumbnail_url, "https://x/thumb-0000000000-480x272.jpg")
+	// The broadcast it was cut from, for its chat.
+	testing.expect_value(t, videos[0].source_id, "2906292713")
+	testing.expect_value(t, videos[0].source_offset, 20159)
 }
 
+@(test)
+chapters_read :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	body := `{"data":{"video":{"moments":{"edges":[{"node":{"positionMilliseconds":0,"durationMilliseconds":8126000,"description":"Endacopia"}},` +
+		`{"node":{"positionMilliseconds":8126000,"durationMilliseconds":1000,"description":"Just Chatting"}}]}}}}`
+	chapters, err := parse_chapters_response(transmute([]byte)body)
+	testing.expect_value(t, err, Twitch_Error.None)
+	testing.expect_value(t, len(chapters), 2)
+	testing.expect_value(t, chapters[1].start, 8126000)
+	testing.expect_value(t, chapters[1].title, "Just Chatting")
+	none, none_err := parse_chapters_response(transmute([]byte)string(`{"data":{"video":{"moments":{"edges":[]}}}}`))
+	testing.expect_value(t, none_err, Twitch_Error.None)
+	testing.expect_value(t, len(none), 0)
+}
 @(test)
 vod_comments_become_chat_messages :: proc(t: ^testing.T) {
 	defer free_all(context.temp_allocator)
@@ -241,4 +273,119 @@ vod_comments_become_chat_messages :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(m.message.badges), 1)
 	testing.expect_value(t, m.message.fragments[1].kind, Fragment_Kind.Emote)
 	testing.expect_value(t, m.message.fragments[1].url_1x, "https://static-cdn.jtvnw.net/emoticons/v2/25/default/dark/1.0")
+}
+
+@(test)
+watched_positions_resume_sensibly :: proc(t: ^testing.T) {
+	w: Watched
+	defer watched_destroy(&w)
+	watched_set(&w, "a", 3600, 7200)
+	watched_set(&w, "near-start", 10, 7200)
+	watched_set(&w, "near-end", 7170, 7200)
+	testing.expect_value(t, watched_resume_at(&w, "a", 7200), 3600)
+	testing.expect_value(t, watched_resume_at(&w, "near-start", 7200), 0)
+	testing.expect_value(t, watched_resume_at(&w, "near-end", 7200), 0)
+	testing.expect_value(t, watched_resume_at(&w, "unseen", 7200), 0)
+	testing.expect_value(t, watched_progress(&w, "a", 7200), 0.5)
+	testing.expect_value(t, watched_progress(&w, "near-end", 7200), 1)
+}
+
+@(test)
+watched_keeps_the_most_recent :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	w: Watched
+	defer watched_destroy(&w)
+	for i in 0 ..< WATCHED_MAX + 5 {
+		id := fmt.tprintf("%d", i)
+		watched_set(&w, id, 100, 1000)
+		// Spread out in time, oldest first.
+		e := w.entries[id]
+		e.at = i64(i)
+		w.entries[id] = e
+	}
+	watched_set(&w, "newest", 100, 1000)
+	testing.expect_value(t, len(w.entries), WATCHED_MAX)
+	_, oldest_kept := w.entries["0"]
+	testing.expect(t, !oldest_kept)
+	_, newest_kept := w.entries["newest"]
+	testing.expect(t, newest_kept)
+}
+
+@(test)
+recording_playlist_is_finished :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	playlist := "#EXTM3U\n#EXT-X-PLAYLIST-TYPE:EVENT\n#EXTINF:10.000,\n0.ts\n#EXTINF:10.000,\r\n1.ts\n"
+	out, ok := finished_playlist(playlist, "https://cdn.example/abc/480p30/index-dvr.m3u8")
+	testing.expect(t, ok)
+	testing.expect_value(
+		t,
+		out,
+		"#EXTM3U\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXTINF:10.000,\nhttps://cdn.example/abc/480p30/0.ts\n#EXTINF:10.000,\nhttps://cdn.example/abc/480p30/1.ts\n#EXT-X-ENDLIST\n",
+	)
+	_, ok = finished_playlist("<html>", "https://x/y")
+	testing.expect(t, !ok)
+}
+
+@(test)
+links_are_read :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	cases := []struct {
+		arg:  string,
+		kind: Link_Kind,
+		id:   string,
+		start: int,
+	} {
+		{"MoonMoon", .Channel, "moonmoon", 0},
+		{"https://www.twitch.tv/moonmoon", .Channel, "moonmoon", 0},
+		{"https://www.twitch.tv/videos/2908932737", .Video, "2908932737", 0},
+		{"twitch.tv/videos/2908932737?t=1h2m3s", .Video, "2908932737", 3723},
+		{"https://m.twitch.tv/videos/5?filter=all&t=90s", .Video, "5", 90},
+		{"https://clips.twitch.tv/FunnyClip-AbC_123", .Clip, "FunnyClip-AbC_123", 0},
+		{"https://www.twitch.tv/moonmoon/clip/FunnyClip-AbC_123?featured=false", .Clip, "FunnyClip-AbC_123", 0},
+	}
+	for c in cases {
+		link, ok := parse_twitch_link(c.arg)
+		testing.expectf(t, ok, "%s wasn't read", c.arg)
+		testing.expect_value(t, link.kind, c.kind)
+		testing.expect_value(t, link.id, c.id)
+		testing.expect_value(t, link.start, c.start)
+	}
+	for bad in ([]string{"https://example.com/videos/1", "https://www.twitch.tv/videos/abc", "a&b", "https://www.twitch.tv/directory/game/x"}) {
+		_, ok := parse_twitch_link(bad)
+		testing.expectf(t, !ok, "%s was read", bad)
+	}
+}
+
+@(test)
+storyboard_frames_are_found :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	body := `[{"count":200,"width":160,"rows":40,"images":["v-low-0.jpg"],"interval":126,"quality":"low","cols":5,"height":90},` +
+		`{"count":200,"width":220,"rows":10,"images":["v-high-0.jpg","v-high-1.jpg"],"interval":126,"quality":"high","cols":5,"height":124}]`
+	s, ok := parse_storyboard(transmute([]byte)string(body), "https://cdn.example/abc/storyboards/v-info.json")
+	defer storyboard_destroy(&s)
+	testing.expect(t, ok)
+	// The larger frames, with full addresses.
+	testing.expect_value(t, s.width, 220)
+	testing.expect_value(t, s.sheets[1], "https://cdn.example/abc/storyboards/v-high-1.jpg")
+	// Frame 0 is the first sheet's top left; frame 52 (6552 s) is the second
+	// sheet's row 0, column 2.
+	sheet, uv, found := storyboard_frame(&s, 10)
+	testing.expect(t, found)
+	testing.expect_value(t, sheet, 0)
+	testing.expect_value(t, uv, [4]f32{0, 0, 0.2, 0.1})
+	sheet, uv, _ = storyboard_frame(&s, 126 * 52 + 1)
+	testing.expect_value(t, sheet, 1)
+	testing.expect_value(t, uv, [4]f32{0.4, 0, 0.6, 0.1})
+	// Past the end, the last sheet.
+	sheet, _, _ = storyboard_frame(&s, 1_000_000)
+	testing.expect_value(t, sheet, 1)
+}
+
+@(test)
+chapters_are_found_by_time :: proc(t: ^testing.T) {
+	chapters := []Chapter{{0, 1000, "A"}, {1000, 1000, "B"}, {2000, 1000, "C"}}
+	testing.expect_value(t, chapter_at(chapters, 0), 0)
+	testing.expect_value(t, chapter_at(chapters, 1500), 1)
+	testing.expect_value(t, chapter_at(chapters, 99_999), 2)
+	testing.expect_value(t, chapter_at(chapters[1:], 500), -1)
 }

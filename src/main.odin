@@ -20,6 +20,8 @@ USAGE :: `usage:
   %[0]s             browse the live channels you follow
   %[0]s <channel> [<channel>...]
                         watch a channel, with the other channels' chats split beside it
+  %[0]s <video or clip link>
+                        watch a past broadcast or clip (twitch.tv/videos/123?t=1h2m)
   %[0]s --login     sign in to Twitch`
 
 main :: proc() {
@@ -55,13 +57,20 @@ main :: proc() {
 
 	login_mode := len(os.args) == 2 && os.args[1] == "--login"
 	channels := make([dynamic]string, context.temp_allocator)
+	video: Maybe(Twitch_Link)
 	if !login_mode {
 		for arg in os.args[1:] {
-			if !valid_login(arg) {
+			link, ok := parse_twitch_link(arg)
+			// A video or clip link has to be the only argument.
+			if !ok || (link.kind != .Channel && len(os.args) > 2) {
 				fmt.eprintfln(USAGE, os.args[0])
 				os.exit(2)
 			}
-			append(&channels, strings.to_lower(arg, context.temp_allocator))
+			if link.kind == .Channel {
+				append(&channels, link.id)
+			} else {
+				video = link
+			}
 		}
 	}
 	if curl.global_init(curl.GLOBAL_DEFAULT) != .E_OK {
@@ -81,7 +90,7 @@ main :: proc() {
 	case login_mode:
 		ok = login(config.client_id)
 	case:
-		ok = run(channels[:], config)
+		ok = run(channels[:], config, video)
 	}
 	destroy_config(config)
 	curl.global_cleanup()
@@ -148,10 +157,12 @@ App :: struct {
 	// Whether the window is, or has been asked to go, fullscreen (see
 	// toggle_fullscreen).
 	fullscreen:          bool,
+	// Where the user got to in each video (watched.odin).
+	watched:             Watched,
 }
 
 // Opens the window on the browse screen, or watching `channel` if it's not "".
-run :: proc(channels: []string, config: Config) -> bool {
+run :: proc(channels: []string, config: Config, video: Maybe(Twitch_Link) = nil) -> bool {
 	// Matches the installed desktop file, so the desktop finds its icon and name:
 	// lurker.desktop, or in a Flatpak the one named after its ID.
 	app_id := os.get_env("FLATPAK_ID", context.temp_allocator)
@@ -236,6 +247,11 @@ run :: proc(channels: []string, config: Config) -> bool {
 	apply_volume(&app)
 	a.renderer.text_scale = f32(app.layout.text_size) / 100
 	defer layout_destroy(&app.layout)
+	app.watched = watched_load()
+	defer {
+		watched_save(&app.watched)
+		watched_destroy(&app.watched)
+	}
 	app.chat_wake_event = sdl.RegisterEvents(1)
 	defer browse_destroy(&app.browse)
 	defer sign_in_destroy(&app.sign_in)
@@ -252,6 +268,9 @@ run :: proc(channels: []string, config: Config) -> bool {
 			layout_remember(&app)
 		}
 	}
+	if link, has_link := video.?; has_link {
+		open_link(&app, link)
+	}
 
 	draw(&app)
 	for running := true; running; {
@@ -260,7 +279,7 @@ run :: proc(channels: []string, config: Config) -> bool {
 		// Wake up for the next animation frame, browse refresh or sign-in poll,
 		// whichever is due first.
 		wait := a.next_frame_ms if a.next_frame_ms >= 0 else -1
-		dues := []int{-1, -1, volume_osd_wait(&app), controls_wait(&app), stream_info_tick(&app), stream_end_tick(&app), text_size_osd_wait(&app), replay_tick(&app)}
+		dues := []int{-1, -1, volume_osd_wait(&app), controls_wait(&app), stream_info_tick(&app), stream_end_tick(&app), text_size_osd_wait(&app), replay_tick(&app), watched_tick(&app), resume_notice_wait(&app)}
 		if app.screen == .Browse {
 			dues[0], dues[1] = browse_tick(&app), sign_in_tick(&app)
 		}
@@ -565,6 +584,12 @@ finish_jobs :: proc(app: ^App) {
 			finish_vod_url_job(app, &p)
 		case Vod_Chat_Job:
 			finish_vod_chat_job(app, &p)
+		case Videos_Job:
+			finish_videos_job(app, &p)
+		case Link_Job:
+			finish_link_job(app, &p)
+		case Vod_Extras_Job:
+			finish_vod_extras_job(app, &p)
 		case User_Emotes_Job:
 			finish_user_emotes_job(app, &p)
 		case Emoji_Job:

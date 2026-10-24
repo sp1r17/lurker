@@ -314,6 +314,12 @@ draw_image :: proc(r: ^Renderer, texture: u32, rect: Rect, tint := Color{255, 25
 	push_quad(r, rect.x, rect.y, rect.x + rect.w, rect.y + rect.h, 0, 0, 1, 1, tint)
 }
 
+// Draws part of a texture, `uv` as (u0, v0, u1, v1), into `rect`.
+draw_image_part :: proc(r: ^Renderer, texture: u32, rect: Rect, uv: [4]f32) {
+	use(r, .Rgba_Texture, texture)
+	push_quad(r, rect.x, rect.y, rect.x + rect.w, rect.y + rect.h, uv[0], uv[1], uv[2], uv[3], {255, 255, 255, 255})
+}
+
 @(private = "file")
 set_font :: proc(r: ^Renderer, font: Font, size: f32) {
 	fs.SetFont(&r.fonts, r.font_ids[font])

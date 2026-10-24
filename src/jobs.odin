@@ -31,6 +31,9 @@ Job_Payload :: union {
 	Vod_Job,
 	Vod_Url_Job,
 	Vod_Chat_Job,
+	Videos_Job,
+	Link_Job,
+	Vod_Extras_Job,
 	Emoji_Job,
 	Cache_Prune_Job,
 }
@@ -153,6 +156,12 @@ destroy_job :: proc(job: ^Job) {
 		destroy_vod_url_job(&p)
 	case Vod_Chat_Job:
 		destroy_vod_chat_job(&p)
+	case Videos_Job:
+		destroy_videos_job(&p)
+	case Link_Job:
+		destroy_link_job(&p)
+	case Vod_Extras_Job:
+		destroy_vod_extras_job(&p)
 	case Emoji_Job:
 		destroy_emoji_job(&p)
 	case Cache_Prune_Job:

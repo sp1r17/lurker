@@ -62,6 +62,8 @@ Browse_View :: enum {
 	// What the search box found: channels, or categories when searching from
 	// Categories.
 	Search,
+	// A channel's past broadcasts, highlights, uploads and clips (videos.odin).
+	Videos,
 }
 
 Search_Kind :: enum {
@@ -77,6 +79,7 @@ BROWSE_TAB_LABELS := [Browse_View]string {
 	.Followed_Categories = "",
 	.Category            = "",
 	.Search              = "",
+	.Videos              = "",
 }
 
 // Live streams as a grid of cards: the followed channels, Twitch's top streams, or
@@ -99,6 +102,8 @@ Browse :: struct {
 	following, top:       Stream_List,
 	// Below the live channels on the Following tab.
 	offline:              Offline_Follows,
+	// The channel video page.
+	videos:               Channel_Videos,
 	// The category the Category view shows (owned), and its streams.
 	category_id:          string,
 	category_name:        string,
@@ -159,6 +164,7 @@ Browse :: struct {
 
 browse_destroy :: proc(b: ^Browse) {
 	offline_destroy(nil, &b.offline)
+	channel_videos_destroy(nil, &b.videos)
 	for l in ([]^Stream_List{&b.following, &b.top, &b.category}) {
 		for s in l.streams {
 			destroy_stream(s)
@@ -219,6 +225,8 @@ browse_tick :: proc(app: ^App) -> (wait_ms: int) {
 	state: Browse_State
 	refreshed: int
 	switch b.view {
+	case .Videos:
+		return videos_tick(app)
 	case .Following, .Top, .Category:
 		l := browse_list(b, b.view)
 		state, refreshed = l.state, l.last_refresh
@@ -334,6 +342,8 @@ browse_refresh :: proc(app: ^App) {
 		)
 	case .Search:
 		search_start(app)
+	case .Videos:
+		videos_refresh(app)
 	}
 }
 
@@ -733,16 +743,18 @@ search_open_row :: proc(app: ^App, i: int) {
 		return
 	}
 	login, go_to := search_go_to(b)
-	if !go_to {
-		if i < 0 || i >= len(b.results) {
+	result := i if !go_to else i - 1
+	if result >= 0 {
+		if result >= len(b.results) {
 			return
 		}
-		login = b.results[i].broadcaster_login
-	} else if i > 0 {
-		if i - 1 >= len(b.results) {
+		c := b.results[result]
+		login = c.broadcaster_login
+		if !c.is_live {
+			// Offline: its videos (which have a button for its chat).
+			browse_open_videos(app, login, c.display_name)
 			return
 		}
-		login = b.results[i - 1].broadcaster_login
 	}
 	browse_search_unfocus(app)
 	watch_start(app, login)
@@ -907,6 +919,8 @@ browse_back :: proc(app: ^App) -> bool {
 	#partial switch b.view {
 	case .Category:
 		category_back(app)
+	case .Videos:
+		videos_back(app)
 	case .Search:
 		browse_search_close(app)
 	case:
@@ -952,8 +966,15 @@ browse_click :: proc(app: ^App, x, y: f32) -> bool {
 	}
 	browse_search_unfocus(app)
 	if b.back_button.w > 0 && in_rect(b.back_button, x, y) {
-		category_back(app)
+		if b.view == .Videos {
+			videos_back(app)
+		} else {
+			category_back(app)
+		}
 		return true
+	}
+	if b.view == .Videos {
+		return videos_click(app, x, y, browse_card_at(b, x, y))
 	}
 	for button, i in b.section_buttons {
 		if button.w > 0 && in_rect(button, x, y) {
@@ -979,8 +1000,9 @@ browse_click :: proc(app: ^App, x, y: f32) -> bool {
 		if i < len(l.streams) {
 			watch_start(app, l.streams[i].user_login, info = &l.streams[i])
 		} else if offline := i - len(l.streams); b.view == .Following && offline < len(b.offline.channels) {
-			// Offline, but its chat is open.
-			watch_start(app, b.offline.channels[offline].login)
+			// Offline: its videos (which have a button for its chat).
+			c := b.offline.channels[offline]
+			browse_open_videos(app, c.login, c.display_name)
 		}
 	case .Categories:
 		if i < len(b.top_categories) {
@@ -992,6 +1014,8 @@ browse_click :: proc(app: ^App, x, y: f32) -> bool {
 		}
 	case .Search:
 		search_open_row(app, i)
+	case .Videos:
+	// Handled above.
 	}
 	return true
 }
@@ -1049,6 +1073,8 @@ draw_browse :: proc(app: ^App, screen: Rect) {
 		draw_categories(app, content)
 	case .Search:
 		draw_search(app, content)
+	case .Videos:
+		draw_videos(app, content)
 	}
 }
 
@@ -1240,7 +1266,6 @@ draw_stream_list :: proc(app: ^App, l: ^Stream_List, content: Rect, empty_messag
 // the mouse has rested on it for TOOLTIP_DELAY_MS. `at` is the text, from the
 // title down, which the tooltip covers at least; `top` is how far above the text
 // it starts, no more than there's room for.
-@(private = "file")
 draw_title_tooltip :: proc(app: ^App, at: Rect, title: string, content: Rect, font: Font, size, top: f32) {
 	a := &app.assets
 	b := &app.browse
