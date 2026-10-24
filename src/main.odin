@@ -20,6 +20,8 @@ USAGE :: `usage:
   %[0]s             browse the live channels you follow
   %[0]s <channel> [<channel>...]
                         watch a channel, with the other channels' chats split beside it
+  %[0]s <video or clip link>
+                        watch a past broadcast or clip (twitch.tv/videos/123?t=1h2m)
   %[0]s --login     sign in to Twitch`
 
 main :: proc() {
@@ -55,13 +57,20 @@ main :: proc() {
 
 	login_mode := len(os.args) == 2 && os.args[1] == "--login"
 	channels := make([dynamic]string, context.temp_allocator)
+	video: Maybe(Twitch_Link)
 	if !login_mode {
 		for arg in os.args[1:] {
-			if !valid_login(arg) {
+			link, ok := parse_twitch_link(arg)
+			// A video or clip link has to be the only argument.
+			if !ok || (link.kind != .Channel && len(os.args) > 2) {
 				fmt.eprintfln(USAGE, os.args[0])
 				os.exit(2)
 			}
-			append(&channels, strings.to_lower(arg, context.temp_allocator))
+			if link.kind == .Channel {
+				append(&channels, link.id)
+			} else {
+				video = link
+			}
 		}
 	}
 	if curl.global_init(curl.GLOBAL_DEFAULT) != .E_OK {
@@ -81,7 +90,7 @@ main :: proc() {
 	case login_mode:
 		ok = login(config.client_id)
 	case:
-		ok = run(channels[:], config)
+		ok = run(channels[:], config, video)
 	}
 	destroy_config(config)
 	curl.global_cleanup()
@@ -153,7 +162,7 @@ App :: struct {
 }
 
 // Opens the window on the browse screen, or watching `channel` if it's not "".
-run :: proc(channels: []string, config: Config) -> bool {
+run :: proc(channels: []string, config: Config, video: Maybe(Twitch_Link) = nil) -> bool {
 	// Matches the installed desktop file, so the desktop finds its icon and name:
 	// lurker.desktop, or in a Flatpak the one named after its ID.
 	app_id := os.get_env("FLATPAK_ID", context.temp_allocator)
@@ -258,6 +267,9 @@ run :: proc(channels: []string, config: Config) -> bool {
 		if len(channels) > 1 {
 			layout_remember(&app)
 		}
+	}
+	if link, has_link := video.?; has_link {
+		open_link(&app, link)
 	}
 
 	draw(&app)
@@ -574,6 +586,8 @@ finish_jobs :: proc(app: ^App) {
 			finish_vod_chat_job(app, &p)
 		case Videos_Job:
 			finish_videos_job(app, &p)
+		case Link_Job:
+			finish_link_job(app, &p)
 		case User_Emotes_Job:
 			finish_user_emotes_job(app, &p)
 		case Emoji_Job:

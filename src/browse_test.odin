@@ -321,3 +321,33 @@ recording_playlist_is_finished :: proc(t: ^testing.T) {
 	_, ok = finished_playlist("<html>", "https://x/y")
 	testing.expect(t, !ok)
 }
+
+@(test)
+links_are_read :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	cases := []struct {
+		arg:  string,
+		kind: Link_Kind,
+		id:   string,
+		start: int,
+	} {
+		{"MoonMoon", .Channel, "moonmoon", 0},
+		{"https://www.twitch.tv/moonmoon", .Channel, "moonmoon", 0},
+		{"https://www.twitch.tv/videos/2908932737", .Video, "2908932737", 0},
+		{"twitch.tv/videos/2908932737?t=1h2m3s", .Video, "2908932737", 3723},
+		{"https://m.twitch.tv/videos/5?filter=all&t=90s", .Video, "5", 90},
+		{"https://clips.twitch.tv/FunnyClip-AbC_123", .Clip, "FunnyClip-AbC_123", 0},
+		{"https://www.twitch.tv/moonmoon/clip/FunnyClip-AbC_123?featured=false", .Clip, "FunnyClip-AbC_123", 0},
+	}
+	for c in cases {
+		link, ok := parse_twitch_link(c.arg)
+		testing.expectf(t, ok, "%s wasn't read", c.arg)
+		testing.expect_value(t, link.kind, c.kind)
+		testing.expect_value(t, link.id, c.id)
+		testing.expect_value(t, link.start, c.start)
+	}
+	for bad in ([]string{"https://example.com/videos/1", "https://www.twitch.tv/videos/abc", "a&b", "https://www.twitch.tv/directory/game/x"}) {
+		_, ok := parse_twitch_link(bad)
+		testing.expectf(t, !ok, "%s was read", bad)
+	}
+}
