@@ -46,6 +46,19 @@
     <category>Video</category>
   </categories>
   <releases>
+    <release version="0.2.0" date="2026-10-24">
+      <description>
+        <p>Videos, and a Windows version.</p>
+        <ul>
+          <li>Each channel's past broadcasts, highlights, uploads and clips, with chat replay</li>
+          <li>Resume videos where you left off</li>
+          <li>Watch a live stream from its start</li>
+          <li>Playback speed, chapters and seek-bar previews</li>
+          <li>Open Twitch video and clip links</li>
+          <li>A Windows installer</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.0" date="2026-10-23">
       <description>
         <p>The first release.</p>
