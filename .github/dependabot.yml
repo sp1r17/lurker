@@ -1,0 +1,11 @@
+version: 2
+updates:
+  # The actions the build workflow uses, pinned to commits.
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: development
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
