@@ -46,7 +46,7 @@ layout_destroy :: proc(l: ^Layout) {
 	delete(l.splits)
 }
 
-@(private = "file")
+// layout.json; other saved state goes beside it (watched.json).
 layout_path :: proc() -> (path: string, ok: bool) {
 	auth := auth_path() or_return
 	joined, err := filepath.join({filepath.dir(auth), "layout.json"}, context.temp_allocator)

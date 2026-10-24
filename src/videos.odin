@@ -362,6 +362,18 @@ draw_videos :: proc(app: ^App, content: Rect) {
 			draw_rect(r, thumb, BROWSE_PLACEHOLDER)
 		}
 
+		// How much of it was watched, along the thumbnail's bottom.
+		if progress := watched_progress(&app.watched, video.id, video.length); progress > 0 && video.kind != .Clip {
+			bar_h := 4 * scale
+			draw_rect(r, {thumb.x, thumb.y + thumb.h - bar_h, thumb.w, bar_h}, VIEWERS_BACKGROUND)
+			draw_rect(r, {thumb.x, thumb.y + thumb.h - bar_h, thumb.w * progress, bar_h}, BROWSE_ACCENT)
+			if progress >= 1 {
+				watched := Rect{thumb.x + 6 * scale, thumb.y + 6 * scale, text_width(r, .Bold, text_size, "Watched") + 12 * scale, lh_text + 4 * scale}
+				draw_rect(r, watched, VIEWERS_BACKGROUND)
+				draw_text(r, .Bold, text_size, watched.x + 6 * scale, watched.y + 2 * scale, "Watched", BROWSE_TEXT)
+			}
+		}
+
 		// The length over the thumbnail's bottom left, or that it's live.
 		inset := 6 * scale
 		badge_text := "LIVE" if video.recording else format_clock(video.length)

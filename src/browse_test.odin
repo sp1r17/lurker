@@ -1,5 +1,6 @@
 package app
 
+import "core:fmt"
 import "core:testing"
 import "core:time"
 
@@ -268,4 +269,40 @@ vod_comments_become_chat_messages :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(m.message.badges), 1)
 	testing.expect_value(t, m.message.fragments[1].kind, Fragment_Kind.Emote)
 	testing.expect_value(t, m.message.fragments[1].url_1x, "https://static-cdn.jtvnw.net/emoticons/v2/25/default/dark/1.0")
+}
+
+@(test)
+watched_positions_resume_sensibly :: proc(t: ^testing.T) {
+	w: Watched
+	defer watched_destroy(&w)
+	watched_set(&w, "a", 3600, 7200)
+	watched_set(&w, "near-start", 10, 7200)
+	watched_set(&w, "near-end", 7170, 7200)
+	testing.expect_value(t, watched_resume_at(&w, "a", 7200), 3600)
+	testing.expect_value(t, watched_resume_at(&w, "near-start", 7200), 0)
+	testing.expect_value(t, watched_resume_at(&w, "near-end", 7200), 0)
+	testing.expect_value(t, watched_resume_at(&w, "unseen", 7200), 0)
+	testing.expect_value(t, watched_progress(&w, "a", 7200), 0.5)
+	testing.expect_value(t, watched_progress(&w, "near-end", 7200), 1)
+}
+
+@(test)
+watched_keeps_the_most_recent :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	w: Watched
+	defer watched_destroy(&w)
+	for i in 0 ..< WATCHED_MAX + 5 {
+		id := fmt.tprintf("%d", i)
+		watched_set(&w, id, 100, 1000)
+		// Spread out in time, oldest first.
+		e := w.entries[id]
+		e.at = i64(i)
+		w.entries[id] = e
+	}
+	watched_set(&w, "newest", 100, 1000)
+	testing.expect_value(t, len(w.entries), WATCHED_MAX)
+	_, oldest_kept := w.entries["0"]
+	testing.expect(t, !oldest_kept)
+	_, newest_kept := w.entries["newest"]
+	testing.expect(t, newest_kept)
 }

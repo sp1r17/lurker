@@ -97,6 +97,10 @@ Watch :: struct {
 	playing_vod:      bool,
 	vod_pending:      bool,
 	vod_button:       Rect,
+	// Until when (Assets.now_ms) the "Resumed at" notice shows, and from where.
+	resumed_until:    int,
+	resumed_from:     int,
+	resume_notice:    Rect,
 	videos_button:    Rect,
 	seek_bar:         Rect,
 	// The past broadcast's chat, in place of the live chat while it plays.
@@ -156,6 +160,7 @@ watch_add_split :: proc(app: ^App, channel: string) {
 // Stops the video and chats and goes back to browsing.
 watch_stop :: proc(app: ^App) {
 	w := &app.watch
+	watched_note(app)
 	player_command(&app.player, {"stop"})
 	streamlink_stop(&w.streamlink)
 	// So the next channel doesn't start on this one's last frame.
@@ -455,6 +460,9 @@ watch_player_events :: proc(app: ^App, events: Player_Events) {
 	if .Playing in events && w.status == .Starting {
 		w.status = .Playing
 		w.controls_until = app.assets.now_ms + CONTROLS_START_MS
+		if w.playing_vod && w.resumed_from > 0 {
+			w.resumed_until = app.assets.now_ms + RESUME_NOTICE_MS
+		}
 		// The first frame is ready: draw it now rather than on mpv's next redraw.
 		w.new_video_frame = true
 	}
@@ -796,6 +804,7 @@ draw_watch :: proc(app: ^App) {
 	}
 	draw_stream_info(app)
 	draw_volume(app)
+	draw_resume_notice(app)
 	draw_controls(app)
 	w.hide_button = {}
 	w.show_tab = {}

@@ -116,11 +116,27 @@ finish_vod_job :: proc(app: ^App, p: ^Vod_Job) {
 	w.vod_state = .Found
 }
 
-// Plays the channel's last broadcast, from `start` seconds in.
-watch_play_vod :: proc(app: ^App, start: f64 = 0) {
+// Plays the channel's last broadcast (or the video in w.vod), from `start`
+// seconds in, or where the user left off if `start` is negative.
+watch_play_vod :: proc(app: ^App, start: f64 = -1) {
 	w := &app.watch
 	if w.vod_state != .Found {
 		return
+	}
+	// Leaving one video for another (or the same again) notes where it was.
+	watched_note(app)
+	start := start
+	w.resumed_from = 0
+	w.resumed_until = 0
+	if start < 0 {
+		start = 0
+		if w.vod.kind != .Clip {
+			// The notice shows once it's playing (watch_player_events).
+			if resume := watched_resume_at(&app.watched, w.vod.id, w.vod.length); resume > 0 {
+				start = f64(resume)
+				w.resumed_from = resume
+			}
+		}
 	}
 	player_command(&app.player, {"stop"})
 	streamlink_stop(&w.streamlink)
@@ -168,7 +184,7 @@ finish_vod_url_job :: proc(app: ^App, p: ^Vod_Url_Job) {
 
 // Watches `vod` (a video or clip) from `start` seconds in, with its channel's
 // chat beside it.
-watch_start_vod :: proc(app: ^App, vod: Vod, start: f64 = 0) {
+watch_start_vod :: proc(app: ^App, vod: Vod, start: f64 = -1) {
 	watch_start(app, vod.login, live = false)
 	w := &app.watch
 	destroy_vod(w.vod)
@@ -191,6 +207,8 @@ vod_key :: proc(app: ^App, key: sdl.KeyboardEvent) -> bool {
 		return false
 	}
 	switch key.key {
+	case sdl.K_HOME:
+		vod_start_over(app)
 	case sdl.K_LEFT:
 		player_command(&app.player, {"seek", fmt.ctprintf("%d", -VOD_SEEK_SECONDS), "relative"})
 	case sdl.K_RIGHT:
@@ -202,11 +220,51 @@ vod_key :: proc(app: ^App, key: sdl.KeyboardEvent) -> bool {
 	return true
 }
 
+// Back to the start of the video, from a resumed position (Home, or the notice).
+vod_start_over :: proc(app: ^App) {
+	player_command(&app.player, {"seek", "0", "absolute"})
+	app.watch.resumed_until = 0
+	app.watch.resumed_from = 0
+}
+
+// For a few seconds after resuming: "Resumed at 1:23:45 · Start over (Home)",
+// below the controls at the top. Clicking it starts over.
+draw_resume_notice :: proc(app: ^App) {
+	w := &app.watch
+	w.resume_notice = {}
+	if app.assets.now_ms >= w.resumed_until || !w.playing_vod {
+		return
+	}
+	r := &app.assets.renderer
+	scale := app.scale
+	size := BROWSE_CARD_TEXT_SIZE * scale
+	pad := 10 * scale
+	lh := line_height(r, .Bold, size)
+	label := fmt.tprintf("Resumed at %s  ·  Start over (Home)", format_clock(w.resumed_from))
+	lw := text_width(r, .Bold, size, label)
+	v := w.video_rect
+	top := v.y + (stream_info_height(app) if controls_visible(app) else 0) + 16 * scale
+	w.resume_notice = {v.x + (v.w - lw) / 2 - pad, top, lw + 2 * pad, lh + 2 * pad}
+	hovered := in_rect(w.resume_notice, app.mouse.x, app.mouse.y)
+	draw_rect(r, w.resume_notice, MENU_HOVER if hovered else CHAT_TOGGLE_BACKGROUND)
+	draw_text(r, .Bold, size, w.resume_notice.x + pad, w.resume_notice.y + pad, label, BROWSE_TEXT)
+}
+
+// ms until the resume notice hides, for the main loop's wait; -1 if it isn't showing.
+resume_notice_wait :: proc(app: ^App) -> int {
+	left := app.watch.resumed_until - app.assets.now_ms
+	return left if app.screen == .Watch && left > 0 else -1
+}
+
 // A click on the offer to watch, or on the seek bar. Returns true if it was one.
 vod_click :: proc(app: ^App, x, y: f32) -> bool {
 	w := &app.watch
 	if w.vod_button.w > 0 && in_rect(w.vod_button, x, y) {
 		watch_play_vod(app)
+		return true
+	}
+	if w.resume_notice.w > 0 && in_rect(w.resume_notice, x, y) {
+		vod_start_over(app)
 		return true
 	}
 	if w.videos_button.w > 0 && in_rect(w.videos_button, x, y) {
