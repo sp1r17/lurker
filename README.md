@@ -1,10 +1,22 @@
-# Lurker
+<p align="center">
+  <img src="assets/install/lurker.svg" width="128" height="128" alt="Lurker logo">
+</p>
+
+<h1 align="center">Lurker</h1>
 
 A native desktop client for watching Twitch, on Linux and Windows. Streams play
 through mpv, alongside a Chatterino-style chat, with no browser involved.
 
 Video goes through streamlink, which drops ad segments, so streams play without
 pre-roll or mid-roll ads.
+
+![A live stream with its chat](packaging/screenshots/watch.png)
+
+<p>
+  <img src="packaging/screenshots/video.png" width="32%" alt="A past broadcast with chat replay">
+  <img src="packaging/screenshots/videos.png" width="32%" alt="A channel's past broadcasts">
+  <img src="packaging/screenshots/categories.png" width="32%" alt="Browsing categories">
+</p>
 
 ## Features
 
