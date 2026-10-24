@@ -104,11 +104,19 @@ player_load :: proc(p: ^Player, url: string, low_latency := false) {
 	}
 }
 
-// Plays `url` from `start` seconds in (for a past broadcast).
-player_load_at :: proc(p: ^Player, url: string, start: f64) {
+// Plays `url` from `start` seconds in (for a past broadcast). With
+// `online_segments`, `url` is a local playlist whose segments are on the web,
+// which FFmpeg only fetches from a local playlist when told to.
+player_load_at :: proc(p: ^Player, url: string, start: f64, online_segments := false) {
 	curl := strings.clone_to_cstring(url, context.temp_allocator)
-	options := strings.clone_to_cstring(fmt.tprintf("start=%.1f", start), context.temp_allocator)
-	player_command(p, {"loadfile", curl, "replace", "-1", options})
+	options := fmt.tprintf("start=%.1f", start)
+	if online_segments {
+		// mpv's %length% quoting, for the commas in the value.
+		whitelist :: "protocol_whitelist=[file,http,https,tcp,tls,crypto]"
+		options = fmt.tprintf("%s,demuxer-lavf-o-add=%%%d%%%s", options, len(whitelist), whitelist)
+	}
+	coptions := strings.clone_to_cstring(options, context.temp_allocator)
+	player_command(p, {"loadfile", curl, "replace", "-1", coptions})
 }
 
 // A number mpv knows about what's playing ("time-pos", "duration"), if it has one.

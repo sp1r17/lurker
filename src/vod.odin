@@ -42,6 +42,8 @@ destroy_vod_job :: proc(p: ^Vod_Job) {
 Vod_Url_Job :: struct {
 	vod_id:    string,
 	kind:      Video_Kind,
+	// Still being recorded: played from a snapshot of its playlist.
+	recording: bool,
 	quality:   Quality,
 	client_id: string,
 	token:     string,
@@ -109,11 +111,59 @@ finish_vod_job :: proc(app: ^App, p: ^Vod_Job) {
 	}
 	if !p.found {
 		w.vod_state = .Missing
+		if w.rewinding {
+			w.rewinding = false
+			w.no_rewind_until = app.assets.now_ms + NO_REWIND_NOTICE_MS
+		}
 		return
 	}
 	destroy_vod(w.vod)
 	w.vod, p.vod = p.vod, {}
 	w.vod_state = .Found
+	if w.rewinding {
+		w.rewinding = false
+		if w.vod.recording {
+			watch_play_vod(app, 0)
+		} else {
+			w.no_rewind_until = app.assets.now_ms + NO_REWIND_NOTICE_MS
+		}
+	}
+}
+
+// How long the notice shows that a live stream can't be rewound.
+NO_REWIND_NOTICE_MS :: 4000
+
+// While live: plays the broadcast being recorded from its start ("From the
+// start"), once it's been looked up.
+watch_rewind :: proc(app: ^App) {
+	w := &app.watch
+	if w.playing_vod || w.rewinding {
+		return
+	}
+	w.rewinding = true
+	w.vod_state = .None
+	vod_lookup(app)
+}
+
+// Back to the live stream and its chat from the rewound broadcast ("Go live").
+watch_go_live :: proc(app: ^App) {
+	w := &app.watch
+	if !w.playing_vod {
+		return
+	}
+	watched_note(app)
+	if w.replay.active {
+		replay_destroy(&w.replay)
+		if len(w.panes) > 0 {
+			chat_view_clear(&w.panes[0].view)
+		}
+	}
+	player_command(&app.player, {"stop"})
+	player_clear(&app.player)
+	w.playing_vod = false
+	w.vod_pending = false
+	w.resumed_until = 0
+	start_stream(app, signed = app.signed_in)
 }
 
 // Plays the channel's last broadcast (or the video in w.vod), from `start`
@@ -146,8 +196,9 @@ watch_play_vod :: proc(app: ^App, start: f64 = -1) {
 	w.playing_vod = true
 	w.vod_pending = true
 	job := Vod_Url_Job {
-		vod_id  = strings.clone(w.vod.id),
-		kind    = w.vod.kind,
+		vod_id    = strings.clone(w.vod.id),
+		kind      = w.vod.kind,
+		recording = w.vod.recording,
 		quality = app.layout.quality,
 		start   = start,
 		session = app.session,
@@ -163,6 +214,12 @@ watch_play_vod :: proc(app: ^App, start: f64 = -1) {
 run_vod_url_job :: proc(job: ^Job) {
 	p := &job.payload.(Vod_Url_Job)
 	p.url, p.ok = streamlink_vod_url(p.vod_id, p.kind, p.quality, p.client_id, p.token)
+	if p.ok && p.recording {
+		snapshot: string
+		snapshot, p.ok = snapshot_recording(p.url)
+		delete(p.url)
+		p.url = strings.clone(snapshot)
+	}
 }
 
 finish_vod_url_job :: proc(app: ^App, p: ^Vod_Url_Job) {
@@ -175,7 +232,8 @@ finish_vod_url_job :: proc(app: ^App, p: ^Vod_Url_Job) {
 		w.status = .Failed
 		return
 	}
-	player_load_at(&app.player, p.url, p.start)
+	// A recording's playlist is a local snapshot with its segments online.
+	player_load_at(&app.player, p.url, p.start, online_segments = p.recording)
 	// Clips have no chat to replay.
 	if w.vod.kind != .Clip {
 		replay_start(app, p.start)
@@ -228,31 +286,44 @@ vod_start_over :: proc(app: ^App) {
 }
 
 // For a few seconds after resuming: "Resumed at 1:23:45 · Start over (Home)",
-// below the controls at the top. Clicking it starts over.
+// below the controls at the top. Clicking it starts over. Or that a live stream
+// can't be rewound, after trying.
 draw_resume_notice :: proc(app: ^App) {
 	w := &app.watch
 	w.resume_notice = {}
+	if app.assets.now_ms < w.no_rewind_until {
+		draw_notice(app, "This stream isn't being saved, so it can't be watched from the start")
+		return
+	}
 	if app.assets.now_ms >= w.resumed_until || !w.playing_vod {
 		return
 	}
+	w.resume_notice = draw_notice(app, fmt.tprintf("Resumed at %s  ·  Start over (Home)", format_clock(w.resumed_from)))
+}
+
+// A one-line notice centred near the video's top, below the controls. Returns
+// where it is.
+@(private = "file")
+draw_notice :: proc(app: ^App, label: string) -> Rect {
+	w := &app.watch
 	r := &app.assets.renderer
 	scale := app.scale
 	size := BROWSE_CARD_TEXT_SIZE * scale
 	pad := 10 * scale
 	lh := line_height(r, .Bold, size)
-	label := fmt.tprintf("Resumed at %s  ·  Start over (Home)", format_clock(w.resumed_from))
 	lw := text_width(r, .Bold, size, label)
 	v := w.video_rect
 	top := v.y + (stream_info_height(app) if controls_visible(app) else 0) + 16 * scale
-	w.resume_notice = {v.x + (v.w - lw) / 2 - pad, top, lw + 2 * pad, lh + 2 * pad}
-	hovered := in_rect(w.resume_notice, app.mouse.x, app.mouse.y)
-	draw_rect(r, w.resume_notice, MENU_HOVER if hovered else CHAT_TOGGLE_BACKGROUND)
-	draw_text(r, .Bold, size, w.resume_notice.x + pad, w.resume_notice.y + pad, label, BROWSE_TEXT)
+	notice := Rect{v.x + (v.w - lw) / 2 - pad, top, lw + 2 * pad, lh + 2 * pad}
+	hovered := in_rect(notice, app.mouse.x, app.mouse.y)
+	draw_rect(r, notice, MENU_HOVER if hovered else CHAT_TOGGLE_BACKGROUND)
+	draw_text(r, .Bold, size, notice.x + pad, notice.y + pad, label, BROWSE_TEXT)
+	return notice
 }
 
 // ms until the resume notice hides, for the main loop's wait; -1 if it isn't showing.
 resume_notice_wait :: proc(app: ^App) -> int {
-	left := app.watch.resumed_until - app.assets.now_ms
+	left := max(app.watch.resumed_until, app.watch.no_rewind_until) - app.assets.now_ms
 	return left if app.screen == .Watch && left > 0 else -1
 }
 
@@ -265,6 +336,14 @@ vod_click :: proc(app: ^App, x, y: f32) -> bool {
 	}
 	if w.resume_notice.w > 0 && in_rect(w.resume_notice, x, y) {
 		vod_start_over(app)
+		return true
+	}
+	if w.live_button.w > 0 && in_rect(w.live_button, x, y) {
+		if w.playing_vod {
+			watch_go_live(app)
+		} else {
+			watch_rewind(app)
+		}
 		return true
 	}
 	if w.videos_button.w > 0 && in_rect(w.videos_button, x, y) {

@@ -97,6 +97,11 @@ Watch :: struct {
 	playing_vod:      bool,
 	vod_pending:      bool,
 	vod_button:       Rect,
+	// "From the start" is looking up the broadcast being recorded; until when the
+	// notice that there's none shows; from the last draw, the button.
+	rewinding:        bool,
+	no_rewind_until:  int,
+	live_button:      Rect,
 	// Until when (Assets.now_ms) the "Resumed at" notice shows, and from where.
 	resumed_until:    int,
 	resumed_from:     int,
@@ -231,7 +236,6 @@ set_title :: proc(app: ^App, channel: string) {
 	sdl.SetWindowTitle(app.window, strings.clone_to_cstring(title, context.temp_allocator))
 }
 
-@(private = "file")
 start_stream :: proc(app: ^App, signed: bool) {
 	w := &app.watch
 	w.status = .Starting
@@ -311,6 +315,9 @@ on_controls :: proc(app: ^App, x, y: f32) -> bool {
 		return true
 	}
 	if w.follow_button.w > 0 && in_rect(w.follow_button, x, y) {
+		return true
+	}
+	if w.live_button.w > 0 && in_rect(w.live_button, x, y) {
 		return true
 	}
 	if (w.seek_bar.w > 0 && in_rect(w.seek_bar, x, y)) || (w.vod_button.w > 0 && in_rect(w.vod_button, x, y)) || (w.videos_button.w > 0 && in_rect(w.videos_button, x, y)) {

@@ -159,6 +159,26 @@ draw_stream_info :: proc(app: ^App) {
 	if follow_left := draw_follow_button(app, right, bar.y + pad + name_h / 2); follow_left < right {
 		right = follow_left - 16 * scale
 	}
+	// "From the start" while live, "Go live" while watching from the start.
+	w.live_button = {}
+	live_label := ""
+	switch {
+	case w.playing_vod && w.vod.recording:
+		live_label = "Go live"
+	case !w.playing_vod && w.status == .Playing:
+		live_label = "Looking for the start..." if w.rewinding else "From the start"
+	}
+	if live_label != "" {
+		lsize := BROWSE_CARD_TEXT_SIZE * scale
+		bw := text_width(r, .Bold, lsize, live_label) + 24 * scale
+		bh := line_height(r, .Bold, lsize) + 12 * scale
+		w.live_button = {right - bw, bar.y + pad + name_h / 2 - bh / 2, bw, bh}
+		hovered := in_rect(w.live_button, app.mouse.x, app.mouse.y)
+		color := LIVE_RED if w.playing_vod else (FOLLOWING_BUTTON_HOVER if hovered else FOLLOWING_BUTTON)
+		draw_rect(r, w.live_button, color)
+		draw_centered(r, .Bold, lsize, w.live_button, live_label, BROWSE_TEXT)
+		right = w.live_button.x - 16 * scale
+	}
 	if w.has_info {
 		parts := make([dynamic]string, context.temp_allocator)
 		append(&parts, format_viewers(w.info.viewer_count))
@@ -183,6 +203,9 @@ draw_stream_info :: proc(app: ^App) {
 		when_ := format_last_live(w.vod.created_at, time.now())
 		ago := strings.to_lower(when_[len("Live "):], context.temp_allocator) if strings.has_prefix(when_, "Live ") else when_
 		past := fmt.tprintf("  ·  %s, %s", VIDEO_KIND_NAMES[w.vod.kind], ago)
+		if w.vod.recording {
+			past = fmt.tprintf("  ·  Live, from the start (began %s)", ago)
+		}
 		game_y := bar.y + pad + (name_h - lh) / 2
 		draw_text(r, .Regular, size, x, game_y, fit_text(r, .Regular, size, past, right - x), BROWSE_ACCENT)
 		draw_text_line(&app.assets, .Regular, size, title_x, bar.y + pad + name_h, w.vod.title, BROWSE_DIM_TEXT, right - title_x)

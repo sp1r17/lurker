@@ -306,3 +306,18 @@ watched_keeps_the_most_recent :: proc(t: ^testing.T) {
 	_, newest_kept := w.entries["newest"]
 	testing.expect(t, newest_kept)
 }
+
+@(test)
+recording_playlist_is_finished :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	playlist := "#EXTM3U\n#EXT-X-PLAYLIST-TYPE:EVENT\n#EXTINF:10.000,\n0.ts\n#EXTINF:10.000,\r\n1.ts\n"
+	out, ok := finished_playlist(playlist, "https://cdn.example/abc/480p30/index-dvr.m3u8")
+	testing.expect(t, ok)
+	testing.expect_value(
+		t,
+		out,
+		"#EXTM3U\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXTINF:10.000,\nhttps://cdn.example/abc/480p30/0.ts\n#EXTINF:10.000,\nhttps://cdn.example/abc/480p30/1.ts\n#EXT-X-ENDLIST\n",
+	)
+	_, ok = finished_playlist("<html>", "https://x/y")
+	testing.expect(t, !ok)
+}

@@ -160,3 +160,61 @@ streamlink_outcome :: proc(s: ^Streamlink) -> (outcome: Stream_Error, done: bool
 		return .Streamlink_Failed, true
 	}
 }
+
+// A broadcast still being recorded has a growing playlist, which mpv plays like
+// a live stream: from its end, without seeking. This saves a copy as it is now,
+// with its segments' full addresses and marked as finished, which mpv plays like
+// any past broadcast. Returns its path, allocated with the temp allocator.
+snapshot_recording :: proc(url: string) -> (path: string, ok: bool) {
+	res := http_request(url, allocator = context.temp_allocator) or_return
+	if res.status != 200 {
+		log.warnf("can't fetch the recording's playlist: HTTP %d", res.status)
+		return "", false
+	}
+	playlist, playlist_ok := finished_playlist(string(res.body), url)
+	if !playlist_ok {
+		log.warn("the recording's playlist isn't one")
+		return "", false
+	}
+	dir := cache_dir() or_return
+	if err := os.make_directory_all(dir); err != nil && err != .Exist {
+		return "", false
+	}
+	joined, join_err := filepath.join({dir, "recording.m3u8"}, context.temp_allocator)
+	if join_err != nil {
+		return "", false
+	}
+	if err := os.write_entire_file(joined, playlist); err != nil {
+		log.warnf("can't write %s: %v", joined, err)
+		return "", false
+	}
+	return joined, true
+}
+
+// `playlist` (an HLS media playlist fetched from `url`) as a finished one, with
+// its segments' addresses made full. Allocated with the temp allocator.
+finished_playlist :: proc(playlist, url: string) -> (out: string, ok: bool) {
+	if !strings.has_prefix(playlist, "#EXTM3U") {
+		return "", false
+	}
+	base := url[:strings.last_index_byte(url, '/') + 1]
+	sb := strings.builder_make(context.temp_allocator)
+	rest := playlist
+	for raw in strings.split_lines_iterator(&rest) {
+		line := strings.trim_right(raw, "\r")
+		switch {
+		case line == "#EXT-X-PLAYLIST-TYPE:EVENT":
+			strings.write_string(&sb, "#EXT-X-PLAYLIST-TYPE:VOD")
+		case line == "#EXT-X-ENDLIST":
+			continue
+		case line != "" && !strings.has_prefix(line, "#") && !strings.contains(line, "://"):
+			strings.write_string(&sb, base)
+			strings.write_string(&sb, line)
+		case:
+			strings.write_string(&sb, line)
+		}
+		strings.write_byte(&sb, '\n')
+	}
+	strings.write_string(&sb, "#EXT-X-ENDLIST\n")
+	return strings.to_string(sb), true
+}
