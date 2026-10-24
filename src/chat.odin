@@ -204,6 +204,11 @@ chat_session :: proc(chat: ^Chat) {
 	// 2 = connect, do the WebSocket upgrade, then hand the socket to ws_send/ws_recv.
 	curl.easy_setopt(h, .CONNECT_ONLY, c.long(2))
 	curl.easy_setopt(h, .CONNECTTIMEOUT, c.long(10))
+	when ODIN_OS == .Windows {
+		// Windows' certificate revocation check fails outright when it can't reach
+		// the revocation servers (often under Wine); certificates are still checked.
+		curl.easy_setopt(h, .SSL_OPTIONS, c.long(curl.SSLOPT_REVOKE_BEST_EFFORT))
+	}
 	// The WebSocket stays with the multi handle that connected it, until the end.
 	multi := curl.multi_init()
 	if multi == nil {

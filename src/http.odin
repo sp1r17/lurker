@@ -72,6 +72,11 @@ http_request :: proc(
 	curl.easy_setopt(h, .NOPROGRESS, c.long(0))
 	curl.easy_setopt(h, .XFERINFOFUNCTION, check_cancelled)
 	curl.easy_setopt(h, .USERAGENT, cstring(APP_ID))
+	when ODIN_OS == .Windows {
+		// Windows' certificate revocation check fails outright when it can't reach
+		// the revocation servers (often under Wine); certificates are still checked.
+		curl.easy_setopt(h, .SSL_OPTIONS, c.long(curl.SSLOPT_REVOKE_BEST_EFFORT))
+	}
 	// Empty means every encoding curl supports (gzip, brotli...).
 	curl.easy_setopt(h, .ACCEPT_ENCODING, cstring(""))
 
