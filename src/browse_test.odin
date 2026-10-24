@@ -351,3 +351,37 @@ links_are_read :: proc(t: ^testing.T) {
 		testing.expectf(t, !ok, "%s was read", bad)
 	}
 }
+
+@(test)
+storyboard_frames_are_found :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	body := `[{"count":200,"width":160,"rows":40,"images":["v-low-0.jpg"],"interval":126,"quality":"low","cols":5,"height":90},` +
+		`{"count":200,"width":220,"rows":10,"images":["v-high-0.jpg","v-high-1.jpg"],"interval":126,"quality":"high","cols":5,"height":124}]`
+	s, ok := parse_storyboard(transmute([]byte)string(body), "https://cdn.example/abc/storyboards/v-info.json")
+	defer storyboard_destroy(&s)
+	testing.expect(t, ok)
+	// The larger frames, with full addresses.
+	testing.expect_value(t, s.width, 220)
+	testing.expect_value(t, s.sheets[1], "https://cdn.example/abc/storyboards/v-high-1.jpg")
+	// Frame 0 is the first sheet's top left; frame 52 (6552 s) is the second
+	// sheet's row 0, column 2.
+	sheet, uv, found := storyboard_frame(&s, 10)
+	testing.expect(t, found)
+	testing.expect_value(t, sheet, 0)
+	testing.expect_value(t, uv, [4]f32{0, 0, 0.2, 0.1})
+	sheet, uv, _ = storyboard_frame(&s, 126 * 52 + 1)
+	testing.expect_value(t, sheet, 1)
+	testing.expect_value(t, uv, [4]f32{0.4, 0, 0.6, 0.1})
+	// Past the end, the last sheet.
+	sheet, _, _ = storyboard_frame(&s, 1_000_000)
+	testing.expect_value(t, sheet, 1)
+}
+
+@(test)
+chapters_are_found_by_time :: proc(t: ^testing.T) {
+	chapters := []Chapter{{0, 1000, "A"}, {1000, 1000, "B"}, {2000, 1000, "C"}}
+	testing.expect_value(t, chapter_at(chapters, 0), 0)
+	testing.expect_value(t, chapter_at(chapters, 1500), 1)
+	testing.expect_value(t, chapter_at(chapters, 99_999), 2)
+	testing.expect_value(t, chapter_at(chapters[1:], 500), -1)
+}

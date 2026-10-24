@@ -97,6 +97,17 @@ Watch :: struct {
 	playing_vod:      bool,
 	vod_pending:      bool,
 	vod_button:       Rect,
+	// The video's chapters and preview frames (vod_extras.odin), owned, and which
+	// video they're for; the playback speed; the chapter list's state and, from
+	// the last draw, its button, items and the speed button.
+	chapters:         [dynamic]Chapter,
+	storyboard:       Storyboard,
+	extras_id:        string,
+	speed:            f64,
+	chapter_menu:     bool,
+	chapters_button:  Rect,
+	chapter_items:    [dynamic]Rect,
+	speed_button:     Rect,
 	// "From the start" is looking up the broadcast being recorded; until when the
 	// notice that there's none shows; from the last draw, the button.
 	rewinding:        bool,
@@ -133,6 +144,7 @@ watch_start :: proc(app: ^App, channel: string, restore := true, info: ^Stream =
 		channel   = strings.clone(channel),
 		status    = .Starting,
 		show_chat = !app.layout.hide_chat,
+		speed     = 1,
 	}
 	if info != nil {
 		watch_set_info(app, info^)
@@ -184,6 +196,8 @@ watch_stop :: proc(app: ^App) {
 	delete(w.channel_id)
 	destroy_vod(w.vod)
 	replay_destroy(&w.replay)
+	vod_extras_clear(w)
+	delete(w.chapter_items)
 	w^ = {}
 	app.session += 1
 	set_title(app, "")
@@ -320,6 +334,14 @@ on_controls :: proc(app: ^App, x, y: f32) -> bool {
 	if w.live_button.w > 0 && in_rect(w.live_button, x, y) {
 		return true
 	}
+	if (w.chapters_button.w > 0 && in_rect(w.chapters_button, x, y)) || (w.speed_button.w > 0 && in_rect(w.speed_button, x, y)) {
+		return true
+	}
+	for item in w.chapter_items {
+		if in_rect(item, x, y) {
+			return true
+		}
+	}
 	if (w.seek_bar.w > 0 && in_rect(w.seek_bar, x, y)) || (w.vod_button.w > 0 && in_rect(w.vod_button, x, y)) || (w.videos_button.w > 0 && in_rect(w.videos_button, x, y)) {
 		return true
 	}
@@ -341,6 +363,22 @@ on_controls :: proc(app: ^App, x, y: f32) -> bool {
 @(private = "file")
 controls_click :: proc(app: ^App, x, y: f32) -> bool {
 	w := &app.watch
+	if chapter_menu_click(app, x, y) {
+		w.quality_menu = false
+		return true
+	}
+	if w.speed_button.w > 0 && in_rect(w.speed_button, x, y) {
+		// The next speed up, back to the slowest after the fastest.
+		next := VOD_SPEEDS[0]
+		for speed in VOD_SPEEDS {
+			if speed > w.speed {
+				next = speed
+				break
+			}
+		}
+		vod_set_speed(app, next)
+		return true
+	}
 	if !w.quality_menu && vod_click(app, x, y) {
 		return true
 	}
@@ -432,7 +470,6 @@ draw_controls :: proc(app: ^App) {
 	draw_menu_item(app, w.latency_item, "Low latency", app.layout.low_latency)
 }
 
-@(private = "file")
 draw_menu_item :: proc(app: ^App, item: Rect, label: string, checked: bool) {
 	r := &app.assets.renderer
 	scale := app.scale
@@ -571,6 +608,8 @@ watch_key :: proc(app: ^App, key: sdl.KeyboardEvent) -> bool {
 		switch {
 		case w.quality_menu:
 			w.quality_menu = false
+		case w.chapter_menu:
+			w.chapter_menu = false
 		case w.card.open:
 			user_card_close(app)
 		case focused.searching:

@@ -588,6 +588,8 @@ finish_jobs :: proc(app: ^App) {
 			finish_videos_job(app, &p)
 		case Link_Job:
 			finish_link_job(app, &p)
+		case Vod_Extras_Job:
+			finish_vod_extras_job(app, &p)
 		case User_Emotes_Job:
 			finish_user_emotes_job(app, &p)
 		case Emoji_Job:

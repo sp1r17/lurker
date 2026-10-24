@@ -160,6 +160,10 @@ watch_go_live :: proc(app: ^App) {
 	}
 	player_command(&app.player, {"stop"})
 	player_clear(&app.player)
+	if w.speed != 1 {
+		vod_set_speed(app, 1)
+	}
+	w.chapter_menu = false
 	w.playing_vod = false
 	w.vod_pending = false
 	w.resumed_until = 0
@@ -234,9 +238,10 @@ finish_vod_url_job :: proc(app: ^App, p: ^Vod_Url_Job) {
 	}
 	// A recording's playlist is a local snapshot with its segments online.
 	player_load_at(&app.player, p.url, p.start, online_segments = p.recording)
-	// Clips have no chat to replay.
+	// Clips have no chat to replay, chapters or preview frames.
 	if w.vod.kind != .Clip {
 		replay_start(app, p.start)
+		vod_extras_request(app)
 	}
 }
 
@@ -263,6 +268,9 @@ vod_key :: proc(app: ^App, key: sdl.KeyboardEvent) -> bool {
 	w := &app.watch
 	if !w.playing_vod || w.status != .Playing {
 		return false
+	}
+	if vod_extras_key(app, key) {
+		return true
 	}
 	switch key.key {
 	case sdl.K_HOME:
@@ -429,7 +437,11 @@ draw_vod_offer :: proc(app: ^App, video: Rect) {
 draw_vod_seek :: proc(app: ^App, right: f32) {
 	w := &app.watch
 	w.seek_bar = {}
+	w.speed_button = {}
+	w.chapters_button = {}
+	clear(&w.chapter_items)
 	if !w.playing_vod || w.status != .Playing || !controls_visible(app) {
+		w.chapter_menu = false
 		return
 	}
 	pos, has_pos := player_number(&app.player, "time-pos")
@@ -444,19 +456,29 @@ draw_vod_seek :: proc(app: ^App, right: f32) {
 	v := w.video_rect
 	pad := 16 * scale
 	clock := fmt.tprintf("%s / %s", format_clock(int(pos)), format_clock(int(duration)))
+	if w.speed != 1 {
+		clock = fmt.tprintf("%s  ·  %g×", clock, w.speed)
+	}
 	if player_paused(&app.player) {
 		clock = fmt.tprintf("%s  ·  Paused", clock)
 	}
 	cw := text_width(r, .Bold, size, clock)
 	panel := Rect{v.x + pad, v.y + v.h - pad - lh - 12 * scale, cw + 24 * scale, lh + 12 * scale}
-	draw_rect(r, panel, CHAT_TOGGLE_BACKGROUND)
+	// Clicking the time changes the speed.
+	w.speed_button = panel
+	draw_rect(r, panel, MENU_HOVER if in_rect(panel, app.mouse.x, app.mouse.y) else CHAT_TOGGLE_BACKGROUND)
 	draw_text(r, .Bold, size, panel.x + 12 * scale, panel.y + 6 * scale, clock, BROWSE_TEXT)
 
-	// The bar between the time and the quality button; taller than it looks, to
-	// be easy to click.
+	// The bar between the time and the Chapters (or quality) button; taller than it
+	// looks, to be easy to click.
+	right := right
+	if chapters_left := draw_chapters_button(app, right - pad / 2, panel); chapters_left < right - pad / 2 {
+		right = chapters_left
+	}
 	bar_x := panel.x + panel.w + pad
 	bar_w := right - pad - bar_x
 	if bar_w < 40 * scale {
+		draw_chapter_menu(app)
 		return
 	}
 	w.seek_bar = {bar_x, panel.y, bar_w, panel.h}
@@ -464,8 +486,13 @@ draw_vod_seek :: proc(app: ^App, right: f32) {
 	track := Rect{bar_x, panel.y + (panel.h - track_h) / 2, bar_w, track_h}
 	draw_rect(r, track, CHAT_TOGGLE_BACKGROUND)
 	draw_rect(r, {track.x, track.y, track.w * f32(pos / duration), track.h}, BROWSE_ACCENT)
+	draw_chapter_marks(app, track, duration)
 	if in_rect(w.seek_bar, app.mouse.x, app.mouse.y) {
 		// Where a click would go.
 		draw_rect(r, {app.mouse.x - scale, track.y - 4 * scale, 2 * scale, track.h + 8 * scale}, BROWSE_TEXT)
+	}
+	draw_chapter_menu(app)
+	if !w.chapter_menu {
+		draw_seek_preview(app, track, duration)
 	}
 }
