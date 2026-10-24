@@ -41,6 +41,7 @@ destroy_vod_job :: proc(p: ^Vod_Job) {
 // Finds the address of a past broadcast's video, with streamlink.
 Vod_Url_Job :: struct {
 	vod_id:    string,
+	kind:      Video_Kind,
 	quality:   Quality,
 	client_id: string,
 	token:     string,
@@ -130,6 +131,7 @@ watch_play_vod :: proc(app: ^App, start: f64 = 0) {
 	w.vod_pending = true
 	job := Vod_Url_Job {
 		vod_id  = strings.clone(w.vod.id),
+		kind    = w.vod.kind,
 		quality = app.layout.quality,
 		start   = start,
 		session = app.session,
@@ -144,7 +146,7 @@ watch_play_vod :: proc(app: ^App, start: f64 = 0) {
 @(private = "file")
 run_vod_url_job :: proc(job: ^Job) {
 	p := &job.payload.(Vod_Url_Job)
-	p.url, p.ok = streamlink_vod_url(p.vod_id, p.quality, p.client_id, p.token)
+	p.url, p.ok = streamlink_vod_url(p.vod_id, p.kind, p.quality, p.client_id, p.token)
 }
 
 finish_vod_url_job :: proc(app: ^App, p: ^Vod_Url_Job) {
@@ -158,7 +160,21 @@ finish_vod_url_job :: proc(app: ^App, p: ^Vod_Url_Job) {
 		return
 	}
 	player_load_at(&app.player, p.url, p.start)
-	replay_start(app, p.start)
+	// Clips have no chat to replay.
+	if w.vod.kind != .Clip {
+		replay_start(app, p.start)
+	}
+}
+
+// Watches `vod` (a video or clip) from `start` seconds in, with its channel's
+// chat beside it.
+watch_start_vod :: proc(app: ^App, vod: Vod, start: f64 = 0) {
+	watch_start(app, vod.login, live = false)
+	w := &app.watch
+	destroy_vod(w.vod)
+	w.vod = clone_vod(vod)
+	w.vod_state = .Found
+	watch_play_vod(app, start)
 }
 
 // Where the past broadcast is, in seconds, for picking it up again after a
@@ -193,6 +209,10 @@ vod_click :: proc(app: ^App, x, y: f32) -> bool {
 		watch_play_vod(app)
 		return true
 	}
+	if w.videos_button.w > 0 && in_rect(w.videos_button, x, y) {
+		watch_open_videos(app, w.channel, w.info.user_name if w.has_info else "")
+		return true
+	}
 	if w.seek_bar.w > 0 && in_rect(w.seek_bar, x, y) {
 		if duration, ok := player_number(&app.player, "duration"); ok && duration > 0 {
 			at := clamp((x - w.seek_bar.x) / w.seek_bar.w, 0, 1) * f32(duration)
@@ -212,12 +232,13 @@ format_clock :: proc(seconds: int) -> string {
 	return fmt.tprintf("%d:%02d", s / 60, s % 60)
 }
 
-// Under the offline (or ended) message: the last broadcast, and a button to
-// watch it. `message_y` is where the message is drawn.
+// Under the offline (or ended) message: the video just watched or the last
+// broadcast, with a button to watch it, and a button for all the channel's videos.
 draw_vod_offer :: proc(app: ^App, video: Rect) {
 	w := &app.watch
 	w.vod_button = {}
-	if w.vod_state != .Found {
+	w.videos_button = {}
+	if w.vod_state == .None || w.vod_state == .Loading {
 		return
 	}
 	r := &app.assets.renderer
@@ -230,25 +251,40 @@ draw_vod_offer :: proc(app: ^App, video: Rect) {
 	cx := video.x + video.w / 2
 	y := video.y + video.h / 2 + lh + 16 * scale
 
-	when_ := format_last_live(w.vod.created_at, time.now())
-	detail := fmt.tprintf("%s · %s", when_, format_clock(w.vod.length))
-	if w.vod.game != "" {
-		detail = fmt.tprintf("%s · %s", detail, w.vod.game)
+	found := w.vod_state == .Found
+	if found {
+		when_ := format_last_live(w.vod.created_at, time.now())
+		detail := fmt.tprintf("%s · %s", when_, format_clock(w.vod.length))
+		if w.vod.game != "" {
+			detail = fmt.tprintf("%s · %s", detail, w.vod.game)
+		}
+		title := fit_text(r, .Bold, title_size, w.vod.title, room)
+		draw_text(r, .Bold, title_size, cx - text_width(r, .Bold, title_size, title) / 2, y, title, BROWSE_TEXT)
+		y += lh_title
+		detail = fit_text(r, .Regular, size, detail, room)
+		draw_text(r, .Regular, size, cx - text_width(r, .Regular, size, detail) / 2, y, detail, BROWSE_DIM_TEXT)
+		y += lh + 12 * scale
 	}
-	title := fit_text(r, .Bold, title_size, w.vod.title, room)
-	draw_text(r, .Bold, title_size, cx - text_width(r, .Bold, title_size, title) / 2, y, title, BROWSE_TEXT)
-	y += lh_title
-	detail = fit_text(r, .Regular, size, detail, room)
-	draw_text(r, .Regular, size, cx - text_width(r, .Regular, size, detail) / 2, y, detail, BROWSE_DIM_TEXT)
-	y += lh + 12 * scale
 
-	label := "Watch again (Enter)" if w.playing_vod else "Watch the last broadcast (Enter)"
-	bw := text_width(r, .Bold, size, label) + 32 * scale
+	// The buttons, side by side and centred.
 	bh := lh + 16 * scale
-	w.vod_button = {cx - bw / 2, y, bw, bh}
-	hovered := in_rect(w.vod_button, app.mouse.x, app.mouse.y)
-	draw_rect(r, w.vod_button, SIGN_IN_BUTTON_HOVER if hovered else SIGN_IN_BUTTON)
-	draw_centered(r, .Bold, size, w.vod_button, label, BROWSE_TEXT)
+	gap := 8 * scale
+	watch_label := "Watch again (Enter)" if w.playing_vod else "Watch the last broadcast (Enter)"
+	watch_w := text_width(r, .Bold, size, watch_label) + 32 * scale if found else 0
+	videos_label := "All videos"
+	videos_w := text_width(r, .Bold, size, videos_label) + 32 * scale
+	x := cx - (watch_w + (gap if found else 0) + videos_w) / 2
+	if found {
+		w.vod_button = {x, y, watch_w, bh}
+		hovered := in_rect(w.vod_button, app.mouse.x, app.mouse.y)
+		draw_rect(r, w.vod_button, SIGN_IN_BUTTON_HOVER if hovered else SIGN_IN_BUTTON)
+		draw_centered(r, .Bold, size, w.vod_button, watch_label, BROWSE_TEXT)
+		x += watch_w + gap
+	}
+	w.videos_button = {x, y, videos_w, bh}
+	hovered := in_rect(w.videos_button, app.mouse.x, app.mouse.y)
+	draw_rect(r, w.videos_button, BROWSE_CARD_HOVER if hovered else BROWSE_PLACEHOLDER)
+	draw_centered(r, .Bold, size, w.videos_button, videos_label, BROWSE_TEXT)
 }
 
 // While a past broadcast plays, with the controls: a bar across the video's

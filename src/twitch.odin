@@ -789,18 +789,56 @@ parse_channel_status_response :: proc(body: []byte) -> (channels: []Followed_Cha
 	return list[:], .None
 }
 
-// A past broadcast (VOD).
+// The kinds of video a channel has: past broadcasts, highlights and uploads
+// (all videos to Twitch), and clips.
+Video_Kind :: enum {
+	Broadcast,
+	Highlight,
+	Upload,
+	Clip,
+}
+
+// GraphQL's name for each kind of video (clips are asked for separately).
+@(rodata)
+VIDEO_TYPES := [Video_Kind]string {
+	.Broadcast = "ARCHIVE",
+	.Highlight = "HIGHLIGHT",
+	.Upload    = "UPLOAD",
+	.Clip      = "",
+}
+
+// A video or clip.
 Vod :: struct {
-	id:         string,
-	title:      string,
-	game:       string,
+	kind:              Video_Kind,
+	// The video's ID, or the clip's slug.
+	id:                string,
+	title:             string,
+	game:              string,
 	// RFC 3339.
-	created_at: string,
-	length:     int,
+	created_at:        string,
+	length:            int,
+	views:             int,
+	thumbnail_url:     string,
+	// The storyboard of preview frames (broadcasts), for the seek bar.
+	seek_previews_url: string,
+	// A broadcast that's still live.
+	recording:         bool,
+	// The channel it's from.
+	login:             string,
+	channel_name:      string,
 }
 
 clone_vod :: proc(v: Vod) -> Vod {
-	return {strings.clone(v.id), strings.clone(v.title), strings.clone(v.game), strings.clone(v.created_at), v.length}
+	c := v
+	c.id = strings.clone(v.id)
+	c.title = strings.clone(v.title)
+	c.game = strings.clone(v.game)
+	c.created_at = strings.clone(v.created_at)
+	c.thumbnail_url = strings.clone(v.thumbnail_url)
+	c.seek_previews_url = strings.clone(v.seek_previews_url)
+	c.login = strings.clone(v.login)
+	c.channel_name = strings.clone(v.channel_name)
+	return c
 }
 
 destroy_vod :: proc(v: Vod) {
@@ -808,66 +846,331 @@ destroy_vod :: proc(v: Vod) {
 	delete(v.title)
 	delete(v.game)
 	delete(v.created_at)
+	delete(v.thumbnail_url)
+	delete(v.seek_previews_url)
+	delete(v.login)
+	delete(v.channel_name)
 }
 
-// `login`'s most recent past broadcast, if it has one. Allocated with the temp
-// allocator.
-get_latest_vod :: proc(client_id, token, login: string) -> (vod: Vod, found: bool, err: Twitch_Error) {
+// How many videos one request lists.
+VIDEOS_PAGE :: 30
+// The size of the thumbnails asked for: cards show them at about this size.
+VIDEO_THUMBNAIL_SIZE :: [2]int{440, 248}
+
+@(private = "file")
+video_fields :: proc() -> string {
+	return fmt.tprintf(
+		"id title lengthSeconds createdAt viewCount status broadcastType previewThumbnailURL(width: %d, height: %d) seekPreviewsURL game {{ displayName }} owner {{ login displayName }}",
+		VIDEO_THUMBNAIL_SIZE.x,
+		VIDEO_THUMBNAIL_SIZE.y,
+	)
+}
+
+CLIP_FIELDS :: "slug title durationSeconds viewCount createdAt thumbnailURL game { displayName } broadcaster { login displayName }"
+
+// GraphQL's video, as asked for by video_fields.
+@(private = "file")
+Video_Node :: struct {
+	id:                  string,
+	title:               string,
+	lengthSeconds:       int,
+	createdAt:           string,
+	viewCount:           int,
+	status:              string,
+	broadcastType:       string,
+	previewThumbnailURL: string,
+	seekPreviewsURL:     string,
+	game:                Maybe(struct {
+		displayName: string,
+	}),
+	owner:               Maybe(struct {
+		login:       string,
+		displayName: string,
+	}),
+}
+
+@(private = "file")
+Clip_Node :: struct {
+	slug:            string,
+	title:           string,
+	durationSeconds: int,
+	viewCount:       int,
+	createdAt:       string,
+	thumbnailURL:    string,
+	game:            Maybe(struct {
+		displayName: string,
+	}),
+	broadcaster:     Maybe(struct {
+		login:       string,
+		displayName: string,
+	}),
+}
+
+// Points into `n`.
+@(private = "file")
+vod_from_node :: proc(n: Video_Node) -> Vod {
+	v := Vod {
+		id                = n.id,
+		title             = n.title,
+		created_at        = n.createdAt,
+		length            = n.lengthSeconds,
+		views             = n.viewCount,
+		thumbnail_url     = n.previewThumbnailURL,
+		seek_previews_url = n.seekPreviewsURL,
+		recording         = n.status == "RECORDING",
+	}
+	switch n.broadcastType {
+	case "HIGHLIGHT":
+		v.kind = .Highlight
+	case "UPLOAD":
+		v.kind = .Upload
+	}
+	if game, ok := n.game.?; ok {
+		v.game = game.displayName
+	}
+	if owner, ok := n.owner.?; ok {
+		v.login, v.channel_name = owner.login, owner.displayName
+	}
+	return v
+}
+
+// Points into `n`, apart from the thumbnail address (temp allocator).
+@(private = "file")
+vod_from_clip :: proc(n: Clip_Node) -> Vod {
+	v := Vod {
+		kind       = .Clip,
+		id         = n.slug,
+		title      = n.title,
+		created_at = n.createdAt,
+		length     = n.durationSeconds,
+		views      = n.viewCount,
+		// Twitch gives the full size; a smaller one is there by name.
+		thumbnail_url = clip_thumbnail(n.thumbnailURL),
+	}
+	if game, ok := n.game.?; ok {
+		v.game = game.displayName
+	}
+	if b, ok := n.broadcaster.?; ok {
+		v.login, v.channel_name = b.login, b.displayName
+	}
+	return v
+}
+
+// A clip thumbnail's address at 480x272 rather than 1920x1080. Allocated with the
+// temp allocator.
+clip_thumbnail :: proc(url: string) -> string {
+	small, _ := strings.replace(url, "-1920x1080.", "-480x272.", 1, context.temp_allocator)
+	return small
+}
+
+@(private = "file")
+Graphql_Errors :: []struct {
+	message: string,
+}
+
+@(private = "file")
+check_errors :: proc(errors: Graphql_Errors) -> Twitch_Error {
+	if len(errors) > 0 {
+		log.warnf("GraphQL error: %s", errors[0].message)
+		return .Bad_Status
+	}
+	return .None
+}
+
+// A page of `login`'s videos of one kind, newest first (clips: most viewed),
+// after `cursor` ("" for the first). `next` is the cursor for the page after, or
+// "" at the end. Allocated with the temp allocator.
+get_channel_videos :: proc(
+	client_id, token, login: string,
+	kind: Video_Kind,
+	cursor := "",
+) -> (
+	videos: []Vod,
+	next: string,
+	err: Twitch_Error,
+) {
 	variables := make(map[string]string, context.temp_allocator)
 	variables["login"] = login
-	body := gql_post(
-		client_id,
-		token,
-		"query($login: String!) { user(login: $login) { videos(first: 1, type: ARCHIVE, sort: TIME) { edges { node { id title lengthSeconds createdAt game { displayName } } } } } }",
-		variables,
-	) or_return
-	return parse_latest_vod_response(body)
+	if cursor != "" {
+		variables["cursor"] = cursor
+	}
+	list: string
+	if kind == .Clip {
+		list = fmt.tprintf(
+			"clips(first: %d, after: $cursor, criteria: {{ period: ALL_TIME, sort: VIEWS_DESC }}) {{ edges {{ cursor node {{ %s }} }} pageInfo {{ hasNextPage }} }}",
+			VIDEOS_PAGE,
+			CLIP_FIELDS,
+		)
+	} else {
+		list = fmt.tprintf(
+			"videos(first: %d, after: $cursor, type: %s, sort: TIME) {{ edges {{ cursor node {{ %s }} }} pageInfo {{ hasNextPage }} }}",
+			VIDEOS_PAGE,
+			VIDEO_TYPES[kind],
+			video_fields(),
+		)
+	}
+	query := strings.concatenate({"query($login: String!, $cursor: Cursor) { user(login: $login) { ", list, " } }"}, context.temp_allocator)
+	body := gql_post(client_id, token, query, variables) or_return
+	return parse_channel_videos_response(body, kind)
 }
 
-parse_latest_vod_response :: proc(body: []byte) -> (vod: Vod, found: bool, err: Twitch_Error) {
+parse_channel_videos_response :: proc(body: []byte, kind: Video_Kind) -> (videos: []Vod, next: string, err: Twitch_Error) {
+	Page :: struct($T: typeid) {
+		edges:    []struct {
+			cursor: string,
+			node:   T,
+		},
+		pageInfo: struct {
+			hasNextPage: bool,
+		},
+	}
 	r: struct {
 		data:   struct {
 			user: Maybe(struct {
-				videos: Maybe(struct {
+				videos: Maybe(Page(Video_Node)),
+				clips:  Maybe(Page(Clip_Node)),
+			}),
+		},
+		errors: Graphql_Errors,
+	}
+	if json.unmarshal(body, &r, allocator = context.temp_allocator) != nil {
+		return nil, "", .Bad_Json
+	}
+	check_errors(r.errors) or_return
+	user, has_user := r.data.user.?
+	if !has_user {
+		return nil, "", .None
+	}
+	list := make([dynamic]Vod, context.temp_allocator)
+	if kind == .Clip {
+		page := user.clips.? or_else {}
+		for e in page.edges {
+			append(&list, vod_from_clip(e.node))
+		}
+		if page.pageInfo.hasNextPage && len(page.edges) > 0 {
+			next = page.edges[len(page.edges) - 1].cursor
+		}
+	} else {
+		page := user.videos.? or_else {}
+		for e in page.edges {
+			append(&list, vod_from_node(e.node))
+		}
+		if page.pageInfo.hasNextPage && len(page.edges) > 0 {
+			next = page.edges[len(page.edges) - 1].cursor
+		}
+	}
+	return list[:], next, .None
+}
+
+// `login`'s most recent past broadcast, if it has one: the one still recording
+// if they're live. Allocated with the temp allocator.
+get_latest_vod :: proc(client_id, token, login: string) -> (vod: Vod, found: bool, err: Twitch_Error) {
+	videos, _ := get_channel_videos(client_id, token, login, .Broadcast) or_return
+	if len(videos) == 0 {
+		return {}, false, .None
+	}
+	return videos[0], true, .None
+}
+
+// The video with ID `id`, for twitch.tv/videos links. Allocated with the temp
+// allocator.
+get_video :: proc(client_id, token, id: string) -> (vod: Vod, found: bool, err: Twitch_Error) {
+	variables := make(map[string]string, context.temp_allocator)
+	variables["id"] = id
+	query := strings.concatenate({"query($id: ID!) { video(id: $id) { ", video_fields(), " } }"}, context.temp_allocator)
+	body := gql_post(client_id, token, query, variables) or_return
+	r: struct {
+		data:   struct {
+			video: Maybe(Video_Node),
+		},
+		errors: Graphql_Errors,
+	}
+	if json.unmarshal(body, &r, allocator = context.temp_allocator) != nil {
+		return {}, false, .Bad_Json
+	}
+	check_errors(r.errors) or_return
+	node, has_node := r.data.video.?
+	if !has_node {
+		return {}, false, .None
+	}
+	return vod_from_node(node), true, .None
+}
+
+// The clip with slug `slug`, for clip links. Allocated with the temp allocator.
+get_clip :: proc(client_id, token, slug: string) -> (vod: Vod, found: bool, err: Twitch_Error) {
+	variables := make(map[string]string, context.temp_allocator)
+	variables["slug"] = slug
+	query := strings.concatenate({"query($slug: ID!) { clip(slug: $slug) { ", CLIP_FIELDS, " } }"}, context.temp_allocator)
+	body := gql_post(client_id, token, query, variables) or_return
+	r: struct {
+		data:   struct {
+			clip: Maybe(Clip_Node),
+		},
+		errors: Graphql_Errors,
+	}
+	if json.unmarshal(body, &r, allocator = context.temp_allocator) != nil {
+		return {}, false, .Bad_Json
+	}
+	check_errors(r.errors) or_return
+	node, has_node := r.data.clip.?
+	if !has_node {
+		return {}, false, .None
+	}
+	return vod_from_clip(node), true, .None
+}
+
+// A part of a past broadcast, in milliseconds from its start: one game, usually.
+Chapter :: struct {
+	start:  int,
+	length: int,
+	title:  string,
+}
+
+// The chapters of video `id`, in order; none if Twitch has none for it.
+// Allocated with the temp allocator.
+get_chapters :: proc(client_id, token, id: string) -> (chapters: []Chapter, err: Twitch_Error) {
+	variables := make(map[string]string, context.temp_allocator)
+	variables["id"] = id
+	body := gql_post(
+		client_id,
+		token,
+		"query($id: ID!) { video(id: $id) { moments(first: 100, momentRequestType: VIDEO_CHAPTER_MARKERS) { edges { node { positionMilliseconds durationMilliseconds description } } } } }",
+		variables,
+	) or_return
+	return parse_chapters_response(body)
+}
+
+parse_chapters_response :: proc(body: []byte) -> (chapters: []Chapter, err: Twitch_Error) {
+	r: struct {
+		data:   struct {
+			video: Maybe(struct {
+				moments: Maybe(struct {
 					edges: []struct {
 						node: struct {
-							id:            string,
-							title:         string,
-							lengthSeconds: int,
-							createdAt:     string,
-							game:          Maybe(struct {
-								displayName: string,
-							}),
+							positionMilliseconds: int,
+							durationMilliseconds: int,
+							description:          string,
 						},
 					},
 				}),
 			}),
 		},
-		errors: []struct {
-			message: string,
-		},
+		errors: Graphql_Errors,
 	}
 	if json.unmarshal(body, &r, allocator = context.temp_allocator) != nil {
-		return {}, false, .Bad_Json
+		return nil, .Bad_Json
 	}
-	if len(r.errors) > 0 {
-		log.warnf("GraphQL error: %s", r.errors[0].message)
-		return {}, false, .Bad_Status
+	check_errors(r.errors) or_return
+	video, has_video := r.data.video.?
+	if !has_video {
+		return nil, .None
 	}
-	user, has_user := r.data.user.?
-	if !has_user {
-		return {}, false, .None
+	moments := video.moments.? or_else {}
+	list := make([]Chapter, len(moments.edges), context.temp_allocator)
+	for e, i in moments.edges {
+		list[i] = {e.node.positionMilliseconds, e.node.durationMilliseconds, e.node.description}
 	}
-	videos, has_videos := user.videos.?
-	if !has_videos || len(videos.edges) == 0 {
-		return {}, false, .None
-	}
-	n := videos.edges[0].node
-	vod = {id = n.id, title = n.title, created_at = n.createdAt, length = n.lengthSeconds}
-	if game, has_game := n.game.?; has_game {
-		vod.game = game.displayName
-	}
-	return vod, true, .None
+	return list, .None
 }
 
 // A message from a past broadcast's chat, as a chat message, and when in the

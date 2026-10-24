@@ -200,21 +200,48 @@ last_live_reads_naturally :: proc(t: ^testing.T) {
 }
 
 @(test)
-latest_vod_reads :: proc(t: ^testing.T) {
+channel_videos_read :: proc(t: ^testing.T) {
 	defer free_all(context.temp_allocator)
-	body := `{"data":{"user":{"videos":{"edges":[{"node":{"id":"2908012950","title":"SLOPTOBER 21","lengthSeconds":24205,` +
-		`"createdAt":"2026-10-22T22:30:13Z","game":{"displayName":"Games + Demos"}}}]}}}}`
-	vod, found, err := parse_latest_vod_response(transmute([]byte)body)
+	body := `{"data":{"user":{"videos":{"edges":[{"cursor":"c1","node":{"id":"2909463658","title":"WORLDS","lengthSeconds":24912,` +
+		`"createdAt":"2026-10-24T13:48:38Z","viewCount":5,"status":"RECORDING","broadcastType":"ARCHIVE","previewThumbnailURL":"https://x/t.jpg",` +
+		`"seekPreviewsURL":"https://x/info.json","game":{"displayName":"League of Legends"},"owner":{"login":"caedrel","displayName":"Caedrel"}}},` +
+		`{"cursor":"c2","node":{"id":"2","title":"Best of","lengthSeconds":60,"createdAt":"","viewCount":9,"status":"RECORDED",` +
+		`"broadcastType":"HIGHLIGHT","game":null,"owner":null}}],"pageInfo":{"hasNextPage":true}}}}}`
+	videos, next, err := parse_channel_videos_response(transmute([]byte)body, .Broadcast)
 	testing.expect_value(t, err, Twitch_Error.None)
-	testing.expect(t, found)
-	testing.expect_value(t, vod.id, "2908012950")
-	testing.expect_value(t, vod.length, 24205)
-	testing.expect_value(t, vod.game, "Games + Demos")
-	_, found, err = parse_latest_vod_response(transmute([]byte)string(`{"data":{"user":{"videos":{"edges":[]}}}}`))
+	testing.expect_value(t, len(videos), 2)
+	testing.expect_value(t, next, "c2")
+	testing.expect(t, videos[0].recording)
+	testing.expect_value(t, videos[0].login, "caedrel")
+	testing.expect_value(t, videos[0].game, "League of Legends")
+	testing.expect_value(t, videos[1].kind, Video_Kind.Highlight)
+
+	clips := `{"data":{"user":{"clips":{"edges":[{"cursor":"MQ==","node":{"slug":"Funny-Clip","title":"MAAAAN","durationSeconds":16,` +
+		`"viewCount":813,"createdAt":"","thumbnailURL":"https://x/thumb-0000000000-1920x1080.jpg","game":null,"broadcaster":{"login":"moonmoon","displayName":"MOONMOON"}}}],` +
+		`"pageInfo":{"hasNextPage":false}}}}}`
+	videos, next, err = parse_channel_videos_response(transmute([]byte)clips, .Clip)
 	testing.expect_value(t, err, Twitch_Error.None)
-	testing.expect(t, !found)
+	testing.expect_value(t, next, "")
+	testing.expect_value(t, videos[0].kind, Video_Kind.Clip)
+	testing.expect_value(t, videos[0].id, "Funny-Clip")
+	// The small thumbnail, by name.
+	testing.expect_value(t, videos[0].thumbnail_url, "https://x/thumb-0000000000-480x272.jpg")
 }
 
+@(test)
+chapters_read :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	body := `{"data":{"video":{"moments":{"edges":[{"node":{"positionMilliseconds":0,"durationMilliseconds":8126000,"description":"Endacopia"}},` +
+		`{"node":{"positionMilliseconds":8126000,"durationMilliseconds":1000,"description":"Just Chatting"}}]}}}}`
+	chapters, err := parse_chapters_response(transmute([]byte)body)
+	testing.expect_value(t, err, Twitch_Error.None)
+	testing.expect_value(t, len(chapters), 2)
+	testing.expect_value(t, chapters[1].start, 8126000)
+	testing.expect_value(t, chapters[1].title, "Just Chatting")
+	none, none_err := parse_chapters_response(transmute([]byte)string(`{"data":{"video":{"moments":{"edges":[]}}}}`))
+	testing.expect_value(t, none_err, Twitch_Error.None)
+	testing.expect_value(t, len(none), 0)
+}
 @(test)
 vod_comments_become_chat_messages :: proc(t: ^testing.T) {
 	defer free_all(context.temp_allocator)

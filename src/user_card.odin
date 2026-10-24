@@ -49,6 +49,8 @@ User_Card :: struct {
 	rect:     Rect,
 	// Bumped per card, so a lookup for an earlier one is ignored.
 	request:  int,
+	// The link to their videos, from the last draw.
+	videos_link: Rect,
 }
 
 user_card_open :: proc(app: ^App, p: ^Chat_Pane, login: string, anchor_y: f32) {
@@ -243,6 +245,12 @@ draw_user_card :: proc(app: ^App) {
 	}
 	ty = y + card_h - pad - lh_small
 	draw_text(r, .Regular, small, x + pad, ty, "Esc or click outside to close", CHAT_SYSTEM_TEXT)
+	// Their videos, at the right of that line.
+	label := "Videos ›"
+	lw := text_width(r, .Bold, small, label)
+	c.videos_link = {x + card_w - pad - lw, ty, lw, lh_small}
+	hovered := in_rect(c.videos_link, app.mouse.x, app.mouse.y)
+	draw_text(r, .Bold, small, c.videos_link.x, ty, label, BROWSE_TEXT if hovered else BROWSE_ACCENT)
 }
 
 // A message's text with emotes as their names, allocated with the temp allocator.

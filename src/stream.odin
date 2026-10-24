@@ -95,14 +95,15 @@ write_streamlink_config :: proc(client_id, token: string) -> (path: string, ok: 
 // The address of past broadcast `vod_id`'s video, which mpv plays directly (so it
 // can seek), from streamlink. Blocks while streamlink looks it up: for a job. With
 // a `token`, subscriber-only broadcasts work too. Allocated with `allocator`.
-streamlink_vod_url :: proc(vod_id: string, quality: Quality, client_id := "", token := "", allocator := context.allocator) -> (url: string, ok: bool) {
+streamlink_vod_url :: proc(vod_id: string, kind: Video_Kind, quality: Quality, client_id := "", token := "", allocator := context.allocator) -> (url: string, ok: bool) {
 	command := make([dynamic]string, context.temp_allocator)
 	append(&command, streamlink_program(), "--stream-url", "--loglevel", "error")
 	if token != "" {
 		config := write_streamlink_config(client_id, token) or_return
 		append(&command, "--config", config)
 	}
-	append(&command, fmt.tprintf("https://www.twitch.tv/videos/%s", vod_id), QUALITY_STREAMS[quality])
+	page := fmt.tprintf("https://clips.twitch.tv/%s", vod_id) if kind == .Clip else fmt.tprintf("https://www.twitch.tv/videos/%s", vod_id)
+	append(&command, page, QUALITY_STREAMS[quality])
 	state, stdout, stderr, err := os.process_exec({command = command[:]}, context.temp_allocator)
 	if err != nil {
 		log.errorf("can't run streamlink: %v", err)

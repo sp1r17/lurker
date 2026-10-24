@@ -97,6 +97,7 @@ Watch :: struct {
 	playing_vod:      bool,
 	vod_pending:      bool,
 	vod_button:       Rect,
+	videos_button:    Rect,
 	seek_bar:         Rect,
 	// The past broadcast's chat, in place of the live chat while it plays.
 	replay:           Chat_Replay,
@@ -111,7 +112,9 @@ Watch :: struct {
 // `restore`. `info`, if known (from the browse screen), shows right away. Each
 // watch is a new session: jobs started for an earlier one are ignored when they
 // finish.
-watch_start :: proc(app: ^App, channel: string, restore := true, info: ^Stream = nil) {
+// Without `live`, the stream isn't started: a past broadcast is played instead
+// (watch_start_vod).
+watch_start :: proc(app: ^App, channel: string, restore := true, info: ^Stream = nil, live := true) {
 	if app.screen == .Watch {
 		watch_stop(app)
 	}
@@ -127,7 +130,9 @@ watch_start :: proc(app: ^App, channel: string, restore := true, info: ^Stream =
 		// Just fetched by the browse screen: the next lookup can wait.
 		w.info_at = max(app.assets.now_ms, 1)
 	}
-	start_stream(app, signed = app.signed_in)
+	if live {
+		start_stream(app, signed = app.signed_in)
+	}
 	follow_lookup(app)
 	p := pane_new(app)
 	pane_join(app, p, w.channel)
@@ -303,7 +308,7 @@ on_controls :: proc(app: ^App, x, y: f32) -> bool {
 	if w.follow_button.w > 0 && in_rect(w.follow_button, x, y) {
 		return true
 	}
-	if (w.seek_bar.w > 0 && in_rect(w.seek_bar, x, y)) || (w.vod_button.w > 0 && in_rect(w.vod_button, x, y)) {
+	if (w.seek_bar.w > 0 && in_rect(w.seek_bar, x, y)) || (w.vod_button.w > 0 && in_rect(w.vod_button, x, y)) || (w.videos_button.w > 0 && in_rect(w.videos_button, x, y)) {
 		return true
 	}
 	if w.quality_menu {
@@ -675,6 +680,9 @@ pane_at :: proc(app: ^App, x, y: f32) -> (p: ^Chat_Pane, index: int) {
 watch_click :: proc(app: ^App, x, y: f32) {
 	w := &app.watch
 	if w.card.open && in_rect(w.card.rect, x, y) {
+		if in_rect(w.card.videos_link, x, y) {
+			watch_open_videos(app, w.card.login, w.card.info.display_name if w.card.state == .Loaded else "")
+		}
 		return
 	}
 	if controls_click(app, x, y) {
@@ -708,6 +716,15 @@ watch_right_click :: proc(app: ^App, x, y: f32) {
 		app.watch.focus = i
 		pane_reply_start(app, p, m)
 	}
+}
+
+// Leaves the stream for `login`'s video page.
+watch_open_videos :: proc(app: ^App, login, name: string) {
+	// Copies: they may point into what watch_stop frees.
+	channel := strings.clone(login, context.temp_allocator)
+	display := strings.clone(name, context.temp_allocator)
+	watch_stop(app)
+	browse_open_videos(app, channel, display)
 }
 
 // The wheel scrolls a chat, or over the video, changes the volume as in mpv.
@@ -759,10 +776,10 @@ draw_watch :: proc(app: ^App) {
 			draw_image(&a.renderer, app.player.texture, video)
 		}
 	case .Starting:
-		loading := "Loading the last broadcast..." if w.playing_vod else fmt.tprintf("Loading %s...", w.channel)
+		loading := fmt.tprintf("Loading the %s...", strings.to_lower(VIDEO_KIND_NAMES[w.vod.kind], context.temp_allocator)) if w.playing_vod else fmt.tprintf("Loading %s...", w.channel)
 		draw_centered(&a.renderer, .Regular, text_size, video, loading, BROWSE_DIM_TEXT)
 	case .Ended:
-		ended := "That's the end of the broadcast. Esc to go back." if w.playing_vod else "The stream has ended. Esc to go back."
+		ended := fmt.tprintf("That's the end of the %s. Esc to go back.", strings.to_lower(VIDEO_KIND_NAMES[w.vod.kind], context.temp_allocator)) if w.playing_vod else "The stream has ended. Esc to go back."
 		draw_centered(&a.renderer, .Regular, text_size, video, ended, BROWSE_DIM_TEXT)
 		draw_vod_offer(app, video)
 	case .Offline:
@@ -775,6 +792,7 @@ draw_watch :: proc(app: ^App) {
 	scale := app.scale
 	if w.status != .Offline && w.status != .Ended {
 		w.vod_button = {}
+		w.videos_button = {}
 	}
 	draw_stream_info(app)
 	draw_volume(app)
