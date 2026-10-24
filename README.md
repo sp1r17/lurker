@@ -49,6 +49,9 @@ Download `lurker-<version>-x86_64-setup.exe` from the
 includes mpv and streamlink, and installs for the current user unless you choose
 otherwise.
 
+The Windows version is new and hasn't had much testing yet. If something doesn't
+work, please [open an issue](https://github.com/sp1r17/lurker/issues).
+
 To build it, run `packaging\windows\build.ps1` from an "x64 Native Tools" prompt
 with Odin on the PATH. It downloads libmpv and streamlink, and makes the installer
 if Inno Setup is installed.
