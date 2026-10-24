@@ -129,6 +129,7 @@ draw_stream_info :: proc(app: ^App) {
 	w := &app.watch
 	w.back_button = {}
 	w.follow_button = {}
+	w.channel_videos_button = {}
 	w.unfollow_armed = w.unfollow_armed && controls_visible(app)
 	if !controls_visible(app) {
 		return
@@ -177,7 +178,19 @@ draw_stream_info :: proc(app: ^App) {
 		color := LIVE_RED if w.playing_vod else (FOLLOWING_BUTTON_HOVER if hovered else FOLLOWING_BUTTON)
 		draw_rect(r, w.live_button, color)
 		draw_centered(r, .Bold, lsize, w.live_button, live_label, BROWSE_TEXT)
-		right = w.live_button.x - 16 * scale
+		right = w.live_button.x - 8 * scale
+	}
+	// The channel's videos, live or not.
+	{
+		lsize := BROWSE_CARD_TEXT_SIZE * scale
+		label := "Videos"
+		bw := text_width(r, .Bold, lsize, label) + 24 * scale
+		bh := line_height(r, .Bold, lsize) + 12 * scale
+		w.channel_videos_button = {right - bw, bar.y + pad + name_h / 2 - bh / 2, bw, bh}
+		hovered := in_rect(w.channel_videos_button, app.mouse.x, app.mouse.y)
+		draw_rect(r, w.channel_videos_button, FOLLOWING_BUTTON_HOVER if hovered else FOLLOWING_BUTTON)
+		draw_centered(r, .Bold, lsize, w.channel_videos_button, label, BROWSE_TEXT)
+		right = w.channel_videos_button.x - 16 * scale
 	}
 	if w.has_info {
 		parts := make([dynamic]string, context.temp_allocator)

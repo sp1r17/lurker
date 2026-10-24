@@ -344,6 +344,10 @@ vod_click :: proc(app: ^App, x, y: f32) -> bool {
 		vod_start_over(app)
 		return true
 	}
+	if w.channel_videos_button.w > 0 && in_rect(w.channel_videos_button, x, y) {
+		watch_open_videos(app, w.channel, w.info.user_name if w.has_info else "")
+		return true
+	}
 	if w.live_button.w > 0 && in_rect(w.live_button, x, y) {
 		if w.playing_vod {
 			watch_go_live(app)

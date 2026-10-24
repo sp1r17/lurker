@@ -113,6 +113,8 @@ Watch :: struct {
 	rewinding:        bool,
 	no_rewind_until:  int,
 	live_button:      Rect,
+	// The info bar's button for the channel's video page.
+	channel_videos_button: Rect,
 	// Until when (Assets.now_ms) the "Resumed at" notice shows, and from where.
 	resumed_until:    int,
 	resumed_from:     int,
@@ -332,6 +334,9 @@ on_controls :: proc(app: ^App, x, y: f32) -> bool {
 		return true
 	}
 	if w.live_button.w > 0 && in_rect(w.live_button, x, y) {
+		return true
+	}
+	if w.channel_videos_button.w > 0 && in_rect(w.channel_videos_button, x, y) {
 		return true
 	}
 	if (w.chapters_button.w > 0 && in_rect(w.chapters_button, x, y)) || (w.speed_button.w > 0 && in_rect(w.speed_button, x, y)) {
