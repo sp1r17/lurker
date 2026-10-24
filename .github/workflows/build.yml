@@ -6,6 +6,10 @@ on:
     tags: ['v*']
   pull_request:
 
+# Read-only unless a job asks for more (the release job writes releases).
+permissions:
+  contents: read
+
 jobs:
   flatpak:
     name: Flatpak
