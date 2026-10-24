@@ -1,7 +1,7 @@
 # Lurker
 
-A native Linux desktop client for watching Twitch. Streams play through mpv,
-alongside a Chatterino-style chat, with no browser involved.
+A native desktop client for watching Twitch, on Linux and Windows. Streams play
+through mpv, alongside a Chatterino-style chat, with no browser involved.
 
 Video goes through streamlink, which drops ad segments, so streams play without
 pre-roll or mid-roll ads.
@@ -10,8 +10,10 @@ pre-roll or mid-roll ads.
 
 - Browse followed channels (live and offline), top streams and categories, and
   search channels and categories
-- Chat with 7TV, BTTV and FFZ emotes, badges, replies, mentions and an emote
-  picker; open other channels' chats as splits beside the video
+- Chat with 7TV, BTTV and FFZ emotes, badges, replies and an emote picker; open
+  other channels' chats as splits beside the video
+- Mentions are highlighted, with a count of unread ones on each chat
+- Hover a stream card for its full title, or an emote or badge for its name
 - Past broadcasts for offline channels, with seeking and chat replay
 - Quality selection, low-latency mode, volume boost up to 130%
 - Follow and unfollow channels
@@ -56,9 +58,9 @@ To build it, run `packaging\windows\build.ps1` from an "x64 Native Tools" prompt
 with Odin on the PATH. It downloads libmpv and streamlink, and makes the installer
 if Inno Setup is installed.
 
-## Requirements
+## Building on Linux
 
-To build and install on Linux without Flatpak:
+To build and install without Flatpak, you need:
 
 - [mpv](https://mpv.io) (libmpv), SDL3, SDL3_image, libcurl, fontconfig and Wayland
 - [streamlink](https://streamlink.github.io)
@@ -67,14 +69,14 @@ To build and install on Linux without Flatpak:
 On Fedora:
 
 ```sh
-sudo dnf install mpv-libs SDL3 SDL3_image libcurl libwayland-client streamlink
+sudo dnf install mpv-libs SDL3 SDL3_image libcurl fontconfig libwayland-client streamlink
 ```
 
 For Japanese, Chinese and Korean text, install Noto Sans CJK
 (`google-noto-sans-cjk-fonts` on Fedora, `noto-fonts-cjk` on Arch,
 `fonts-noto-cjk` on Debian and Ubuntu).
 
-## Installing
+Then:
 
 ```sh
 ./install.sh
@@ -97,8 +99,8 @@ lurker --login              # sign in from the terminal
 
 Signing in is optional, but needed for followed channels, chatting and
 following. It uses Twitch's device code flow: Lurker shows a code to enter at
-twitch.tv/activate, so no password is typed into the app. The sign-in is stored
-in `~/.config/lurker/auth.json`.
+twitch.tv/activate, so no password is typed into the app. The sign-in and
+settings are stored in `~/.config/lurker` (`%APPDATA%\lurker` on Windows).
 
 ## Keyboard shortcuts
 
@@ -110,13 +112,13 @@ in `~/.config/lurker/auth.json`.
 | Left / Right | Seek 10 seconds (past broadcasts) |
 | F, or double-click the video | Fullscreen |
 | C | Show or hide chat |
-| Enter | Chat in the focused split |
+| Enter | Chat in the focused split, or play an offline channel's last broadcast |
 | Ctrl+T / Ctrl+W | Open / close a chat split |
 | Ctrl+F | Search the chat, or channels when browsing |
 | / | Search channels |
 | R | Refresh |
-| Ctrl+= / Ctrl+- / Ctrl+0 | Text size |
-| Esc | Back |
+| Ctrl+= / Ctrl+- / Ctrl+0, or Ctrl+scroll | Text size |
+| Esc, or the mouse's back button | Back |
 | Q | Quit |
 
 In chat, Tab completes emote and user names, `:` followed by part of a name opens
@@ -126,7 +128,7 @@ the emote picker, and right-clicking a message replies to it.
 
 By default Lurker signs in with the client ID of Twitch's Android TV app, so no
 application needs to be registered with Twitch. To use your own, set
-`TWITCH_CLIENT_ID` or add it to `~/.config/lurker/config.json`:
+`TWITCH_CLIENT_ID` or add it to `config.json` beside the sign-in:
 
 ```json
 { "client_id": "your-client-id" }
@@ -138,8 +140,9 @@ chat replay, and your own Twitch emotes in the picker.
 
 ## License
 
-Lurker is released under the [MIT License](LICENSE). The Flatpak also contains
-mpv and other libraries under their own licenses, some of them GPL.
+Lurker is released under the [MIT License](LICENSE). The Flatpak and the Windows
+installer also contain mpv, streamlink and other libraries under their own
+licenses, some of them GPL.
 
 Text is set in [Noto Sans](https://fonts.google.com/noto/specimen/Noto+Sans),
 licensed under the SIL Open Font License (`assets/fonts/noto_sans/OFL.txt`).
