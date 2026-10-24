@@ -238,11 +238,9 @@ finish_vod_url_job :: proc(app: ^App, p: ^Vod_Url_Job) {
 	}
 	// A recording's playlist is a local snapshot with its segments online.
 	player_load_at(&app.player, p.url, p.start, online_segments = p.recording)
-	// Clips have no chat to replay, chapters or preview frames.
-	if w.vod.kind != .Clip {
-		replay_start(app, p.start)
-		vod_extras_request(app)
-	}
+	// Clips replay their broadcast's chat too, but have no chapters or previews.
+	replay_start(app, p.start)
+	vod_extras_request(app)
 }
 
 // Watches `vod` (a video or clip) from `start` seconds in, with its channel's

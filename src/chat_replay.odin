@@ -24,12 +24,17 @@ Chat_Replay :: struct {
 	// The video's position at the last tick, in seconds.
 	last_pos:   f64,
 	failed:     bool,
+	// The broadcast whose chat is replayed (owned), and how far into it the video
+	// starts: a clip's broadcast and where the clip was cut from.
+	video_id:   string,
+	offset:     f64,
 }
 
 replay_destroy :: proc(r: ^Chat_Replay) {
 	replay_clear_pending(r)
 	delete(r.pending)
 	delete(r.next)
+	delete(r.video_id)
 	r^ = {}
 }
 
@@ -76,6 +81,14 @@ replay_start :: proc(app: ^App, start: f64) {
 	r := &w.replay
 	r.active = true
 	r.failed = false
+	// A clip replays the chat of the broadcast it was cut from, from where it was.
+	delete(r.video_id)
+	r.video_id = strings.clone(w.vod.source_id if w.vod.kind == .Clip else w.vod.id)
+	r.offset = f64(w.vod.source_offset) if w.vod.kind == .Clip else 0
+	if r.video_id == "" {
+		// That broadcast is gone: no chat, rather than live chat unrelated to it.
+		r.failed = true
+	}
 	if len(w.panes) > 0 {
 		// Nothing can be sent to it now.
 		if typing, box, ok := focused_box(app); ok && typing == w.panes[0] && box == .Chat {
@@ -101,10 +114,14 @@ replay_seek :: proc(app: ^App, pos: f64) {
 	r.next = ""
 	p := w.panes[0]
 	chat_view_clear(&p.view)
+	if r.video_id == "" {
+		replay_notice(app, "Chat isn't available for this clip.")
+		return
+	}
 	if !r.failed {
 		replay_notice(app, "Replaying the broadcast's chat")
 	}
-	replay_fetch(app, int(pos), "")
+	replay_fetch(app, int(pos + r.offset), "")
 }
 
 @(private = "file")
@@ -118,7 +135,7 @@ replay_fetch :: proc(app: ^App, offset: int, cursor: string) {
 		Vod_Chat_Job {
 			client_id = strings.clone(app.client_id),
 			auth = clone_auth(app.auth) if app.signed_in else {},
-			vod_id = strings.clone(w.vod.id),
+			vod_id = strings.clone(r.video_id),
 			offset = offset,
 			cursor = strings.clone(cursor),
 			session = app.session,
@@ -160,7 +177,7 @@ finish_vod_chat_job :: proc(app: ^App, p: ^Vod_Chat_Job) {
 	if !p.ok {
 		if !r.failed {
 			r.failed = true
-			replay_notice(app, "Chat replay isn't available for this broadcast.")
+			replay_notice(app, "Chat replay isn't available for this clip." if w.vod.kind == .Clip else "Chat replay isn't available for this broadcast.")
 		}
 		return
 	}
@@ -190,8 +207,10 @@ replay_tick :: proc(app: ^App) -> int {
 	}
 	r.last_pos = pos
 
+	// Where the video is in the broadcast whose chat this is.
+	at := pos + r.offset
 	shown := 0
-	for shown < len(r.pending) && f64(r.pending[shown].offset) <= pos {
+	for shown < len(r.pending) && f64(r.pending[shown].offset) <= at {
 		shown += 1
 	}
 	if shown > 0 {
@@ -204,8 +223,8 @@ replay_tick :: proc(app: ^App) -> int {
 		remove_range(&r.pending, 0, shown)
 	}
 
-	ahead := f64(r.pending[len(r.pending) - 1].offset) if len(r.pending) > 0 else pos
-	if !r.loading && !r.failed && r.next != "" && ahead < pos + REPLAY_FETCH_AHEAD {
+	ahead := f64(r.pending[len(r.pending) - 1].offset) if len(r.pending) > 0 else at
+	if !r.loading && !r.failed && r.next != "" && ahead < at + REPLAY_FETCH_AHEAD {
 		replay_fetch(app, 0, r.next)
 	}
 	return REPLAY_TICK_MS

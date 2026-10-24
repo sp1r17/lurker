@@ -826,6 +826,10 @@ Vod :: struct {
 	// The channel it's from.
 	login:             string,
 	channel_name:      string,
+	// For a clip: the broadcast it was cut from ("" if that's gone), and where in
+	// it the clip starts, in seconds.
+	source_id:         string,
+	source_offset:     int,
 }
 
 clone_vod :: proc(v: Vod) -> Vod {
@@ -838,6 +842,7 @@ clone_vod :: proc(v: Vod) -> Vod {
 	c.seek_previews_url = strings.clone(v.seek_previews_url)
 	c.login = strings.clone(v.login)
 	c.channel_name = strings.clone(v.channel_name)
+	c.source_id = strings.clone(v.source_id)
 	return c
 }
 
@@ -850,6 +855,7 @@ destroy_vod :: proc(v: Vod) {
 	delete(v.seek_previews_url)
 	delete(v.login)
 	delete(v.channel_name)
+	delete(v.source_id)
 }
 
 // How many videos one request lists.
@@ -866,7 +872,7 @@ video_fields :: proc() -> string {
 	)
 }
 
-CLIP_FIELDS :: "slug title durationSeconds viewCount createdAt thumbnailURL game { displayName } broadcaster { login displayName }"
+CLIP_FIELDS :: "slug title durationSeconds viewCount createdAt thumbnailURL game { displayName } broadcaster { login displayName } video { id } videoOffsetSeconds"
 
 // GraphQL's video, as asked for by video_fields.
 @(private = "file")
@@ -904,6 +910,11 @@ Clip_Node :: struct {
 		login:       string,
 		displayName: string,
 	}),
+	// The broadcast it was cut from, if that still exists, and where in it.
+	video:              Maybe(struct {
+		id: string,
+	}),
+	videoOffsetSeconds: int,
 }
 
 // Points into `n`.
@@ -952,6 +963,9 @@ vod_from_clip :: proc(n: Clip_Node) -> Vod {
 	}
 	if b, ok := n.broadcaster.?; ok {
 		v.login, v.channel_name = b.login, b.displayName
+	}
+	if source, ok := n.video.?; ok {
+		v.source_id, v.source_offset = source.id, n.videoOffsetSeconds
 	}
 	return v
 }

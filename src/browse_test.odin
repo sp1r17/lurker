@@ -218,7 +218,8 @@ channel_videos_read :: proc(t: ^testing.T) {
 	testing.expect_value(t, videos[1].kind, Video_Kind.Highlight)
 
 	clips := `{"data":{"user":{"clips":{"edges":[{"cursor":"MQ==","node":{"slug":"Funny-Clip","title":"MAAAAN","durationSeconds":16,` +
-		`"viewCount":813,"createdAt":"","thumbnailURL":"https://x/thumb-0000000000-1920x1080.jpg","game":null,"broadcaster":{"login":"moonmoon","displayName":"MOONMOON"}}}],` +
+		`"viewCount":813,"createdAt":"","thumbnailURL":"https://x/thumb-0000000000-1920x1080.jpg","game":null,"broadcaster":{"login":"moonmoon","displayName":"MOONMOON"},` +
+		`"video":{"id":"2906292713"},"videoOffsetSeconds":20159}}],` +
 		`"pageInfo":{"hasNextPage":false}}}}}`
 	videos, next, err = parse_channel_videos_response(transmute([]byte)clips, .Clip)
 	testing.expect_value(t, err, Twitch_Error.None)
@@ -227,6 +228,9 @@ channel_videos_read :: proc(t: ^testing.T) {
 	testing.expect_value(t, videos[0].id, "Funny-Clip")
 	// The small thumbnail, by name.
 	testing.expect_value(t, videos[0].thumbnail_url, "https://x/thumb-0000000000-480x272.jpg")
+	// The broadcast it was cut from, for its chat.
+	testing.expect_value(t, videos[0].source_id, "2906292713")
+	testing.expect_value(t, videos[0].source_offset, 20159)
 }
 
 @(test)
