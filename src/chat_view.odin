@@ -212,6 +212,14 @@ chat_view_refresh_emotes :: proc(v: ^Chat_View, a: ^Assets) {
 	}
 }
 
+// Lays every message out again after badges load: messages that arrived first
+// were shown without.
+chat_view_refresh_badges :: proc(v: ^Chat_View) {
+	for &m in v.messages {
+		m.layout.height = 0
+	}
+}
+
 // Drops `login`'s messages, when they've just been ignored.
 chat_view_remove_user :: proc(v: ^Chat_View, login: string) {
 	for i := len(v.messages) - 1; i >= 0; i -= 1 {

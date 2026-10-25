@@ -573,6 +573,10 @@ finish_jobs :: proc(app: ^App) {
 		case Badges_Job:
 			pane := find_pane(app, p.pane)
 			finish_badges_job(&pane.emotes if pane != nil else nil, &a.emotes, &p)
+			// Global badges are in every chat.
+			for other in app.watch.panes {
+				chat_view_refresh_badges(&other.view)
+			}
 			apply_auth_check(app, p.check, p.auth)
 		case Streams_Job:
 			apply_auth_check(app, p.check, p.auth)
