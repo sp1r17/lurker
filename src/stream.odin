@@ -51,6 +51,7 @@ streamlink_start :: proc(
 ) {
 	command := make([dynamic]string, context.temp_allocator)
 	append(&command, streamlink_program(), "--loglevel", "error")
+	append(&command, "--twitch-supported-codecs", quality_codecs(quality))
 	if low_latency {
 		append(&command, "--twitch-low-latency")
 	}
@@ -98,6 +99,7 @@ write_streamlink_config :: proc(client_id, token: string) -> (path: string, ok: 
 streamlink_vod_url :: proc(vod_id: string, kind: Video_Kind, quality: Quality, client_id := "", token := "", allocator := context.allocator) -> (url: string, ok: bool) {
 	command := make([dynamic]string, context.temp_allocator)
 	append(&command, streamlink_program(), "--stream-url", "--loglevel", "error")
+	append(&command, "--twitch-supported-codecs", quality_codecs(quality))
 	if token != "" {
 		config := write_streamlink_config(client_id, token) or_return
 		append(&command, "--config", config)
