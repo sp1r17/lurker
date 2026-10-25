@@ -161,6 +161,7 @@ Browse :: struct {
 	back_button:          Rect,
 	// The header's switch for live notifications.
 	notify_button:        Rect,
+	updates_button:       Rect,
 	header_h:             f32,
 }
 
@@ -975,6 +976,13 @@ browse_click :: proc(app: ^App, x, y: f32) -> bool {
 		live_notifications_toggle(app)
 		return true
 	}
+	if b.updates_button.w > 0 && in_rect(b.updates_button, x, y) {
+		update_checks_toggle(app)
+		return true
+	}
+	if update_bar_click(app, x, y) {
+		return true
+	}
 	for view in BROWSE_TABS {
 		if in_rect(b.tabs[view], x, y) {
 			browse_search_unfocus(app)
@@ -1062,6 +1070,12 @@ on_browse_header_controls :: proc(app: ^App, x, y: f32) -> bool {
 	if b.notify_button.w > 0 && in_rect(b.notify_button, x, y) {
 		return true
 	}
+	if b.updates_button.w > 0 && in_rect(b.updates_button, x, y) {
+		return true
+	}
+	if app.update.bar.w > 0 && in_rect(app.update.bar, x, y) {
+		return true
+	}
 	return b.search_rect.w > 0 && in_rect(b.search_rect, x, y)
 }
 
@@ -1075,7 +1089,8 @@ draw_browse :: proc(app: ^App, screen: Rect) {
 	clear(&b.follow_buttons)
 	b.back_button = {}
 	b.section_buttons = {}
-	content := Rect{0, b.header_h, screen.w, screen.h - b.header_h}
+	bar_h := draw_update_bar(app, b.header_h, screen.w)
+	content := Rect{0, b.header_h + bar_h, screen.w, screen.h - b.header_h - bar_h}
 	if !app.signed_in {
 		draw_sign_in(app, content)
 		return
@@ -1123,9 +1138,10 @@ draw_browse_header :: proc(app: ^App, screen: Rect) {
 	right := controls_left - pad
 	app.sign_in.sign_out = {}
 	b.notify_button = {}
+	b.updates_button = {}
 	if app.signed_in {
-		// "R to refresh  ·  Notifications on  ·  login  ·  Sign out", with
-		// "Notifications on" (or off) and "Sign out" clickable.
+		// "R to refresh  ·  Updates on  ·  Notifications on  ·  login  ·  Sign out",
+		// with the switches and "Sign out" clickable.
 		label := "Sign out"
 		lw := text_width(r, .Regular, text_size, label)
 		app.sign_in.sign_out = {right - lw, text_y, lw, line_height(r, .Regular, text_size)}
@@ -1139,8 +1155,16 @@ draw_browse_header :: proc(app: ^App, screen: Rect) {
 		b.notify_button = {right - lw, text_y, lw, line_height(r, .Regular, text_size)}
 		hovered = in_rect(b.notify_button, app.mouse.x, app.mouse.y)
 		draw_text(r, .Regular, text_size, b.notify_button.x, text_y, label, BROWSE_TEXT if hovered else BROWSE_ACCENT)
+		separator := "  ·  "
+		right = b.notify_button.x - text_width(r, .Regular, text_size, separator)
+		draw_text(r, .Regular, text_size, right, text_y, separator, BROWSE_DIM_TEXT)
+		label = "Updates off" if app.layout.update_checks_off else "Updates on"
+		lw = text_width(r, .Regular, text_size, label)
+		b.updates_button = {right - lw, text_y, lw, line_height(r, .Regular, text_size)}
+		hovered = in_rect(b.updates_button, app.mouse.x, app.mouse.y)
+		draw_text(r, .Regular, text_size, b.updates_button.x, text_y, label, BROWSE_TEXT if hovered else BROWSE_ACCENT)
 		hint := "R to refresh  ·  "
-		right = b.notify_button.x - text_width(r, .Regular, text_size, hint)
+		right = b.updates_button.x - text_width(r, .Regular, text_size, hint)
 		draw_text(r, .Regular, text_size, right, text_y, hint, BROWSE_DIM_TEXT)
 	}
 

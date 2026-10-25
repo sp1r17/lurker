@@ -40,3 +40,5 @@ Name: "{autodesktop}\Lurker"; Filename: "{app}\lurker.exe"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\lurker.exe"; Description: "{cm:LaunchProgram,Lurker}"; Flags: nowait postinstall skipifsilent
+; Lurker updating itself runs this silently, then expects to be opened again.
+Filename: "{app}\lurker.exe"; Flags: nowait; Check: WizardSilent
