@@ -370,6 +370,12 @@ pane_click :: proc(app: ^App, p: ^Chat_Pane, x, y: f32) {
 		return
 	}
 	box_unfocus(app)
+	if url, found := chat_view_link_at(&p.view, x, y); found {
+		if !sdl.OpenURL(strings.clone_to_cstring(url, context.temp_allocator)) {
+			log.warnf("can't open %s: %s", url, sdl.GetError())
+		}
+		return
+	}
 	if login, found := chat_view_name_at(&p.view, x, y); found {
 		user_card_open(app, p, login, y)
 		return

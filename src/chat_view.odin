@@ -30,6 +30,7 @@ CHAT_SYSTEM_TEXT :: Color{0x9a, 0x9a, 0xa3, 255}
 CHAT_MORE_BAR :: Color{0x2a, 0x2a, 0x30, 235}
 // Chatterino's colour for messages that mention you.
 CHAT_MENTION_BACKGROUND :: Color{0x7f, 0x3f, 0x49, 110}
+CHAT_LINK :: Color{0x8c, 0xb4, 0xff, 255}
 // How opaque messages removed by a moderator are drawn.
 CHAT_DELETED_ALPHA :: 90
 
@@ -64,6 +65,7 @@ Chat_View :: struct {
 	// (an index into `messages`), for replying to it.
 	image_hits:   [dynamic]Image_Hit,
 	message_hits: [dynamic]Message_Hit,
+	link_hits:    [dynamic]Link_Hit,
 	// How many messages matched the filter.
 	matches:    int,
 }
@@ -84,6 +86,12 @@ Message_Hit :: struct {
 	index: int,
 }
 
+Link_Hit :: struct {
+	rect: Rect,
+	// The link as written (see chat_link), valid until the next draw.
+	link: string,
+}
+
 chat_view_destroy :: proc(v: ^Chat_View) {
 	for m in v.messages {
 		destroy_chat_message(m)
@@ -92,6 +100,7 @@ chat_view_destroy :: proc(v: ^Chat_View) {
 	delete(v.name_hits)
 	delete(v.image_hits)
 	delete(v.message_hits)
+	delete(v.link_hits)
 }
 
 // Adds messages that have just arrived, taking ownership. Moderation messages fade
@@ -140,6 +149,7 @@ chat_view_clear :: proc(v: ^Chat_View) {
 	clear(&v.name_hits)
 	clear(&v.image_hits)
 	clear(&v.message_hits)
+	clear(&v.link_hits)
 	v.scroll = 0
 	v.max_scroll = 0
 }
@@ -225,6 +235,18 @@ chat_view_scroll :: proc(v: ^Chat_View, wheel_y, scale: f32) {
 	v.scroll = clamp(v.scroll + wheel_y * CHAT_SCROLL_STEP * scale, 0, v.max_scroll)
 }
 
+// The address of the link at (x, y), if one is drawn there. Allocated with the
+// temp allocator.
+chat_view_link_at :: proc(v: ^Chat_View, x, y: f32) -> (url: string, found: bool) {
+	for hit in v.link_hits {
+		if in_rect(hit.rect, x, y) {
+			_, url, found = chat_link(hit.link)
+			return
+		}
+	}
+	return "", false
+}
+
 // Handles a click at (x, y) in pixels. Returns true if it changed the view.
 chat_view_click :: proc(v: ^Chat_View, x, y: f32) -> bool {
 	if v.more_bar.w > 0 && in_rect(v.more_bar, x, y) {
@@ -246,6 +268,7 @@ draw_chat_view :: proc(a: ^Assets, v: ^Chat_View, rect: Rect, scale: f32, filter
 	clear(&v.name_hits)
 	clear(&v.image_hits)
 	clear(&v.message_hits)
+	clear(&v.link_hits)
 	clip_begin(r, rect)
 	// Messages are laid out from the newest upwards; `bottom` is the next one's
 	// bottom edge.
@@ -315,11 +338,18 @@ draw_message :: proc(a: ^Assets, v: ^Chat_View, m: ^Chat_Message, layout: ^Messa
 		if item.hint != .None {
 			append(&v.image_hits, Image_Hit{rect, item})
 		}
+		if item.link != "" {
+			append(&v.link_hits, Link_Hit{rect, item.link})
+		}
 		switch item.kind {
 		case .Text:
 			color := item.color
 			color.a = u8(u32(color.a) * u32(alpha) / 255)
 			draw_text(&a.renderer, item.font, size, rect.x, rect.y, item.text, color)
+			if item.link != "" {
+				line := max(1, layout.scale)
+				draw_rect(&a.renderer, {rect.x, rect.y + rect.h - line, rect.w, line}, color)
+			}
 		case .Image:
 			image_use(&a.jobs, item.image)
 			if item.image.state != .Ready {
@@ -350,6 +380,8 @@ Layout_Item :: struct {
 	image:   ^Image,
 	// Part of the sender's name: clicking it opens their user card.
 	is_name: bool,
+	// Part of a link: clicking it opens `link` (see chat_link) in the browser.
+	link:    string,
 	// A badge (`text` is its "set/version") or emote (`text` is its name), which
 	// shows a tooltip when hovered.
 	hint:        Item_Hint,
@@ -447,7 +479,9 @@ message_layout :: proc(a: ^Assets, channel: ^Emotes, m: ^Chat_Message, scale, wi
 	for f in m.fragments {
 		switch f.kind {
 		case .Text:
+			b.links = m.kind != .System
 			put_words(&b, .Regular, text_color, f.text, f.attached)
+			b.links = false
 		case .Emote:
 			image := image_get(&a.images, &a.jobs, f.url_2x if pixel_scale > 1 && f.url_2x != "" else f.url_1x, pixel_scale)
 			switch {
@@ -487,8 +521,11 @@ Builder :: struct {
 	line_y:     f32,
 	line_h:     f32,
 	line_start: int,
-	// Words put now are the sender's name.
+	// Words put now are the sender's name, or may be links.
 	in_name:    bool,
+	links:      bool,
+	// The link the word being put is part of.
+	link:       string,
 }
 
 // Finishes the current line: centres its items vertically on the tallest one.
@@ -580,7 +617,13 @@ put_words :: proc(b: ^Builder, font: Font, color: Color, text: string, attached 
 			space(b, font)
 		}
 		glued = false
-		put_word(b, font, color, word)
+		if link, _, is_link := chat_link(word); b.links && is_link {
+			b.link = link
+			put_word(b, font, CHAT_LINK, word)
+			b.link = ""
+		} else {
+			put_word(b, font, color, word)
+		}
 	}
 }
 
@@ -612,7 +655,7 @@ put_word :: proc(b: ^Builder, font: Font, color: Color, word: string) {
 @(private = "file")
 put_text :: proc(b: ^Builder, font: Font, color: Color, text: string) {
 	w := text_width(&b.a.renderer, font, b.size, text)
-	place(b, {kind = .Text, font = font, color = color, text = text, is_name = b.in_name}, w, b.text_h)
+	place(b, {kind = .Text, font = font, color = color, text = text, is_name = b.in_name, link = b.link}, w, b.text_h)
 }
 
 CHAT_TOOLTIP_BACKGROUND :: Color{0x0e, 0x0e, 0x10, 245}
