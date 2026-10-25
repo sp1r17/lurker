@@ -39,6 +39,9 @@ Chat :: struct {
 	// The tags of the last USERSTATE (our name, colour and badges in this channel),
 	// for showing our own messages. Only the chat thread uses it.
 	user_tags:  string,
+	// The chat's settings, and what we are in it. Guarded by mutex.
+	room:       Room_State,
+	self:       Chat_Self,
 	thread:     ^thread.Thread,
 }
 
@@ -119,6 +122,12 @@ chat_stop :: proc(chat: ^Chat) {
 chat_room_id :: proc(chat: ^Chat) -> string {
 	sync.guard(&chat.mutex)
 	return strings.clone(chat.room_id, context.temp_allocator)
+}
+
+// The chat's settings, and what the signed-in user is in it.
+chat_room :: proc(chat: ^Chat) -> (room: Room_State, self: Chat_Self) {
+	sync.guard(&chat.mutex)
+	return chat.room, chat.self
 }
 
 // Moves the messages that arrived since the last call onto the end of `into`.
@@ -307,6 +316,7 @@ handle_payload :: proc(chat: ^Chat, h: ^curl.CURL, payload: string) -> bool {
 				if chat.room_id == "" {
 					chat.room_id = strings.clone(id)
 				}
+				apply_roomstate(&chat.room, msg)
 			}
 			if _, has_slow := irc_tag(msg, "slow"); has_slow {
 				chat_post(chat, system_message(fmt.tprintf("Joined #%s", chat.channel)))
@@ -314,6 +324,8 @@ handle_payload :: proc(chat: ^Chat, h: ^curl.CURL, payload: string) -> bool {
 		case "USERSTATE":
 			delete(chat.user_tags)
 			chat.user_tags = strings.clone(msg.tags)
+			sync.guard(&chat.mutex)
+			chat.self = chat_self_from_tags(msg)
 		case "PRIVMSG", "USERNOTICE", "NOTICE", "CLEARCHAT", "CLEARMSG":
 			messages := make([dynamic]Chat_Message, context.temp_allocator)
 			irc_chat_messages(msg, &messages)

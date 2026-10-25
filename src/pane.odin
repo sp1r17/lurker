@@ -44,6 +44,10 @@ Chat_Pane :: struct {
 	reply:            Chat_Reply,
 	reply_rect:       Rect,
 	reply_close:      Rect,
+	// The chat's modes (slow, subscribers only...) from the last draw, shown above
+	// the chat box, and when the user last sent a message here, for slow mode.
+	modes_rect:       Rect,
+	last_sent_ms:     int,
 	// Messages that mentioned the user while they couldn't see them (see
 	// pane_seen), shown as a count on the header; and from the last draw, where.
 	unread_mentions:  int,
@@ -175,6 +179,12 @@ pane_layout :: proc(app: ^App, p: ^Chat_Pane, rect: Rect) {
 		p.reply_rect = {p.input_rect.x, p.input_rect.y - reply_h, p.input_rect.w, reply_h}
 		bottom = p.reply_rect.y - pad / 2
 	}
+	p.modes_rect = {}
+	if pane_modes(app, p) != "" {
+		modes_h := line_height(&app.assets.renderer, .Regular, BROWSE_CARD_TEXT_SIZE * scale) + pad / 2
+		p.modes_rect = {rect.x, bottom - modes_h, rect.w, modes_h}
+		bottom = p.modes_rect.y
+	}
 	p.messages_rect = {rect.x, top, rect.w, bottom - top}
 }
 
@@ -212,9 +222,18 @@ draw_pane :: proc(app: ^App, p: ^Chat_Pane, focused: bool) {
 		draw_chat_view(a, &p.view, p.messages_rect, scale, filter)
 	}
 
+	if p.modes_rect.w > 0 {
+		draw_rect(r, p.modes_rect, CHAT_HEADER)
+		modes := pane_modes(app, p)
+		draw_centered(r, .Regular, size, p.modes_rect, fit_text(r, .Regular, size, modes, p.modes_rect.w - 16 * scale), CHAT_SYSTEM_TEXT)
+	}
+
 	hint := "Channel name, then Enter (Esc to cancel)"
 	if p.channel != "" {
 		hint = "Send a message (Enter)" if app.signed_in else "Sign in to chat"
+		if app.signed_in && pane_subs_only(p) {
+			hint = "Subscribers-only chat"
+		}
 		if p.reply.id != "" {
 			hint = "Reply (Enter, or Esc to cancel)"
 		}
@@ -576,6 +595,16 @@ pane_send :: proc(app: ^App, p: ^Chat_Pane) {
 	if text == "" {
 		return
 	}
+	room, self := chat_room(p.chat)
+	if pane_subs_only(p) {
+		notice(app, p, "This chat is for subscribers only.")
+		return
+	}
+	if wait := p.last_sent_ms + room.slow * 1000 - app.assets.now_ms; room.slow > 0 && p.last_sent_ms > 0 && wait > 0 && !chat_self_exempt(self) {
+		notice(app, p, fmt.tprintf("Slow mode: wait %ds.", (wait + 999) / 1000))
+		return
+	}
+
 	line := text
 	if strings.has_prefix(text, "/me ") {
 		line = strings.concatenate({"\x01ACTION ", text[len("/me "):], "\x01"}, context.temp_allocator)
@@ -594,6 +623,7 @@ pane_send :: proc(app: ^App, p: ^Chat_Pane) {
 		return
 	}
 	append(&w.sent_at, now)
+	p.last_sent_ms = now
 	if p.reply.id != "" && !strings.has_prefix(line, "\x01") {
 		// As twitch.tv does, for chats that don't show replies.
 		mention := strings.concatenate({"@", p.reply.name, " "}, context.temp_allocator)
@@ -604,6 +634,26 @@ pane_send :: proc(app: ^App, p: ^Chat_Pane) {
 	chat_send(p.chat, line, p.reply)
 	pane_reply_cancel(p)
 	input_clear(&p.boxes[.Chat])
+}
+
+// The chat's modes that are on, as shown above the chat box, or "".
+@(private = "file")
+pane_modes :: proc(app: ^App, p: ^Chat_Pane) -> string {
+	if p.chat == nil || pane_replaying(app, p) {
+		return ""
+	}
+	room, _ := chat_room(p.chat)
+	return room_modes_label(room)
+}
+
+// Whether the chat is subscribers-only and the user can't chat in it.
+@(private = "file")
+pane_subs_only :: proc(p: ^Chat_Pane) -> bool {
+	if p.chat == nil {
+		return false
+	}
+	room, self := chat_room(p.chat)
+	return room.subs_only && !self.subscriber && !chat_self_exempt(self)
 }
 
 // Starts a reply to `m` (on a right-click), if it can have one: it's from
