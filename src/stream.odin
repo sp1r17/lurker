@@ -1,5 +1,6 @@
 package app
 
+import "core:encoding/json"
 import "core:fmt"
 import "core:log"
 import "core:os"
@@ -104,8 +105,7 @@ streamlink_vod_url :: proc(vod_id: string, kind: Video_Kind, quality: Quality, c
 		config := write_streamlink_config(client_id, token) or_return
 		append(&command, "--config", config)
 	}
-	page := fmt.tprintf("https://clips.twitch.tv/%s", vod_id) if kind == .Clip else fmt.tprintf("https://www.twitch.tv/videos/%s", vod_id)
-	append(&command, page, QUALITY_STREAMS[quality])
+	append(&command, vod_page(vod_id, kind), QUALITY_STREAMS[quality])
 	state, stdout, stderr, err := os.process_exec({command = command[:]}, context.temp_allocator)
 	if err != nil {
 		log.errorf("can't run streamlink: %v", err)
@@ -117,6 +117,46 @@ streamlink_vod_url :: proc(vod_id: string, kind: Video_Kind, quality: Quality, c
 		return "", false
 	}
 	return strings.clone(out, allocator), true
+}
+
+// The Twitch page streamlink is given for a past broadcast or clip. Allocated with
+// the temp allocator.
+vod_page :: proc(vod_id: string, kind: Video_Kind) -> string {
+	return fmt.tprintf("https://clips.twitch.tv/%s", vod_id) if kind == .Clip else fmt.tprintf("https://www.twitch.tv/videos/%s", vod_id)
+}
+
+// The qualities the stream at `page` has, from streamlink. Every codec is allowed,
+// so 1440p shows up where there is one; with a `token`, renditions only some
+// accounts get are included. Blocks while streamlink looks: for a job.
+streamlink_qualities :: proc(page: string, client_id := "", token := "") -> (found: Quality_Set, ok: bool) {
+	command := make([dynamic]string, context.temp_allocator)
+	append(&command, streamlink_program(), "--json", "--loglevel", "error")
+	append(&command, "--twitch-supported-codecs", quality_codecs(.P1440))
+	if token != "" {
+		config := write_streamlink_config(client_id, token) or_return
+		append(&command, "--config", config)
+	}
+	append(&command, page)
+	state, stdout, _, err := os.process_exec({command = command[:]}, context.temp_allocator)
+	if err != nil {
+		log.errorf("can't run streamlink: %v", err)
+		return {}, false
+	}
+	if state.exit_code != 0 {
+		return {}, false
+	}
+	Listing :: struct {
+		streams: map[string]json.Value,
+	}
+	listing: Listing
+	if json.unmarshal(stdout, &listing, allocator = context.temp_allocator) != nil {
+		return {}, false
+	}
+	names := make([dynamic]string, context.temp_allocator)
+	for name in listing.streams {
+		append(&names, name)
+	}
+	return qualities_from_streams(names[:]), true
 }
 
 // Stops streamlink: asked first, then killed if it doesn't exit in time.

@@ -77,6 +77,10 @@ Watch :: struct {
 	// When the stream was started, for STREAMLINK_SERVES_HTTP's retries.
 	started_at:       int,
 	quality_menu:     bool,
+	// The qualities the stream playing has (empty until known), and the page they
+	// were looked up for. Owned.
+	qualities:        Quality_Set,
+	qualities_page:   string,
 	// From the last draw, in pixels (zero size when hidden).
 	quality_button:   Rect,
 	quality_items:    [Quality]Rect,
@@ -196,6 +200,7 @@ watch_stop :: proc(app: ^App) {
 	}
 	delete(w.channel)
 	delete(w.channel_id)
+	delete(w.qualities_page)
 	destroy_vod(w.vod)
 	replay_destroy(&w.replay)
 	vod_extras_clear(w)
@@ -261,6 +266,7 @@ start_stream :: proc(app: ^App, signed: bool) {
 	s: Streamlink
 	ok: bool
 	l := &app.layout
+	qualities_request(app, fmt.tprintf("https://twitch.tv/%s", w.channel))
 	if signed {
 		s, ok = streamlink_start(w.channel, l.quality, l.low_latency, app.client_id, app.auth.access_token)
 	} else {
@@ -432,7 +438,8 @@ draw_controls :: proc(app: ^App) {
 	scale := app.scale
 	size := BROWSE_CARD_TEXT_SIZE * scale
 	pad := 12 * scale
-	label := QUALITY_LABELS[app.layout.quality]
+	playing := quality_playing(app.layout.quality, watch_qualities(app))
+	label := QUALITY_LABELS[playing]
 	lh := line_height(r, .Bold, size)
 	// A chevron after the label, drawn: Noto Sans has no "▼".
 	arrow := lh * 0.4
@@ -461,15 +468,19 @@ draw_controls :: proc(app: ^App) {
 	item_h := MENU_ITEM_HEIGHT * scale * r.text_scale
 	divider := 9 * scale
 	menu_w := max(MENU_WIDTH * scale * r.text_scale, bw)
-	menu_h := item_h * (len(Quality) + 1) + divider
+	offered := watch_qualities(app)
+	items := card(offered)
+	menu_h := item_h * f32(items + 1) + divider
 	menu := Rect{w.quality_button.x + w.quality_button.w - menu_w, w.quality_button.y - 6 * scale - menu_h, menu_w, menu_h}
 	draw_rect(r, menu, USER_CARD_BACKGROUND)
-	for q in Quality {
-		item := Rect{menu.x, menu.y + f32(int(q)) * item_h, menu.w, item_h}
+	row := 0
+	for q in offered {
+		item := Rect{menu.x, menu.y + f32(row) * item_h, menu.w, item_h}
+		row += 1
 		w.quality_items[q] = item
-		draw_menu_item(app, item, QUALITY_LABELS[q], q == app.layout.quality)
+		draw_menu_item(app, item, QUALITY_LABELS[q], q == playing)
 	}
-	line_y := menu.y + item_h * len(Quality) + divider / 2
+	line_y := menu.y + item_h * f32(items) + divider / 2
 	draw_rect(r, {menu.x + pad, line_y, menu.w - 2 * pad, scale}, USER_CARD_BORDER)
 	w.latency_item = {menu.x, menu.y + menu_h - item_h, menu.w, item_h}
 	draw_menu_item(app, w.latency_item, "Low latency", app.layout.low_latency)

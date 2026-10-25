@@ -616,6 +616,8 @@ finish_jobs :: proc(app: ^App) {
 			finish_history_job(app, &p)
 		case Mod_Job:
 			finish_mod_job(app, &p)
+		case Qualities_Job:
+			finish_qualities_job(app, &p)
 		}
 		destroy_job(job)
 	}

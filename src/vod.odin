@@ -199,6 +199,7 @@ watch_play_vod :: proc(app: ^App, start: f64 = -1) {
 	w.ended_at = 0
 	w.playing_vod = true
 	w.vod_pending = true
+	qualities_request(app, vod_page(w.vod.id, w.vod.kind))
 	job := Vod_Url_Job {
 		vod_id    = strings.clone(w.vod.id),
 		kind      = w.vod.kind,
