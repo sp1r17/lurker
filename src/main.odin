@@ -672,6 +672,7 @@ draw :: proc(app: ^App) {
 	sdl.GL_SwapWindow(app.window)
 	player_report_swap(&app.player)
 	update_cursor(app)
+	images_evict(&a.images, a.now_ms)
 }
 
 // The text size, in the middle of the window's top, for a moment after it
