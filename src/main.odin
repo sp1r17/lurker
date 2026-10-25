@@ -25,18 +25,15 @@ USAGE :: `usage:
   %[0]s --login     sign in to Twitch`
 
 main :: proc() {
-	context.logger = log.create_console_logger()
-	defer log.destroy_console_logger(context.logger)
+	console := log.create_console_logger()
+	defer log.destroy_console_logger(console)
 	// Also to a file, where there's no console to read it from (Windows).
-	console := context.logger
 	file_logger, has_file := open_log_file()
-	if has_file {
-		context.logger = log.create_multi_logger(console, file_logger)
-	}
+	// Not set inside an if: a context change only lasts to the end of its block.
+	context.logger = log.create_multi_logger(console, file_logger) if has_file else console
 	defer if has_file {
 		log.destroy_multi_logger(context.logger)
 		log.destroy_file_logger(file_logger)
-		context.logger = console
 	}
 
 	when ODIN_DEBUG {
