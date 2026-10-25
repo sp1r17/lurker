@@ -18,6 +18,7 @@
       <li>Open other channels' chats as splits beside the video</li>
       <li>Watch past broadcasts with seeking and chat replay</li>
       <li>Choose the quality, or switch to low latency</li>
+      <li>Get a notification when a channel you follow goes live</li>
     </ul>
     <p>Lurker is not affiliated with or endorsed by Twitch.</p>
   </description>
@@ -46,6 +47,11 @@
     <category>Video</category>
   </categories>
   <releases>
+    <release version="0.3.0" date="2026-10-25">
+      <description>
+        <p>A desktop notification when a channel you follow goes live, while Lurker is open, with the channel's picture. Click it to watch the stream. Notifications can be turned off at the top of the browse screen.</p>
+      </description>
+    </release>
     <release version="0.2.2" date="2026-10-24">
       <description>
         <p>Fixes memory use that kept growing while a video played (about 1 GB an hour on NVIDIA).</p>
