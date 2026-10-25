@@ -4,15 +4,16 @@ import "core:fmt"
 import "core:slice"
 import "core:strings"
 
-CHAT_COMMANDS_HELP :: "Commands: /me, /highlight, /unhighlight, /highlights, /ignore, /unignore, /ignores"
+CHAT_COMMANDS_HELP :: "Commands: /me, /highlight, /unhighlight, /highlights, /ignore, /unignore, /ignores; for moderators /ban, /unban, /timeout, /untimeout, /clear"
 
 // Runs a command typed in the chat box, other than /me (which is sent). Returns
 // false if `text` isn't one.
 pane_command :: proc(app: ^App, p: ^Chat_Pane, text: string) -> bool {
 	name, _, arg := strings.partition(text, " ")
+	name = strings.to_lower(name, context.temp_allocator)
 	arg = strings.trim_space(arg)
 	rules := &app.layout.chat
-	switch strings.to_lower(name, context.temp_allocator) {
+	switch name {
 	case "/highlight":
 		phrase := strings.to_lower(arg, context.temp_allocator)
 		if phrase == "" {
@@ -57,6 +58,30 @@ pane_command :: proc(app: ^App, p: ^Chat_Pane, text: string) -> bool {
 		} else {
 			pane_notice(app, p, fmt.tprintf("Ignored: %s", strings.join(rules.ignored[:], ", ", context.temp_allocator)))
 		}
+	case "/ban", "/unban", "/untimeout", "/timeout":
+		target, _, rest := strings.partition(arg, " ")
+		login := strings.to_lower(strings.trim_left(target, "@"), context.temp_allocator)
+		if !valid_login(login) {
+			pane_notice(app, p, fmt.tprintf("Usage: %s name%s", name, " [10m] [reason]" if name == "/timeout" else " [reason]" if name == "/ban" else ""))
+			return true
+		}
+		rest = strings.trim_space(rest)
+		switch name {
+		case "/ban":
+			mod_request(app, p, .Ban, login = login, reason = rest)
+		case "/unban", "/untimeout":
+			mod_request(app, p, .Unban, login = login)
+		case "/timeout":
+			seconds := DEFAULT_TIMEOUT_SECONDS
+			first, _, reason := strings.partition(rest, " ")
+			if n, is_duration := parse_timeout(first); is_duration {
+				seconds = n
+				rest = strings.trim_space(reason)
+			}
+			mod_request(app, p, .Timeout, login = login, seconds = seconds, reason = rest)
+		}
+	case "/clear":
+		mod_request(app, p, .Clear)
 	case:
 		return false
 	}

@@ -15,7 +15,7 @@ import "core:time"
 // involved, so nothing secret ships in the binary.
 DEVICE_URL :: "https://id.twitch.tv/oauth2/device"
 VALIDATE_URL :: "https://id.twitch.tv/oauth2/validate"
-AUTH_SCOPES :: "chat:read chat:edit user:read:follows user:read:subscriptions"
+AUTH_SCOPES :: "chat:read chat:edit user:read:follows user:read:subscriptions moderator:manage:banned_users moderator:manage:chat_messages"
 DEVICE_GRANT_TYPE :: "urn:ietf:params:oauth:grant-type:device_code"
 
 // A signed-in user. Strings are owned; free with destroy_auth.
