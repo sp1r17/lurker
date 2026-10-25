@@ -232,6 +232,11 @@ browse_tick :: proc(app: ^App) -> (wait_ms: int) {
 	case .Following, .Top, .Category:
 		l := browse_list(b, b.view)
 		state, refreshed = l.state, l.last_refresh
+		if b.view == .Following {
+			// Not left to browse_refresh: the live list is also refreshed for
+			// notifications (live_poll_tick), which doesn't go through it.
+			offline_refresh(app)
+		}
 	case .Categories, .Followed_Categories:
 		if b.categories_state == .Loading {
 			return -1
