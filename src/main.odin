@@ -606,6 +606,8 @@ finish_jobs :: proc(app: ^App) {
 		case Emoji_Job:
 			finish_emoji_job(a, &p)
 		case Cache_Prune_Job:
+		case Notify_Job:
+			finish_notify_job(app, &p)
 		}
 		destroy_job(job)
 	}

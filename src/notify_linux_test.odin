@@ -20,7 +20,7 @@ dbus_address_path :: proc(t: ^testing.T) {
 @(test)
 dbus_notify_message_layout :: proc(t: ^testing.T) {
 	defer free_all(context.temp_allocator)
-	msg := dbus_notify_message(7, "lurker", "a is live", "x", "Watch")
+	msg := dbus_notify_message(7, "lurker", "a is live", "x", "Watch", "/tmp/a.png")
 	testing.expect_value(t, msg[0], 'l')
 	testing.expect_value(t, msg[1], DBUS_METHOD_CALL)
 	testing.expect_value(t, dbus_message_size(msg), len(msg))

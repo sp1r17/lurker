@@ -43,6 +43,8 @@ Notification :: struct {
 	title: string,
 	body:  string,
 	login: string,
+	// A picture's file, or "".
+	image: string,
 }
 
 notifications_init :: proc(app: ^App) {
@@ -84,13 +86,14 @@ notifications_destroy :: proc(app: ^App) {
 	n^ = {}
 }
 
-show_notification :: proc(app: ^App, title, body, login: string) {
+// With `image`, a picture's file, shown beside the text.
+show_notification :: proc(app: ^App, title, body, login: string, image := "") {
 	n := &app.notifications
 	if n.thread == nil {
 		return
 	}
 	sync.lock(&n.mutex)
-	append(&n.outgoing, Notification{strings.clone(title), strings.clone(body), strings.clone(login)})
+	append(&n.outgoing, Notification{strings.clone(title), strings.clone(body), strings.clone(login), strings.clone(image)})
 	sync.unlock(&n.mutex)
 	notify_wake(n)
 }
@@ -108,6 +111,7 @@ destroy_notification :: proc(m: Notification) {
 	delete(m.title)
 	delete(m.body)
 	delete(m.login)
+	delete(m.image)
 }
 
 @(private = "file")
@@ -186,7 +190,7 @@ notify_bus_send :: proc(bus: ^Notify_Bus, app_id: string, m: Notification) {
 		}
 		bus.serial += 1
 		// The body takes a little markup, so its own <, > and & are escaped.
-		msg := dbus_notify_message(bus.serial, app_id, m.title, notify_escape(m.body), "Watch" if m.login != "" else "Open")
+		msg := dbus_notify_message(bus.serial, app_id, m.title, notify_escape(m.body), "Watch" if m.login != "" else "Open", m.image)
 		if dbus_send(bus.sock, msg) {
 			bus.pending[bus.serial] = strings.clone(m.login)
 			return
@@ -630,9 +634,10 @@ dbus_method_call :: proc(serial: u32, destination, path, interface, member, sign
 }
 
 // org.freedesktop.Notifications.Notify, showing `title` and `body` (already
-// escaped) with the app's icon. A click on it invokes its default action, named
-// `action`. Allocated with the temp allocator.
-dbus_notify_message :: proc(serial: u32, app_id, title, body, action: string) -> []byte {
+// escaped) with the app's icon, and `image` (a file) if it isn't "". A click on
+// it invokes its default action, named `action`. Allocated with the temp
+// allocator.
+dbus_notify_message :: proc(serial: u32, app_id, title, body, action: string, image := "") -> []byte {
 	w := Dbus_Writer{buf = make([dynamic]byte, context.temp_allocator)}
 	dbus_string(&w, APP_NAME) // app_name
 	dbus_u32(&w, 0) // replaces_id
@@ -649,6 +654,12 @@ dbus_notify_message :: proc(serial: u32, app_id, title, body, action: string) ->
 	dbus_string(&w, "desktop-entry")
 	dbus_signature(&w, "s")
 	dbus_string(&w, app_id)
+	if image != "" {
+		dbus_pad(&w, 8)
+		dbus_string(&w, "image-path")
+		dbus_signature(&w, "s")
+		dbus_string(&w, image)
+	}
 	dbus_array_end(&w, hints_at, hints_start)
 	dbus_u32(&w, transmute(u32)i32(-1)) // expire_timeout: the server's default
 	return dbus_method_call(

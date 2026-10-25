@@ -57,6 +57,17 @@ cached_get :: proc(url: string) -> (res: Http_Response, from_cache: bool, ok: bo
 	return res, false, true
 }
 
+// The cached file for `url`, downloading it first if need be. Allocated with the
+// temp allocator. Blocks: call from a worker thread.
+cached_file :: proc(url: string) -> (path: string, ok: bool) {
+	path = cache_path(url) or_return
+	res, _, got := cached_get(url)
+	if !got || res.status != 200 {
+		return "", false
+	}
+	return path, os.exists(path)
+}
+
 // Writes to a temporary file, then renames it into place: a crash, or two workers
 // fetching the same URL, never leaves a half-written file under the real name.
 @(private = "file")

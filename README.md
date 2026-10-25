@@ -32,7 +32,7 @@ pre-roll or mid-roll ads.
 - Quality selection, low-latency mode, volume boost up to 130%
 - Follow and unfollow channels
 - A desktop notification when a channel you follow goes live, while Lurker is
-  open; click it to watch
+  open, with its picture; click it to watch, or turn them off at the top
 - Remembers volume, quality, splits, chat visibility and text size
 
 ## Flatpak

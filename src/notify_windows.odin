@@ -3,6 +3,7 @@ package app
 import "core:strings"
 import win "core:sys/windows"
 import sdl "vendor:sdl3"
+import img "vendor:sdl3/image"
 
 // Notifications are a notification area icon's balloon, which Windows 10 and later
 // show as a toast. The icon is added with the first one and stays until Lurker
@@ -17,6 +18,8 @@ Notifications :: struct {
 	// The channel the last balloon is about ("" for many channels). Owned.
 	login:       string,
 	clicked:     bool,
+	// The last balloon's picture, kept until the next replaces it.
+	image:       win.HICON,
 }
 
 // The icon's callback message, and the click it carries in lParam.
@@ -43,7 +46,8 @@ notify_message_hook :: proc "c" (userdata: rawptr, msg: ^win.MSG) -> bool {
 	return true
 }
 
-show_notification :: proc(app: ^App, title, body, login: string) {
+// With `image`, a picture's file, shown as the balloon's large icon.
+show_notification :: proc(app: ^App, title, body, login: string, image := "") {
 	n := &app.notifications
 	hwnd := win.HWND(sdl.GetPointerProperty(sdl.GetWindowProperties(app.window), sdl.PROP_WINDOW_WIN32_HWND_POINTER, nil))
 	if hwnd == nil {
@@ -67,18 +71,70 @@ show_notification :: proc(app: ^App, title, body, login: string) {
 	}
 	data.uFlags = win.NIF_INFO
 	data.dwInfoFlags = NIIF_USER
+	icon := load_icon(image) if image != "" else nil
+	if icon != nil {
+		data.dwInfoFlags |= NIIF_LARGE_ICON
+		data.hBalloonIcon = icon
+	}
 	copy_wide(data.szInfoTitle[:], title)
 	copy_wide(data.szInfo[:], body)
-	if win.Shell_NotifyIconW(win.NIM_MODIFY, &data) {
-		// A new balloon replaces the last, so a click is on this one.
-		delete(n.login)
-		n.login = strings.clone(login)
+	if !win.Shell_NotifyIconW(win.NIM_MODIFY, &data) {
+		if icon != nil {
+			win.DestroyIcon(icon)
+		}
+		return
 	}
+	// A new balloon replaces the last, so a click is on this one.
+	delete(n.login)
+	n.login = strings.clone(login)
+	if n.image != nil {
+		win.DestroyIcon(n.image)
+	}
+	n.image = icon
 }
 
-// The balloon shows the notification area icon (NIIF_USER isn't in core:sys/windows).
+// The balloon's large icon is this size, scaled by Windows to fit.
+@(private = "file")
+BALLOON_ICON_SIZE :: 64
+
+// An icon from a picture's file, or nil if it can't be read.
+@(private = "file")
+load_icon :: proc(path: string) -> win.HICON {
+	loaded := img.Load(strings.clone_to_cstring(path, context.temp_allocator))
+	if loaded == nil {
+		return nil
+	}
+	defer sdl.DestroySurface(loaded)
+	scaled := sdl.ScaleSurface(loaded, BALLOON_ICON_SIZE, BALLOON_ICON_SIZE, .LINEAR)
+	if scaled == nil {
+		return nil
+	}
+	defer sdl.DestroySurface(scaled)
+	// BGRA in memory, as a 32-bit bitmap wants, with no padding at this width.
+	pixels := sdl.ConvertSurface(scaled, .ARGB8888)
+	if pixels == nil {
+		return nil
+	}
+	defer sdl.DestroySurface(pixels)
+	color := win.CreateBitmap(BALLOON_ICON_SIZE, BALLOON_ICON_SIZE, 1, 32, pixels.pixels)
+	// All zero: the color bitmap's alpha decides what shows.
+	mask := win.CreateBitmap(BALLOON_ICON_SIZE, BALLOON_ICON_SIZE, 1, 1, nil)
+	defer win.DeleteObject(win.HGDIOBJ(color))
+	defer win.DeleteObject(win.HGDIOBJ(mask))
+	info := win.ICONINFO {
+		fIcon    = true,
+		hbmMask  = mask,
+		hbmColor = color,
+	}
+	return win.CreateIconIndirect(&info)
+}
+
+// The balloon shows the notification area icon, or with NIIF_LARGE_ICON its own
+// (neither is in core:sys/windows).
 @(private = "file")
 NIIF_USER :: 0x4
+@(private = "file")
+NIIF_LARGE_ICON :: 0x20
 
 // The click since the last call, if any; the caller owns it.
 notifications_take :: proc(n: ^Notifications, into: ^[dynamic]Notify_Click) {
@@ -93,6 +149,9 @@ notifications_destroy :: proc(app: ^App) {
 	n := &app.notifications
 	sdl.SetWindowsMessageHook(nil, nil)
 	delete(n.login)
+	if n.image != nil {
+		win.DestroyIcon(n.image)
+	}
 	if !n.icon {
 		n^ = {}
 		return

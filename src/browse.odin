@@ -159,6 +159,8 @@ Browse :: struct {
 	section_buttons:      [2]Rect,
 	search_rect:          Rect,
 	back_button:          Rect,
+	// The header's switch for live notifications.
+	notify_button:        Rect,
 	header_h:             f32,
 }
 
@@ -963,6 +965,10 @@ browse_click :: proc(app: ^App, x, y: f32) -> bool {
 	if sign_in_click(app, x, y) {
 		return true
 	}
+	if b.notify_button.w > 0 && in_rect(b.notify_button, x, y) {
+		live_notifications_toggle(app)
+		return true
+	}
 	for view in BROWSE_TABS {
 		if in_rect(b.tabs[view], x, y) {
 			browse_search_unfocus(app)
@@ -1047,6 +1053,9 @@ on_browse_header_controls :: proc(app: ^App, x, y: f32) -> bool {
 			return true
 		}
 	}
+	if b.notify_button.w > 0 && in_rect(b.notify_button, x, y) {
+		return true
+	}
 	return b.search_rect.w > 0 && in_rect(b.search_rect, x, y)
 }
 
@@ -1107,15 +1116,25 @@ draw_browse_header :: proc(app: ^App, screen: Rect) {
 	controls_left := draw_window_controls(app, screen.w, 0)
 	right := controls_left - pad
 	app.sign_in.sign_out = {}
+	b.notify_button = {}
 	if app.signed_in {
-		// "R to refresh  ·  login  ·  Sign out", with "Sign out" clickable.
+		// "R to refresh  ·  Notifications on  ·  login  ·  Sign out", with
+		// "Notifications on" (or off) and "Sign out" clickable.
 		label := "Sign out"
 		lw := text_width(r, .Regular, text_size, label)
 		app.sign_in.sign_out = {right - lw, text_y, lw, line_height(r, .Regular, text_size)}
 		hovered := in_rect(app.sign_in.sign_out, app.mouse.x, app.mouse.y)
 		draw_text(r, .Regular, text_size, app.sign_in.sign_out.x, text_y, label, BROWSE_TEXT if hovered else BROWSE_ACCENT)
-		hint := fmt.tprintf("R to refresh  ·  %s  ·  ", app.auth.login)
-		right = app.sign_in.sign_out.x - text_width(r, .Regular, text_size, hint)
+		login := fmt.tprintf("  ·  %s  ·  ", app.auth.login)
+		right = app.sign_in.sign_out.x - text_width(r, .Regular, text_size, login)
+		draw_text(r, .Regular, text_size, right, text_y, login, BROWSE_DIM_TEXT)
+		label = "Notifications off" if app.layout.notifications_off else "Notifications on"
+		lw = text_width(r, .Regular, text_size, label)
+		b.notify_button = {right - lw, text_y, lw, line_height(r, .Regular, text_size)}
+		hovered = in_rect(b.notify_button, app.mouse.x, app.mouse.y)
+		draw_text(r, .Regular, text_size, b.notify_button.x, text_y, label, BROWSE_TEXT if hovered else BROWSE_ACCENT)
+		hint := "R to refresh  ·  "
+		right = b.notify_button.x - text_width(r, .Regular, text_size, hint)
 		draw_text(r, .Regular, text_size, right, text_y, hint, BROWSE_DIM_TEXT)
 	}
 

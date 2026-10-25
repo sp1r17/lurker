@@ -89,7 +89,7 @@ live_notifier_seen :: proc(n: ^Live_Notifier, user_id: string, now: int) {
 // notifications. Returns ms until it's next due, for the main loop's wait.
 live_poll_tick :: proc(app: ^App) -> (wait_ms: int) {
 	l := &app.browse.following
-	if !app.signed_in || l.state == .Loading {
+	if !app.signed_in || app.layout.notifications_off || l.state == .Loading {
 		return -1
 	}
 	due := l.last_refresh + LIVE_POLL_MS
@@ -104,6 +104,9 @@ live_poll_tick :: proc(app: ^App) -> (wait_ms: int) {
 // On the main thread, with each new list of the followed channels that are live:
 // announces the ones that have just gone live, except one being watched.
 live_notify :: proc(app: ^App, streams: []Stream) {
+	if app.layout.notifications_off {
+		return
+	}
 	went_live := live_notifier_update(&app.live, streams, app.assets.now_ms)
 	announce := make([dynamic]Stream, context.temp_allocator)
 	for i in went_live {
@@ -118,10 +121,102 @@ live_notify :: proc(app: ^App, streams: []Stream) {
 		show_notification(app, title, body, "")
 		return
 	}
+	if len(announce) == 0 {
+		return
+	}
+	// Each shows once its channel's avatar is found.
+	p := Notify_Job {
+		client_id = strings.clone(app.client_id),
+		auth      = clone_auth(app.auth),
+	}
 	for s in announce {
 		title, body := live_notification(s)
-		show_notification(app, title, body, s.user_login)
+		append(&p.notifications, Live_Notification{title = strings.clone(title), body = strings.clone(body), login = strings.clone(s.user_login)})
 	}
+	jobs_add(&app.assets.jobs, run_notify_job, p)
+}
+
+// One channel's notification: its text, the channel a click opens, and its
+// avatar's file ("" for none). Owned.
+Live_Notification :: struct {
+	title: string,
+	body:  string,
+	login: string,
+	image: string,
+}
+
+// Finds the avatars of channels that just went live, for their notifications.
+Notify_Job :: struct {
+	client_id:     string,
+	// A copy; the job may refresh it.
+	auth:          Auth,
+	check:         Auth_Check,
+	// Owned. The worker fills in each one's image.
+	notifications: [dynamic]Live_Notification,
+}
+
+destroy_notify_job :: proc(p: ^Notify_Job) {
+	delete(p.client_id)
+	destroy_auth(p.auth)
+	for n in p.notifications {
+		delete(n.title)
+		delete(n.body)
+		delete(n.login)
+		delete(n.image)
+	}
+	delete(p.notifications)
+}
+
+@(private = "file")
+run_notify_job :: proc(job: ^Job) {
+	p := &job.payload.(Notify_Job)
+	logins := make([]string, len(p.notifications), context.temp_allocator)
+	for n, i in p.notifications {
+		logins[i] = n.login
+	}
+	p.check = .Valid
+	channels, err := get_channel_status(p.client_id, p.auth.access_token, logins)
+	if err == .Unauthorized {
+		p.check = refresh_auth(p.client_id, &p.auth)
+		if p.check != .Refreshed {
+			return
+		}
+		channels, err = get_channel_status(p.client_id, p.auth.access_token, logins)
+	}
+	if err != .None {
+		return
+	}
+	for &n in p.notifications {
+		for c in channels {
+			if c.login != n.login || c.avatar_url == "" {
+				continue
+			}
+			if path, ok := cached_file(c.avatar_url); ok {
+				n.image = strings.clone(path)
+			}
+			break
+		}
+	}
+}
+
+// On the main thread: shows the notifications, with or without avatars, unless
+// notifications were turned off (or the user signed out) meanwhile.
+finish_notify_job :: proc(app: ^App, p: ^Notify_Job) {
+	apply_auth_check(app, p.check, p.auth)
+	if !app.signed_in || app.layout.notifications_off {
+		return
+	}
+	for n in p.notifications {
+		show_notification(app, n.title, n.body, n.login, n.image)
+	}
+}
+
+// The browse header's switch. Turned back on, the next list is a new start, so
+// channels that went live in the meantime aren't announced late.
+live_notifications_toggle :: proc(app: ^App) {
+	app.layout.notifications_off = !app.layout.notifications_off
+	live_notifier_clear(&app.live)
+	layout_save(&app.layout)
 }
 
 // "<name> is live", then the stream's title and category. Allocated with the temp

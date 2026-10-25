@@ -33,6 +33,8 @@ Layout :: struct {
 	hide_chat:   bool,
 	// MIN_TEXT_SIZE to MAX_TEXT_SIZE percent.
 	text_size:   int,
+	// Live notifications are turned off (notify.odin).
+	notifications_off: bool,
 }
 
 layout_destroy :: proc(l: ^Layout) {
@@ -79,6 +81,7 @@ parse_layout :: proc(data: []byte, l: ^Layout) -> bool {
 		low_latency: bool,
 		hide_chat:   bool,
 		text_size:   int,
+		notifications_off: bool,
 	}
 	if json.unmarshal(data, &saved, allocator = context.temp_allocator) != nil {
 		log.warn("layout.json is unreadable; starting without saved splits")
@@ -94,6 +97,7 @@ parse_layout :: proc(data: []byte, l: ^Layout) -> bool {
 	l.quality = quality_from_label(saved.quality)
 	l.low_latency = saved.low_latency
 	l.hide_chat = saved.hide_chat
+	l.notifications_off = saved.notifications_off
 	// A file from before the text size was saved has none (0): keep the default.
 	if saved.text_size != 0 {
 		l.text_size = clamp(saved.text_size, MIN_TEXT_SIZE, MAX_TEXT_SIZE)
@@ -131,7 +135,8 @@ layout_save :: proc(l: ^Layout) {
 		low_latency: bool,
 		hide_chat:   bool,
 		text_size:   int,
-	}{l.splits, l.volume, l.muted, QUALITY_LABELS[l.quality], l.low_latency, l.hide_chat, l.text_size}
+		notifications_off: bool,
+	}{l.splits, l.volume, l.muted, QUALITY_LABELS[l.quality], l.low_latency, l.hide_chat, l.text_size, l.notifications_off}
 	data, err := json.marshal(saved, {pretty = true}, context.temp_allocator)
 	if err != nil {
 		return
