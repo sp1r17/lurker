@@ -70,7 +70,6 @@ cached_file :: proc(url: string) -> (path: string, ok: bool) {
 
 // Writes to a temporary file, then renames it into place: a crash, or two workers
 // fetching the same URL, never leaves a half-written file under the real name.
-@(private = "file")
 cache_store :: proc(path: string, data: []byte) {
 	if err := os.make_directory_all(filepath.dir(path)); err != nil && err != .Exist {
 		log.warnf("can't create the cache folder: %v", err)

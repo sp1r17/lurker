@@ -23,8 +23,10 @@ DBUS_MAX_MESSAGE :: 1 << 20
 Notifications :: struct {
 	// Pushed when a click arrives, for notifications_take.
 	click_event: u32,
-	// The desktop file's name, for the icon and for grouping. Owned.
+	// The desktop file's name, for grouping and settings, and the app's icon
+	// (see notify_icon). Owned.
 	app_id:      string,
+	icon:        string,
 	thread:      ^thread.Thread,
 	mutex:       sync.Mutex,
 	// Waiting for the thread to send, and clicks waiting for the main thread.
@@ -51,6 +53,7 @@ notifications_init :: proc(app: ^App) {
 	n := &app.notifications
 	n.click_event = sdl.RegisterEvents(1)
 	n.app_id = strings.clone(app_icon_name())
+	n.icon = strings.clone(notify_icon(n.app_id))
 	if posix.pipe(&n.wake) != .OK {
 		log.warn("notification: can't make a pipe; no notifications")
 		return
@@ -83,6 +86,7 @@ notifications_destroy :: proc(app: ^App) {
 	}
 	delete(n.clicks)
 	delete(n.app_id)
+	delete(n.icon)
 	n^ = {}
 }
 
@@ -129,6 +133,55 @@ app_icon_name :: proc() -> string {
 	return APP_ID
 }
 
+// The app's picture, for running from the build folder.
+@(private = "file")
+ICON_PNG :: #load("../assets/install/lurker.png")
+
+// Notifications' app icon. Installed (or in a Flatpak) it's the icon theme's, by
+// name; run from the build folder the theme has none, so it's a copy of the
+// bundled picture in the cache, written by notify_icon_write. Allocated with the
+// temp allocator.
+@(private = "file")
+notify_icon :: proc(app_id: string) -> string {
+	if os.get_env("FLATPAK_ID", context.temp_allocator) != "" || desktop_file_installed(app_id) {
+		return app_id
+	}
+	dir, ok := cache_dir()
+	if !ok {
+		return app_id
+	}
+	return fmt.tprintf("%s/%s.png", dir, APP_ID)
+}
+
+// Writes the bundled picture for a notify_icon path, unless it's there already
+// (cache pruning may have removed it).
+@(private = "file")
+notify_icon_write :: proc(icon: string) {
+	if strings.has_prefix(icon, "/") && !os.exists(icon) {
+		cache_store(icon, ICON_PNG)
+	}
+}
+
+// Whether `app_id`.desktop is in an XDG data folder, where installing puts it
+// beside the icon.
+@(private = "file")
+desktop_file_installed :: proc(app_id: string) -> bool {
+	data_home := os.get_env("XDG_DATA_HOME", context.temp_allocator)
+	if data_home == "" {
+		data_home = fmt.tprintf("%s/.local/share", os.get_env("HOME", context.temp_allocator))
+	}
+	data_dirs := os.get_env("XDG_DATA_DIRS", context.temp_allocator)
+	if data_dirs == "" {
+		data_dirs = "/usr/local/share:/usr/share"
+	}
+	for dir in strings.split(fmt.tprintf("%s:%s", data_home, data_dirs), ":", context.temp_allocator) {
+		if dir != "" && os.exists(fmt.tprintf("%s/applications/%s.desktop", dir, app_id)) {
+			return true
+		}
+	}
+	return false
+}
+
 // The notifier thread's connection, and what it knows of the notifications it
 // sent. Notification IDs are the server's, so they're dropped with the connection.
 Notify_Bus :: struct {
@@ -168,8 +221,11 @@ notify_thread :: proc(n: ^Notifications) {
 			}
 			outgoing, n.outgoing = n.outgoing, {}
 		}
+		if len(outgoing) > 0 {
+			notify_icon_write(n.icon)
+		}
 		for m in outgoing {
-			notify_bus_send(&bus, n.app_id, m)
+			notify_bus_send(&bus, n.app_id, n.icon, m)
 			destroy_notification(m)
 		}
 		delete(outgoing)
@@ -183,14 +239,14 @@ notify_thread :: proc(n: ^Notifications) {
 // Sends a Notify call, connecting first if need be. A connection that's gone stale
 // gets one more try.
 @(private = "file")
-notify_bus_send :: proc(bus: ^Notify_Bus, app_id: string, m: Notification) {
+notify_bus_send :: proc(bus: ^Notify_Bus, app_id, icon: string, m: Notification) {
 	for attempt in 0 ..< 2 {
 		if !bus.connected && !notify_bus_connect(bus) {
 			return
 		}
 		bus.serial += 1
 		// The body takes a little markup, so its own <, > and & are escaped.
-		msg := dbus_notify_message(bus.serial, app_id, m.title, notify_escape(m.body), "Watch" if m.login != "" else "Open", m.image)
+		msg := dbus_notify_message(bus.serial, app_id, icon, m.title, notify_escape(m.body), "Watch" if m.login != "" else "Open", m.image)
 		if dbus_send(bus.sock, msg) {
 			bus.pending[bus.serial] = strings.clone(m.login)
 			return
@@ -634,14 +690,14 @@ dbus_method_call :: proc(serial: u32, destination, path, interface, member, sign
 }
 
 // org.freedesktop.Notifications.Notify, showing `title` and `body` (already
-// escaped) with the app's icon, and `image` (a file) if it isn't "". A click on
-// it invokes its default action, named `action`. Allocated with the temp
-// allocator.
-dbus_notify_message :: proc(serial: u32, app_id, title, body, action: string, image := "") -> []byte {
+// escaped) with `icon` (a name or file), and `image` (a file) if it isn't "". A
+// click on it invokes its default action, named `action`. Allocated with the
+// temp allocator.
+dbus_notify_message :: proc(serial: u32, app_id, icon, title, body, action: string, image := "") -> []byte {
 	w := Dbus_Writer{buf = make([dynamic]byte, context.temp_allocator)}
 	dbus_string(&w, APP_NAME) // app_name
 	dbus_u32(&w, 0) // replaces_id
-	dbus_string(&w, app_id) // app_icon
+	dbus_string(&w, icon) // app_icon
 	dbus_string(&w, title) // summary
 	dbus_string(&w, body)
 	actions_at, actions_start := dbus_array_begin(&w, 4)
