@@ -46,6 +46,11 @@
     <category>Video</category>
   </categories>
   <releases>
+    <release version="0.2.2" date="2026-10-24">
+      <description>
+        <p>Fixes memory use that kept growing while a video played (about 1 GB an hour on NVIDIA).</p>
+      </description>
+    </release>
     <release version="0.2.1" date="2026-10-24">
       <description>
         <p>A Videos button in the bar above the stream, to reach a channel's videos while it's live.</p>
