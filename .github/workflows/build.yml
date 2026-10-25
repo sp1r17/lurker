@@ -82,10 +82,12 @@ jobs:
           flatpak="lurker-${TAG#v}-x86_64.flatpak"
           mv lurker.flatpak "$flatpak"
           setup="lurker-${TAG#v}-x86_64-setup.exe"
+          # Lurker checks the installer against this before it updates itself.
+          sha256sum "$flatpak" "$setup" > SHA256SUMS
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            gh release upload "$TAG" "$flatpak" "$setup" --clobber --repo "$GITHUB_REPOSITORY"
+            gh release upload "$TAG" "$flatpak" "$setup" SHA256SUMS --clobber --repo "$GITHUB_REPOSITORY"
           else
-            gh release create "$TAG" "$flatpak" "$setup" --repo "$GITHUB_REPOSITORY" --verify-tag \
+            gh release create "$TAG" "$flatpak" "$setup" SHA256SUMS --repo "$GITHUB_REPOSITORY" --verify-tag \
               --title "Lurker ${TAG#v}" \
               --notes "Linux: \`flatpak install --user $flatpak\`. Windows: run $setup. x86-64 only; updates are manual."
           fi

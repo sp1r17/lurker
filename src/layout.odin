@@ -37,6 +37,10 @@ Layout :: struct {
 	notifications_off: bool,
 	// Highlight phrases and ignored people, for every chat.
 	chat:              Chat_Rules,
+	// Not checking for new versions (update.odin), and the version the user chose
+	// to skip (owned).
+	update_checks_off: bool,
+	skipped_version:   string,
 }
 
 layout_destroy :: proc(l: ^Layout) {
@@ -49,6 +53,7 @@ layout_destroy :: proc(l: ^Layout) {
 	}
 	delete(l.splits)
 	chat_rules_destroy(&l.chat)
+	delete(l.skipped_version)
 }
 
 // layout.json; other saved state goes beside it (watched.json).
@@ -87,6 +92,8 @@ parse_layout :: proc(data: []byte, l: ^Layout) -> bool {
 		notifications_off: bool,
 		highlights:  []string,
 		ignored:     []string,
+		update_checks_off: bool,
+		skipped_version:   string,
 	}
 	if json.unmarshal(data, &saved, allocator = context.temp_allocator) != nil {
 		log.warn("layout.json is unreadable; starting without saved splits")
@@ -103,6 +110,11 @@ parse_layout :: proc(data: []byte, l: ^Layout) -> bool {
 	l.low_latency = saved.low_latency
 	l.hide_chat = saved.hide_chat
 	l.notifications_off = saved.notifications_off
+	l.update_checks_off = saved.update_checks_off
+	if _, ok := parse_version(saved.skipped_version); ok {
+		delete(l.skipped_version)
+		l.skipped_version = strings.clone(saved.skipped_version)
+	}
 	for phrase in saved.highlights {
 		rule_add(&l.chat.highlights, strings.to_lower(strings.trim_space(phrase), context.temp_allocator))
 	}
@@ -151,7 +163,9 @@ layout_save :: proc(l: ^Layout) {
 		notifications_off: bool,
 		highlights:  []string,
 		ignored:     []string,
-	}{l.splits, l.volume, l.muted, QUALITY_LABELS[l.quality], l.low_latency, l.hide_chat, l.text_size, l.notifications_off, l.chat.highlights[:], l.chat.ignored[:]}
+		update_checks_off: bool,
+		skipped_version:   string,
+	}{l.splits, l.volume, l.muted, QUALITY_LABELS[l.quality], l.low_latency, l.hide_chat, l.text_size, l.notifications_off, l.chat.highlights[:], l.chat.ignored[:], l.update_checks_off, l.skipped_version}
 	data, err := json.marshal(saved, {pretty = true}, context.temp_allocator)
 	if err != nil {
 		return

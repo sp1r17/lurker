@@ -40,6 +40,8 @@ pre-roll or mid-roll ads.
 - A desktop notification when a channel you follow goes live, while Lurker is
   open, with its picture; click it to watch, or turn them off at the top
 - Remembers volume, quality, splits, chat visibility and text size
+- Tells you when a new version is out (turn it off at the top); on Windows, it
+  updates itself
 
 ## Flatpak
 
