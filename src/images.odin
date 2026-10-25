@@ -38,6 +38,12 @@ Image :: struct {
 
 // Every image by URL, each downloaded once. `version` goes up whenever an image
 // finishes loading, since that can change its size and so the chat layout.
+//
+// TODO: evict images that haven't been drawn for a while (or whose channel was
+// left) and reload them from the disk cache when they come back. Nothing is freed
+// before exit, and drivers can keep a copy of each texture in RAM (NVIDIA does,
+// mipmaps included), so a long session in an emote-heavy chat grows by a few
+// hundred MB.
 Images :: struct {
 	by_url:  map[string]^Image,
 	version: int,
