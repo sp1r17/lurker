@@ -271,6 +271,7 @@ browse_clear :: proc(app: ^App) {
 		stream_list_clear(app, l)
 	}
 	offline_clear(app, &b.offline)
+	live_notifier_clear(&app.live)
 	for c in b.followed_categories {
 		destroy_category(c)
 	}
@@ -314,21 +315,7 @@ browse_refresh :: proc(app: ^App) {
 		if b.view == .Following {
 			offline_refresh(app)
 		}
-		l := browse_list(b, b.view)
-		if l.state == .Loading {
-			return
-		}
-		l.state = .Loading
-		jobs_add(
-			&app.assets.jobs,
-			run_streams_job,
-			Streams_Job {
-				client_id = strings.clone(app.client_id),
-				auth = clone_auth(app.auth),
-				view = b.view,
-				game_id = strings.clone(b.category_id),
-			},
-		)
+		stream_list_refresh(app, b.view)
 	case .Categories, .Followed_Categories:
 		if b.categories_state == .Loading {
 			return
@@ -345,6 +332,26 @@ browse_refresh :: proc(app: ^App) {
 	case .Videos:
 		videos_refresh(app)
 	}
+}
+
+// Fetches `view`'s stream list again, unless it's being fetched already.
+stream_list_refresh :: proc(app: ^App, view: Browse_View) {
+	b := &app.browse
+	l := browse_list(b, view)
+	if l.state == .Loading {
+		return
+	}
+	l.state = .Loading
+	jobs_add(
+		&app.assets.jobs,
+		run_streams_job,
+		Streams_Job {
+			client_id = strings.clone(app.client_id),
+			auth = clone_auth(app.auth),
+			view = view,
+			game_id = strings.clone(b.category_id),
+		},
+	)
 }
 
 // Fetches a stream list: the followed channels', the top streams, or a category's.
@@ -424,6 +431,9 @@ finish_streams_job :: proc(app: ^App, p: ^Streams_Job) {
 	}
 	clear(&p.streams)
 	l.state = .Loaded
+	if p.view == .Following {
+		live_notify(app, l.streams[:])
+	}
 }
 
 // Fetches the followed categories and the first page of top ones, or (with

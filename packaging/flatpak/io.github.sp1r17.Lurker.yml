@@ -14,6 +14,8 @@ finish-args:
   - --socket=fallback-x11
   - --socket=pulseaudio
   - --device=dri
+  # Notifications when followed channels go live.
+  - --talk-name=org.freedesktop.Notifications
 
 cleanup:
   - /include
