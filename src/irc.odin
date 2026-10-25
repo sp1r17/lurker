@@ -190,6 +190,8 @@ Chat_Message :: struct {
 	deleted:   bool,
 	// Mentions the signed-in user.
 	mention:   bool,
+	// Said before the chat joined (chat_history.odin): drawn dimmed.
+	historical: bool,
 	// For moderation messages: what to clear when this arrives, and whose
 	// (a message ID or a login).
 	clear:     Clear_Kind,
@@ -468,10 +470,14 @@ apply_third_party_emotes :: proc(m: ^Chat_Message, channel, global: ^Emotes, own
 	old := m.fragments
 	m.fragments = make([dynamic]Fragment)
 	pending := strings.builder_make(context.temp_allocator)
-	flush :: proc(pending: ^strings.Builder, out: ^[dynamic]Fragment) {
+	// Whether the next fragment joins the one before: an emoji's neighbour keeps that
+	// when this runs again, after more emotes have loaded (chat_view_refresh_emotes).
+	glue := false
+	flush :: proc(pending: ^strings.Builder, out: ^[dynamic]Fragment, glue: ^bool) {
 		if strings.builder_len(pending^) > 0 {
-			append(out, Fragment{kind = .Text, text = strings.clone(strings.to_string(pending^))})
+			append(out, Fragment{kind = .Text, text = strings.clone(strings.to_string(pending^)), attached = glue^})
 			strings.builder_reset(pending)
+			glue^ = false
 		}
 	}
 	for f in old {
@@ -479,6 +485,7 @@ apply_third_party_emotes :: proc(m: ^Chat_Message, channel, global: ^Emotes, own
 			append(&m.fragments, f)
 			continue
 		}
+		glue = f.attached && len(f.text) > 0 && f.text[0] != ' '
 		rest := f.text
 		for word in strings.fields_iterator(&rest) {
 			e: User_Emote
@@ -487,13 +494,14 @@ apply_third_party_emotes :: proc(m: ^Chat_Message, channel, global: ^Emotes, own
 				e, is_own = own[word]
 			}
 			if is_own {
-				flush(&pending, &m.fragments)
+				flush(&pending, &m.fragments, &glue)
 				append(
 					&m.fragments,
 					Fragment{kind = .Emote, text = strings.clone(word), url_1x = strings.clone(e.emote.url_1x), url_2x = strings.clone(e.emote.url_2x)},
 				)
+				glue = false
 			} else if emote, source, found := emote_lookup(channel, global, word); found {
-				flush(&pending, &m.fragments)
+				flush(&pending, &m.fragments, &glue)
 				append(
 					&m.fragments,
 					Fragment {
@@ -504,8 +512,10 @@ apply_third_party_emotes :: proc(m: ^Chat_Message, channel, global: ^Emotes, own
 						zero_width = emote.zero_width,
 						third_party = true,
 						source = source,
+						attached = glue,
 					},
 				)
+				glue = false
 			} else {
 				if strings.builder_len(pending) > 0 {
 					strings.write_byte(&pending, ' ')
@@ -513,7 +523,7 @@ apply_third_party_emotes :: proc(m: ^Chat_Message, channel, global: ^Emotes, own
 				strings.write_string(&pending, word)
 			}
 		}
-		flush(&pending, &m.fragments)
+		flush(&pending, &m.fragments, &glue)
 		delete(f.text)
 	}
 	delete(old)

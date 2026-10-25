@@ -560,9 +560,13 @@ finish_jobs :: proc(app: ^App) {
 		case Emote_Set_Job:
 			if p.source >= .Global_7TV {
 				finish_emote_set_job(&a.emotes, &p)
+				for pane in app.watch.panes {
+					chat_view_refresh_emotes(&pane.view, a)
+				}
 			} else if pane := find_pane(app, p.pane); pane != nil {
 				// A channel's set arriving after its pane closed is dropped.
 				finish_emote_set_job(&pane.emotes, &p)
+				chat_view_refresh_emotes(&pane.view, a)
 			}
 		case Badges_Job:
 			pane := find_pane(app, p.pane)
@@ -608,6 +612,8 @@ finish_jobs :: proc(app: ^App) {
 		case Cache_Prune_Job:
 		case Notify_Job:
 			finish_notify_job(app, &p)
+		case History_Job:
+			finish_history_job(app, &p)
 		}
 		destroy_job(job)
 	}

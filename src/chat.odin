@@ -311,28 +311,50 @@ handle_payload :: proc(chat: ^Chat, h: ^curl.CURL, payload: string) -> bool {
 			if _, has_slow := irc_tag(msg, "slow"); has_slow {
 				chat_post(chat, system_message(fmt.tprintf("Joined #%s", chat.channel)))
 			}
-		case "PRIVMSG":
-			chat_post(chat, privmsg_to_chat(msg))
 		case "USERSTATE":
 			delete(chat.user_tags)
 			chat.user_tags = strings.clone(msg.tags)
-		case "USERNOTICE":
-			// Subs, gifts, raids: Twitch's own wording, then the user's message if any.
-			if text, has_text := irc_tag(msg, "system-msg"); has_text {
-				chat_post(chat, system_message(text))
-			}
-			if len(msg.params) > 1 {
-				chat_post(chat, privmsg_to_chat(msg))
-			}
-		case "NOTICE":
-			chat_post(chat, system_message(irc_trailing(msg)))
-		case "CLEARCHAT", "CLEARMSG":
-			if m, is_mod := moderation_message(msg); is_mod {
+		case "PRIVMSG", "USERNOTICE", "NOTICE", "CLEARCHAT", "CLEARMSG":
+			messages := make([dynamic]Chat_Message, context.temp_allocator)
+			irc_chat_messages(msg, &messages)
+			for m in messages {
 				chat_post(chat, m)
 			}
 		}
 	}
 	return true
+}
+
+// The chat messages an IRC line makes: someone's message, Twitch's notices, or a
+// moderation action. For `history` (chat_history.odin), they're marked historical,
+// and NOTICEs, which were about someone else's connection, are left out.
+irc_chat_messages :: proc(msg: Irc_Message, out: ^[dynamic]Chat_Message, history := false) {
+	start := len(out)
+	switch msg.command {
+	case "PRIVMSG":
+		append(out, privmsg_to_chat(msg))
+	case "USERNOTICE":
+		// Subs, gifts, raids: Twitch's own wording, then the user's message if any.
+		if text, has_text := irc_tag(msg, "system-msg"); has_text {
+			append(out, system_message(text))
+		}
+		if len(msg.params) > 1 {
+			append(out, privmsg_to_chat(msg))
+		}
+	case "NOTICE":
+		if !history {
+			append(out, system_message(irc_trailing(msg)))
+		}
+	case "CLEARCHAT", "CLEARMSG":
+		if m, is_mod := moderation_message(msg); is_mod {
+			append(out, m)
+		}
+	}
+	if history {
+		for &m in out[start:] {
+			m.historical = true
+		}
+	}
 }
 
 // Sends the queued messages, showing each in chat: Twitch doesn't echo our own

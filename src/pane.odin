@@ -75,6 +75,7 @@ pane_join :: proc(app: ^App, p: ^Chat_Pane, channel: string) {
 	} else {
 		chat_start(p.chat, p.channel, app.chat_wake_event)
 	}
+	history_request(app, p)
 }
 
 pane_destroy :: proc(app: ^App, p: ^Chat_Pane) {
@@ -147,7 +148,6 @@ pane_replaying :: proc(app: ^App, p: ^Chat_Pane) -> bool {
 }
 
 // The width messages wrap to.
-@(private = "file")
 pane_text_width :: proc(app: ^App, p: ^Chat_Pane) -> f32 {
 	return p.messages_rect.w - 2 * CHAT_PADDING * app.scale
 }

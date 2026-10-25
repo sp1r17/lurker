@@ -31,8 +31,9 @@ CHAT_MORE_BAR :: Color{0x2a, 0x2a, 0x30, 235}
 // Chatterino's colour for messages that mention you.
 CHAT_MENTION_BACKGROUND :: Color{0x7f, 0x3f, 0x49, 110}
 CHAT_LINK :: Color{0x8c, 0xb4, 0xff, 255}
-// How opaque messages removed by a moderator are drawn.
+// How opaque messages removed by a moderator, and ones from before joining, are drawn.
 CHAT_DELETED_ALPHA :: 90
+CHAT_HISTORICAL_ALPHA :: 170
 
 // What the chat view draws with.
 Assets :: struct {
@@ -131,13 +132,58 @@ chat_view_add :: proc(v: ^Chat_View, a: ^Assets, scale, width: f32, new_messages
 			v.scroll += message_layout(a, v.emotes, added, scale, width).height + CHAT_MESSAGE_GAP * scale
 		}
 	}
+	trim_messages(v)
+	return
+}
+
+// Adds messages from before the chat joined, taking ownership. They go before the
+// messages already there, leaving out any of those (by ID), and don't count as new
+// mentions.
+chat_view_prepend :: proc(v: ^Chat_View, a: ^Assets, scale, width: f32, older: []Chat_Message, self_login := "") {
+	shown := make(map[string]bool, allocator = context.temp_allocator)
+	for m in v.messages {
+		if m.id != "" {
+			shown[m.id] = true
+		}
+	}
+	keep := make([dynamic]Chat_Message, context.temp_allocator)
+	for m in older {
+		if m.id != "" && m.id in shown {
+			destroy_chat_message(m)
+		} else {
+			append(&keep, m)
+		}
+	}
+	newer := v.messages
+	defer delete(newer)
+	v.messages = make([dynamic]Chat_Message, 0, len(keep) + len(newer))
+	// Measured from the newest message, so older ones don't move the view.
+	scroll := v.scroll
+	v.scroll = 0
+	chat_view_add(v, a, scale, width, keep[:], self_login)
+	v.scroll = scroll
+	append(&v.messages, ..newer[:])
+	trim_messages(v)
+}
+
+// Looks for third-party emotes again in every message, after a set of them loaded:
+// messages that arrived first were shown without.
+chat_view_refresh_emotes :: proc(v: ^Chat_View, a: ^Assets) {
+	for &m in v.messages {
+		apply_third_party_emotes(&m, v.emotes, &a.emotes)
+		m.layout.height = 0
+	}
+}
+
+// Keeps the newest CHAT_MAX_MESSAGES.
+@(private = "file")
+trim_messages :: proc(v: ^Chat_View) {
 	if over := len(v.messages) - CHAT_MAX_MESSAGES; over > 0 {
 		for m in v.messages[:over] {
 			destroy_chat_message(m)
 		}
 		remove_range(&v.messages, 0, over)
 	}
-	return
 }
 
 // Forgets every message (for a past broadcast's chat starting over).
@@ -329,7 +375,7 @@ draw_chat_view :: proc(a: ^Assets, v: ^Chat_View, rect: Rect, scale: f32, filter
 @(private = "file")
 draw_message :: proc(a: ^Assets, v: ^Chat_View, m: ^Chat_Message, layout: ^Message_Layout, x, y: f32) {
 	size := CHAT_FONT_SIZE * layout.scale
-	alpha: u8 = CHAT_DELETED_ALPHA if m.deleted else 255
+	alpha: u8 = CHAT_DELETED_ALPHA if m.deleted else CHAT_HISTORICAL_ALPHA if m.historical else 255
 	for item in layout.items {
 		rect := Rect{x + item.rect.x, y + item.rect.y, item.rect.w, item.rect.h}
 		if item.is_name {
