@@ -12,9 +12,9 @@ DRAG_THRESHOLD :: 4
 
 // The window is borderless, so this tells the compositor what a press means: the
 // edges resize it. The video (and the browse header) drag it: through
-// Wayland_Drag when that's set up, which lets the app see the clicks too, or else
-// by marking them draggable here. Called by SDL on the main thread while it handles
-// events.
+// Wayland_Drag when that's set up (on Wayland and Windows), which lets the app see
+// the clicks too, or else by marking them draggable here. Called by SDL on the main
+// thread while it handles events.
 window_hit_test :: proc "c" (window: ^sdl.Window, area: ^sdl.Point, data: rawptr) -> sdl.HitTestResult {
 	context = runtime.default_context()
 	app := (^App)(data)
