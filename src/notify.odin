@@ -71,6 +71,19 @@ live_notifier_update :: proc(n: ^Live_Notifier, streams: []Stream, now: int) -> 
 	return went_live[:]
 }
 
+// Marks a channel just followed while live as seen, so its turning up in the
+// next list isn't taken for it going live.
+live_notifier_seen :: proc(n: ^Live_Notifier, user_id: string, now: int) {
+	if !n.seeded {
+		return
+	}
+	if _, ok := n.last_seen[user_id]; ok {
+		n.last_seen[user_id] = now
+	} else {
+		n.last_seen[strings.clone(user_id)] = now
+	}
+}
+
 // Keeps the followed channels' list fresh while it's not shown, for
 // notifications. Returns ms until it's next due, for the main loop's wait.
 live_poll_tick :: proc(app: ^App) -> (wait_ms: int) {

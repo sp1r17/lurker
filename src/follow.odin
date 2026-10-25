@@ -26,6 +26,8 @@ Follow_Job :: struct {
 	from_search: bool,
 	// What to change it to, or what a lookup found.
 	following: bool,
+	// Whether the channel is live: following it then isn't announced as going live.
+	live:      bool,
 	// The watch it's for; dropped if that's over.
 	session:   int,
 	check:     Auth_Check,
@@ -93,6 +95,9 @@ finish_follow_job :: proc(app: ^App, p: ^Follow_Job) {
 	if p.set && p.ok {
 		// The browse screen's Following list is out of date now.
 		app.browse.following.last_refresh = -BROWSE_REFRESH_MS
+		if p.following && p.live {
+			live_notifier_seen(&app.live, p.user_id, app.assets.now_ms)
+		}
 	}
 	if p.from_search {
 		// The results may have changed since; the channel may still be there.
@@ -133,6 +138,7 @@ follow_click :: proc(app: ^App) {
 				user_id = strings.clone(w.channel_id),
 				set = true,
 				following = w.follow == .Not_Following,
+				live = w.has_info,
 			},
 		)
 	}
@@ -155,6 +161,7 @@ follow_click_result :: proc(app: ^App, i: int) {
 				user_id = strings.clone(c.id),
 				set = true,
 				following = c.follow == .Not_Following,
+				live = c.is_live,
 				from_search = true,
 			},
 		)

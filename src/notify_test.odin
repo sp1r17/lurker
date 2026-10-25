@@ -59,6 +59,20 @@ live_notifier_survives_a_long_gap :: proc(t: ^testing.T) {
 }
 
 @(test)
+live_notifier_skips_a_live_follow :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	n: Live_Notifier
+	defer live_notifier_destroy(&n)
+	a := Stream{user_id = "1"}
+	b := Stream{user_id = "2"}
+	live_notifier_update(&n, {a}, 0)
+
+	// Followed while live: already known, not announced.
+	live_notifier_seen(&n, "2", LIVE_POLL_MS / 2)
+	testing.expect_value(t, len(live_notifier_update(&n, {a, b}, LIVE_POLL_MS)), 0)
+}
+
+@(test)
 live_notification_text :: proc(t: ^testing.T) {
 	defer free_all(context.temp_allocator)
 	title, body := live_notification({user_name = "MOONMOON", title = "dark souls", game_name = "Elden Ring"})
