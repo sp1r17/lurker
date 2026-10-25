@@ -159,6 +159,10 @@ App :: struct {
 	fullscreen:          bool,
 	// Where the user got to in each video (watched.odin).
 	watched:             Watched,
+	// Which followed channels have gone live (notify.odin).
+	live:                Live_Notifier,
+	// Whether a notification has added the notification area icon (Windows).
+	notify_icon:         bool,
 }
 
 // Opens the window on the browse screen, or watching `channel` if it's not "".
@@ -254,6 +258,8 @@ run :: proc(channels: []string, config: Config, video: Maybe(Twitch_Link) = nil)
 	}
 	app.chat_wake_event = sdl.RegisterEvents(1)
 	defer browse_destroy(&app.browse)
+	defer live_notifier_destroy(&app.live)
+	defer notifications_destroy(&app)
 	defer sign_in_destroy(&app.sign_in)
 	defer if app.screen == .Watch {
 		watch_stop(&app)
@@ -279,7 +285,7 @@ run :: proc(channels: []string, config: Config, video: Maybe(Twitch_Link) = nil)
 		// Wake up for the next animation frame, browse refresh or sign-in poll,
 		// whichever is due first.
 		wait := a.next_frame_ms if a.next_frame_ms >= 0 else -1
-		dues := []int{-1, -1, volume_osd_wait(&app), controls_wait(&app), stream_info_tick(&app), stream_end_tick(&app), text_size_osd_wait(&app), replay_tick(&app), watched_tick(&app), resume_notice_wait(&app)}
+		dues := []int{-1, -1, volume_osd_wait(&app), controls_wait(&app), stream_info_tick(&app), stream_end_tick(&app), text_size_osd_wait(&app), replay_tick(&app), watched_tick(&app), resume_notice_wait(&app), live_poll_tick(&app)}
 		if app.screen == .Browse {
 			dues[0], dues[1] = browse_tick(&app), sign_in_tick(&app)
 		}
@@ -595,6 +601,7 @@ finish_jobs :: proc(app: ^App) {
 		case Emoji_Job:
 			finish_emoji_job(a, &p)
 		case Cache_Prune_Job:
+		case Notify_Job:
 		}
 		destroy_job(job)
 	}
