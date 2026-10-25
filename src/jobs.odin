@@ -39,6 +39,7 @@ Job_Payload :: union {
 	Notify_Job,
 	History_Job,
 	Mod_Job,
+	Qualities_Job,
 }
 
 Jobs :: struct {
@@ -174,6 +175,8 @@ destroy_job :: proc(job: ^Job) {
 		destroy_history_job(&p)
 	case Mod_Job:
 		destroy_mod_job(&p)
+	case Qualities_Job:
+		destroy_qualities_job(&p)
 	}
 	free(job)
 }
