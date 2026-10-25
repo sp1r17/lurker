@@ -1,5 +1,6 @@
 package app
 
+import "core:c"
 import "core:log"
 import "core:strings"
 import gl "vendor:OpenGL"
@@ -224,34 +225,47 @@ run_image_job :: proc(job: ^Job) {
 		log.warnf("image %s: HTTP %d", p.url, res.status)
 		return
 	}
-	anim := img.LoadAnimation_IO(sdl.IOFromConstMem(raw_data(res.body), uint(len(res.body))), true)
-	if anim == nil && from_cache {
+	anim, still := decode_image(res.body)
+	if anim == nil && still == nil && from_cache {
 		// A damaged cached copy: drop it and download again.
 		cache_forget(p.url)
 		res, _, ok = cached_get(p.url)
 		if ok && res.status == 200 {
-			anim = img.LoadAnimation_IO(sdl.IOFromConstMem(raw_data(res.body), uint(len(res.body))), true)
+			anim, still = decode_image(res.body)
 		}
 	}
-	if anim == nil {
+	if anim == nil && still == nil {
 		log.warnf("image %s: can't decode: %s", p.url, sdl.GetError())
 		return
 	}
-	defer img.FreeAnimation(anim)
+	defer if anim != nil {
+		img.FreeAnimation(anim)
+	} else {
+		sdl.DestroySurface(still)
+	}
 
-	p.size = {anim.w, anim.h}
-	for i in 0 ..< int(anim.count) {
-		frame := anim.frames[i]
+	frames: []^sdl.Surface
+	delays: []c.int
+	still_frame, still_delay := [1]^sdl.Surface{still}, [1]c.int{0}
+	if anim != nil {
+		p.size = {anim.w, anim.h}
+		frames, delays = anim.frames[:anim.count], anim.delays[:anim.count]
+	} else {
+		p.size = {still.w, still.h}
+		frames, delays = still_frame[:], still_delay[:]
+	}
+	for decoded, i in frames {
+		frame := decoded
 		if frame.format != .RGBA32 {
 			frame = sdl.ConvertSurface(frame, .RGBA32)
 			if frame == nil {
 				return
 			}
 		}
-		defer if frame != anim.frames[i] {
+		defer if frame != decoded {
 			sdl.DestroySurface(frame)
 		}
-		if frame.w != anim.w || frame.h != anim.h {
+		if frame.w != p.size.x || frame.h != p.size.y {
 			return
 		}
 
@@ -261,10 +275,22 @@ run_image_job :: proc(job: ^Job) {
 		for y in 0 ..< int(frame.h) {
 			copy(pixels[y * row:][:row], src[y * int(frame.pitch):][:row])
 		}
-		delay := int(anim.delays[i])
+		delay := int(delays[i])
 		append(&p.frames, Decoded_Frame{pixels, delay if delay >= MIN_FRAME_DELAY_MS else DEFAULT_FRAME_DELAY_MS})
 	}
 	p.ok = len(p.frames) > 0
+}
+
+// Every frame of an animated image, or else the one image. SDL_image's
+// animation loader rejects still PNGs in some builds (Windows'), so those load
+// on their own.
+@(private = "file")
+decode_image :: proc(body: []byte) -> (anim: ^img.Animation, still: ^sdl.Surface) {
+	anim = img.LoadAnimation_IO(sdl.IOFromConstMem(raw_data(body), uint(len(body))), true)
+	if anim == nil {
+		still = img.Load_IO(sdl.IOFromConstMem(raw_data(body), uint(len(body))), true)
+	}
+	return
 }
 
 // On the main thread: upload the frames.
