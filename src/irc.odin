@@ -143,6 +143,18 @@ Chat_Message_Kind :: enum {
 	System,
 }
 
+// Messages Twitch marks out, drawn on a background of their own with a line saying
+// why above them.
+Message_Accent :: enum {
+	None,
+	// Someone's first message in the channel.
+	First,
+	// Sent with bits.
+	Cheer,
+	// A paid, pinned message (Hype Chat).
+	Paid,
+}
+
 Fragment_Kind :: enum {
 	Text,
 	Emote,
@@ -192,6 +204,9 @@ Chat_Message :: struct {
 	mention:   bool,
 	// Said before the chat joined (chat_history.odin): drawn dimmed.
 	historical: bool,
+	// Why it's marked out ("First message"), shown above it, or "".
+	accent:    Message_Accent,
+	label:     string,
 	// For moderation messages: what to clear when this arrives, and whose
 	// (a message ID or a login).
 	clear:     Clear_Kind,
@@ -215,6 +230,7 @@ destroy_chat_message :: proc(m: Chat_Message) {
 	delete(m.clear_target)
 	delete(m.reply)
 	delete(m.reply_login)
+	delete(m.label)
 	for b in m.badges {
 		delete(b)
 	}
@@ -297,7 +313,38 @@ privmsg_to_chat :: proc(msg: Irc_Message) -> Chat_Message {
 		m.reply_login = strings.clone(parent_login)
 		strip_reply_mention(&m, parent, parent_login)
 	}
+	if amount, paid := irc_tag(msg, "pinned-chat-paid-amount"); paid {
+		currency, _ := irc_tag(msg, "pinned-chat-paid-currency")
+		exponent, _ := irc_tag(msg, "pinned-chat-paid-exponent")
+		m.accent = .Paid
+		m.label = fmt.aprintf("Hype Chat · %s %s", format_amount(amount, exponent), currency)
+	} else if bits, cheer := irc_tag(msg, "bits"); cheer {
+		m.accent = .Cheer
+		m.label = fmt.aprintf("Cheered %s bits", bits)
+	} else if first, _ := irc_tag(msg, "first-msg"); first == "1" {
+		m.accent = .First
+		m.label = strings.clone("First message")
+	}
 	return m
+}
+
+// "5.00" from an amount in the currency's smallest unit ("500") and how many
+// decimal places it has ("2"). Allocated with the temp allocator.
+format_amount :: proc(amount, exponent: string) -> string {
+	n, n_ok := strconv.parse_int(amount, 10)
+	places, places_ok := strconv.parse_int(exponent, 10)
+	if !n_ok || !places_ok || places <= 0 || places > 6 {
+		return amount
+	}
+	unit := 1
+	for _ in 0 ..< places {
+		unit *= 10
+	}
+	cents := fmt.tprintf("%d", n % unit)
+	for len(cents) < places {
+		cents = strings.concatenate({"0", cents}, context.temp_allocator)
+	}
+	return fmt.tprintf("%d.%s", n / unit, cents)
 }
 
 // Twitch starts a reply's text with "@name " for clients that don't show

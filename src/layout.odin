@@ -35,6 +35,8 @@ Layout :: struct {
 	text_size:   int,
 	// Live notifications are turned off (notify.odin).
 	notifications_off: bool,
+	// Highlight phrases and ignored people, for every chat.
+	chat:              Chat_Rules,
 }
 
 layout_destroy :: proc(l: ^Layout) {
@@ -46,6 +48,7 @@ layout_destroy :: proc(l: ^Layout) {
 		delete(list)
 	}
 	delete(l.splits)
+	chat_rules_destroy(&l.chat)
 }
 
 // layout.json; other saved state goes beside it (watched.json).
@@ -82,6 +85,8 @@ parse_layout :: proc(data: []byte, l: ^Layout) -> bool {
 		hide_chat:   bool,
 		text_size:   int,
 		notifications_off: bool,
+		highlights:  []string,
+		ignored:     []string,
 	}
 	if json.unmarshal(data, &saved, allocator = context.temp_allocator) != nil {
 		log.warn("layout.json is unreadable; starting without saved splits")
@@ -98,6 +103,14 @@ parse_layout :: proc(data: []byte, l: ^Layout) -> bool {
 	l.low_latency = saved.low_latency
 	l.hide_chat = saved.hide_chat
 	l.notifications_off = saved.notifications_off
+	for phrase in saved.highlights {
+		rule_add(&l.chat.highlights, strings.to_lower(strings.trim_space(phrase), context.temp_allocator))
+	}
+	for login in saved.ignored {
+		if valid_login(login) {
+			rule_add(&l.chat.ignored, login)
+		}
+	}
 	// A file from before the text size was saved has none (0): keep the default.
 	if saved.text_size != 0 {
 		l.text_size = clamp(saved.text_size, MIN_TEXT_SIZE, MAX_TEXT_SIZE)
@@ -136,7 +149,9 @@ layout_save :: proc(l: ^Layout) {
 		hide_chat:   bool,
 		text_size:   int,
 		notifications_off: bool,
-	}{l.splits, l.volume, l.muted, QUALITY_LABELS[l.quality], l.low_latency, l.hide_chat, l.text_size, l.notifications_off}
+		highlights:  []string,
+		ignored:     []string,
+	}{l.splits, l.volume, l.muted, QUALITY_LABELS[l.quality], l.low_latency, l.hide_chat, l.text_size, l.notifications_off, l.chat.highlights[:], l.chat.ignored[:]}
 	data, err := json.marshal(saved, {pretty = true}, context.temp_allocator)
 	if err != nil {
 		return

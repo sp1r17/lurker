@@ -1,5 +1,6 @@
 package app
 
+import "core:slice"
 import "core:strings"
 import "core:unicode/utf8"
 
@@ -31,6 +32,14 @@ CHAT_MORE_BAR :: Color{0x2a, 0x2a, 0x30, 235}
 // Chatterino's colour for messages that mention you.
 CHAT_MENTION_BACKGROUND :: Color{0x7f, 0x3f, 0x49, 110}
 CHAT_LINK :: Color{0x8c, 0xb4, 0xff, 255}
+// Backgrounds for messages Twitch marks out (Message_Accent).
+@(rodata)
+CHAT_ACCENT_BACKGROUNDS := [Message_Accent]Color {
+	.None  = {},
+	.First = {0x2e, 0x9d, 0x5f, 60},
+	.Cheer = {0x91, 0x47, 0xff, 60},
+	.Paid  = {0xd8, 0x8a, 0x0e, 70},
+}
 // How opaque messages removed by a moderator, and ones from before joining, are drawn.
 CHAT_DELETED_ALPHA :: 90
 CHAT_HISTORICAL_ALPHA :: 170
@@ -50,12 +59,32 @@ Assets :: struct {
 	next_frame_ms: int,
 }
 
+// The user's own chat rules, kept in layout.json: phrases that highlight a message,
+// and people whose messages are hidden. Lowercase and owned.
+Chat_Rules :: struct {
+	highlights: [dynamic]string,
+	ignored:    [dynamic]string,
+}
+
+chat_rules_destroy :: proc(r: ^Chat_Rules) {
+	for s in r.highlights {
+		delete(s)
+	}
+	delete(r.highlights)
+	for s in r.ignored {
+		delete(s)
+	}
+	delete(r.ignored)
+}
+
 // The scrolling list of chat messages. `scroll` is how far the view is above the
 // newest message, in pixels; 0 follows new messages as they arrive.
 Chat_View :: struct {
 	messages:   [dynamic]Chat_Message,
 	// The channel's own emotes and badges (owned by the pane), or nil.
 	emotes:     ^Emotes,
+	// The user's highlights and ignores (owned by the app), or nil.
+	rules:      ^Chat_Rules,
 	scroll:     f32,
 	// Set while drawing: the furthest the view can scroll, where the "more
 	// messages below" bar is (zero size when hidden), and where names are.
@@ -105,11 +134,16 @@ chat_view_destroy :: proc(v: ^Chat_View) {
 }
 
 // Adds messages that have just arrived, taking ownership. Moderation messages fade
-// what they remove; messages mentioning `self_login` are highlighted. When the view
+// what they remove; messages mentioning `self_login`, or a highlight phrase, are
+// highlighted, and ignored people's are dropped. When the view
 // is scrolled up, it moves by the new messages' height so the messages being read
 // stay put. Returns how many of them mention `self_login`.
 chat_view_add :: proc(v: ^Chat_View, a: ^Assets, scale, width: f32, new_messages: []Chat_Message, self_login := "") -> (mentions_added: int) {
 	for m in new_messages {
+		if v.rules != nil && m.kind != .System && slice.contains(v.rules.ignored[:], m.login) {
+			destroy_chat_message(m)
+			continue
+		}
 		if m.clear != .None {
 			apply_clear(v, m)
 			// A deleted message leaves no line of its own.
@@ -124,7 +158,8 @@ chat_view_add :: proc(v: ^Chat_View, a: ^Assets, scale, width: f32, new_messages
 		own := added.id == "" && added.kind != .System && self_login != "" && added.login == self_login
 		apply_third_party_emotes(added, v.emotes, &a.emotes, &a.user_emotes if own else nil)
 		apply_emoji(added, &a.emoji)
-		added.mention = mentions(added, self_login)
+		mine := self_login != "" && added.login == self_login
+		added.mention = mentions(added, self_login) || (!mine && highlighted(added, v.rules))
 		if added.mention {
 			mentions_added += 1
 		}
@@ -173,6 +208,54 @@ chat_view_refresh_emotes :: proc(v: ^Chat_View, a: ^Assets) {
 		apply_third_party_emotes(&m, v.emotes, &a.emotes)
 		m.layout.height = 0
 	}
+}
+
+// Drops `login`'s messages, when they've just been ignored.
+chat_view_remove_user :: proc(v: ^Chat_View, login: string) {
+	for i := len(v.messages) - 1; i >= 0; i -= 1 {
+		if v.messages[i].kind != .System && v.messages[i].login == login {
+			destroy_chat_message(v.messages[i])
+			ordered_remove(&v.messages, i)
+		}
+	}
+}
+
+// Whether the message's text has one of the user's highlight phrases, as whole
+// words, ignoring case.
+highlighted :: proc(m: ^Chat_Message, rules: ^Chat_Rules) -> bool {
+	if rules == nil || len(rules.highlights) == 0 || m.kind == .System {
+		return false
+	}
+	text := strings.to_lower(message_plain_text(m), context.temp_allocator)
+	for phrase in rules.highlights {
+		if contains_words(text, phrase) {
+			return true
+		}
+	}
+	return false
+}
+
+// Whether `phrase` is in `text` with no letter or digit right before or after it.
+contains_words :: proc(text, phrase: string) -> bool {
+	if phrase == "" {
+		return false
+	}
+	word_byte :: proc(c: u8) -> bool {
+		return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c >= 0x80
+	}
+	for start := 0; start < len(text); {
+		i := strings.index(text[start:], phrase)
+		if i < 0 {
+			return false
+		}
+		i += start
+		end := i + len(phrase)
+		if (i == 0 || !word_byte(text[i - 1]) || !word_byte(phrase[0])) && (end == len(text) || !word_byte(text[end]) || !word_byte(phrase[len(phrase) - 1])) {
+			return true
+		}
+		start = i + 1
+	}
+	return false
 }
 
 // Keeps the newest CHAT_MAX_MESSAGES.
@@ -336,6 +419,8 @@ draw_chat_view :: proc(a: ^Assets, v: ^Chat_View, rect: Rect, scale: f32, filter
 		if top < rect.y + rect.h {
 			if m.mention {
 				draw_rect(r, {rect.x, top - gap / 2, rect.w, layout.height + gap}, CHAT_MENTION_BACKGROUND)
+			} else if m.accent != .None {
+				draw_rect(r, {rect.x, top - gap / 2, rect.w, layout.height + gap}, CHAT_ACCENT_BACKGROUNDS[m.accent])
 			}
 			draw_message(a, v, m, layout, rect.x + pad, top)
 			append(&v.message_hits, Message_Hit{{rect.x, top - gap / 2, rect.w, layout.height + gap}, i})
@@ -478,6 +563,12 @@ message_layout :: proc(a: ^Assets, channel: ^Emotes, m: ^Chat_Message, scale, wi
 	b.text_h = line_height(&a.renderer, .Regular, b.size)
 	b.line_h = b.text_h
 	pixel_scale: f32 = 2 if image_scale > 1 else 1
+
+	// Why Twitch marks it out, on a line of its own.
+	if m.label != "" {
+		put_text(&b, .Bold, CHAT_SYSTEM_TEXT, m.label)
+		end_line(&b)
+	}
 
 	// A reply starts with what it replies to, on a line of its own, cut to fit.
 	if m.reply != "" {

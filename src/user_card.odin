@@ -49,8 +49,9 @@ User_Card :: struct {
 	rect:     Rect,
 	// Bumped per card, so a lookup for an earlier one is ignored.
 	request:  int,
-	// The link to their videos, from the last draw.
+	// The links to their videos and to ignore them, from the last draw.
 	videos_link: Rect,
+	ignore_link: Rect,
 }
 
 user_card_open :: proc(app: ^App, p: ^Chat_Pane, login: string, anchor_y: f32) {
@@ -244,8 +245,11 @@ draw_user_card :: proc(app: ^App) {
 		ty += lh
 	}
 	ty = y + card_h - pad - lh_small
-	draw_text(r, .Regular, small, x + pad, ty, "Esc or click outside to close", CHAT_SYSTEM_TEXT)
-	// Their videos, at the right of that line.
+	// Ignoring them at the left of the last line, their videos at the right.
+	ignore := "Unignore" if chat_ignored(app, c.login) else "Ignore"
+	c.ignore_link = {x + pad, ty, text_width(r, .Bold, small, ignore), lh_small}
+	ignore_hovered := in_rect(c.ignore_link, app.mouse.x, app.mouse.y)
+	draw_text(r, .Bold, small, c.ignore_link.x, ty, ignore, BROWSE_TEXT if ignore_hovered else BROWSE_ACCENT)
 	label := "Videos ›"
 	lw := text_width(r, .Bold, small, label)
 	c.videos_link = {x + card_w - pad - lw, ty, lw, lh_small}

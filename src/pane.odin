@@ -67,6 +67,7 @@ pane_new :: proc(app: ^App) -> ^Chat_Pane {
 	p := new(Chat_Pane)
 	p.id = app.next_pane_id
 	p.view.emotes = &p.emotes
+	p.view.rules = &app.layout.chat
 	return p
 }
 
@@ -586,8 +587,7 @@ completion_names :: proc(app: ^App, p: ^Chat_Pane) -> (emote_names, user_names: 
 	return emotes[:], users[:]
 }
 
-// Sends what's typed. "/me" is the only command: Twitch's IRC no longer runs the
-// others.
+// Sends what's typed, or runs it if it's a command (chat_commands.odin).
 @(private = "file")
 pane_send :: proc(app: ^App, p: ^Chat_Pane) {
 	w := &app.watch
@@ -595,22 +595,26 @@ pane_send :: proc(app: ^App, p: ^Chat_Pane) {
 	if text == "" {
 		return
 	}
+	if strings.has_prefix(text, "/") && !strings.has_prefix(text, "/me ") {
+		if !pane_command(app, p, text) {
+			pane_notice(app, p, CHAT_COMMANDS_HELP)
+			return
+		}
+		input_clear(&p.boxes[.Chat])
+		return
+	}
 	room, self := chat_room(p.chat)
 	if pane_subs_only(p) {
-		notice(app, p, "This chat is for subscribers only.")
+		pane_notice(app, p, "This chat is for subscribers only.")
 		return
 	}
 	if wait := p.last_sent_ms + room.slow * 1000 - app.assets.now_ms; room.slow > 0 && p.last_sent_ms > 0 && wait > 0 && !chat_self_exempt(self) {
-		notice(app, p, fmt.tprintf("Slow mode: wait %ds.", (wait + 999) / 1000))
+		pane_notice(app, p, fmt.tprintf("Slow mode: wait %ds.", (wait + 999) / 1000))
 		return
 	}
-
 	line := text
 	if strings.has_prefix(text, "/me ") {
 		line = strings.concatenate({"\x01ACTION ", text[len("/me "):], "\x01"}, context.temp_allocator)
-	} else if strings.has_prefix(text, "/") {
-		notice(app, p, "Only /me works here so far.")
-		return
 	}
 
 	// Twitch's limit counts every channel the account chats in.
@@ -619,7 +623,7 @@ pane_send :: proc(app: ^App, p: ^Chat_Pane) {
 		ordered_remove(&w.sent_at, 0)
 	}
 	if len(w.sent_at) >= CHAT_RATE_LIMIT {
-		notice(app, p, "Slow down: Twitch allows 20 messages every 30 seconds.")
+		pane_notice(app, p, "Slow down: Twitch allows 20 messages every 30 seconds.")
 		return
 	}
 	append(&w.sent_at, now)
@@ -718,8 +722,7 @@ draw_reply_bar :: proc(app: ^App, p: ^Chat_Pane) {
 }
 
 // Shows a message from the app in the pane's chat.
-@(private = "file")
-notice :: proc(app: ^App, p: ^Chat_Pane, text: string) {
+pane_notice :: proc(app: ^App, p: ^Chat_Pane, text: string) {
 	messages := []Chat_Message{system_message(text)}
 	chat_view_add(&p.view, &app.assets, app.scale, pane_text_width(app, p), messages)
 }

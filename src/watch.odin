@@ -741,6 +741,10 @@ watch_click :: proc(app: ^App, x, y: f32) {
 	if w.card.open && in_rect(w.card.rect, x, y) {
 		if in_rect(w.card.videos_link, x, y) {
 			watch_open_videos(app, w.card.login, w.card.info.display_name if w.card.state == .Loaded else "")
+		} else if in_rect(w.card.ignore_link, x, y) && valid_login(w.card.login) {
+			if !chat_unignore(app, w.card.login) {
+				chat_ignore(app, w.card.login)
+			}
 		}
 		return
 	}
