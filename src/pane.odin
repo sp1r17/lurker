@@ -398,6 +398,13 @@ pane_click :: proc(app: ^App, p: ^Chat_Pane, x, y: f32) {
 		user_card_open(app, p, login, y)
 		return
 	}
+	// A reply's "Replying to" line opens its thread.
+	if chat_view_reply_at(&p.view, x, y) {
+		if m, found := chat_view_message_at(&p.view, x, y); found && m.thread != "" {
+			thread_card_open(app, p, m.thread, y)
+			return
+		}
+	}
 	user_card_close(app)
 	chat_view_click(&p.view, x, y)
 }
@@ -682,6 +689,7 @@ pane_reply_start :: proc(app: ^App, p: ^Chat_Pane, m: ^Chat_Message) {
 		login = strings.clone(m.login),
 		name  = strings.clone(name),
 		body  = strings.clone(strings.to_string(body)),
+		thread = strings.clone(m.thread if m.thread != "" else m.id),
 	}
 	box_focus(app, p, .Chat)
 }
@@ -691,6 +699,7 @@ pane_reply_cancel :: proc(p: ^Chat_Pane) {
 	delete(p.reply.login)
 	delete(p.reply.name)
 	delete(p.reply.body)
+	delete(p.reply.thread)
 	p.reply = {}
 }
 

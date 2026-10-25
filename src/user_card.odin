@@ -38,12 +38,15 @@ User_Card_State :: enum {
 	Unavailable,
 }
 
-// Chatterino's user popup: who someone is, and what they've said here.
+// Chatterino's user popup: who someone is, and what they've said here. Or with a
+// `thread`, its reply thread popup.
 User_Card :: struct {
 	open:     bool,
 	// The pane whose chat it was opened from, by ID.
 	pane:     int,
 	login:    string,
+	// The ID of the message that started the thread shown, or "" for a user. Owned.
+	thread:   string,
 	state:    User_Card_State,
 	info:     User_Info,
 	// Where it was opened from (y in pixels), and where it's drawn.
@@ -51,25 +54,28 @@ User_Card :: struct {
 	rect:     Rect,
 	// Bumped per card, so a lookup for an earlier one is ignored.
 	request:  int,
-	// From the last draw: the links to their videos and to ignore them, the
-	// moderation buttons, the list of messages and how far it's scrolled up (and can
-	// be), where names, emotes and links are in it, and the delete buttons.
+	// From the last draw: the links to their videos, to ignore them and to reply to
+	// the thread, the moderation buttons, the list of messages and how far it's
+	// scrolled up (and can be), where names, emotes and links are in it, and its rows.
 	videos_link: Rect,
 	ignore_link: Rect,
+	reply_link:  Rect,
 	mod_links:   [len(USER_CARD_MOD_ACTIONS)]Rect,
 	list_rect:   Rect,
 	scroll:      f32,
 	max_scroll:  f32,
 	hits:        Chat_View,
-	delete_hits: [dynamic]Card_Delete_Hit,
+	rows:        [dynamic]Card_Row,
 }
 
-Card_Delete_Hit :: struct {
-	rect:  Rect,
+// A message in the card's list, and its delete button (zero size when hidden).
+Card_Row :: struct {
+	rect:   Rect,
+	delete: Rect,
 	// The message, as an index into the pane's messages and its ID (checked on a
 	// click, in case the messages changed since). The ID points into it.
-	index: int,
-	id:    string,
+	index:  int,
+	id:     string,
 }
 
 @(rodata)
@@ -100,6 +106,16 @@ user_card_open :: proc(app: ^App, p: ^Chat_Pane, login: string, anchor_y: f32) {
 	)
 }
 
+// Opens the thread that message `root` started.
+thread_card_open :: proc(app: ^App, p: ^Chat_Pane, root: string, anchor_y: f32) {
+	c := &app.watch.card
+	user_card_close(app)
+	c.open = true
+	c.pane = p.id
+	c.thread = strings.clone(root)
+	c.anchor_y = anchor_y
+}
+
 user_card_close :: proc(app: ^App) {
 	c := &app.watch.card
 	if !c.open {
@@ -107,8 +123,9 @@ user_card_close :: proc(app: ^App) {
 	}
 	delete(c.login)
 	destroy_user_info(c.info)
+	delete(c.thread)
 	chat_view_destroy(&c.hits)
-	delete(c.delete_hits)
+	delete(c.rows)
 	request := c.request
 	c^ = {}
 	c.request = request
@@ -174,8 +191,9 @@ finish_user_job :: proc(app: ^App, p: ^User_Job) {
 	c.state = .Loaded
 }
 
-// Drawn beside the chat, over the video, level with the name that was clicked:
-// who they are, buttons to moderate them, and everything they've said in this chat.
+// Drawn beside the chat, over the video, level with what was clicked: a user (who
+// they are, buttons to moderate them and everything they've said in this chat), or
+// a reply thread (every message in it, and a button to reply).
 draw_user_card :: proc(app: ^App) {
 	c := &app.watch.card
 	if !c.open {
@@ -191,39 +209,70 @@ draw_user_card :: proc(app: ^App) {
 	pad := 12 * scale
 	gap := CHAT_MESSAGE_GAP * scale
 	small := BROWSE_CARD_TEXT_SIZE * scale
+	size := CHAT_FONT_SIZE * scale
 	lh_small := line_height(r, .Regular, small)
 	avatar := USER_CARD_AVATAR * scale
 	card_w := USER_CARD_WIDTH * scale
-	moderating := pane_moderating(p) && c.login != app.auth.login
+	in_thread := c.thread != ""
+	moderating := pane_moderating(p)
 
-	// Their messages here, oldest first, and their colour from the latest.
-	theirs := make([dynamic]int, context.temp_allocator)
+	// The messages to list, oldest first: the user's (and their colour from the
+	// latest), or the thread's.
+	shown := make([dynamic]int, context.temp_allocator)
 	color := CHAT_TEXT
+	root_shown := false
 	for &m, i in p.view.messages {
-		if m.login == c.login && m.kind != .System {
-			append(&theirs, i)
+		switch {
+		case m.kind == .System:
+		case in_thread && (m.id == c.thread || m.thread == c.thread):
+			append(&shown, i)
+			root_shown ||= m.id == c.thread
+		case !in_thread && m.login == c.login:
+			append(&shown, i)
 			color = m.color
 		}
 	}
 	// Each message has how long ago it was sent at its left.
 	time_w := text_width(r, .Regular, small, "00m") + pad / 2
 	text_w := card_w - 2 * pad - time_w
+	// In a thread, a reply to a message shown above it doesn't quote it. The one
+	// that started it is always above: quoted at the top if it's gone from the chat.
+	listed := make(map[string]bool, allocator = context.temp_allocator)
+	if in_thread {
+		listed[c.thread] = true
+		for i in shown {
+			listed[p.view.messages[i].id] = true
+		}
+	}
 	total: f32
-	for i in theirs {
+	for i in shown {
 		m := &p.view.messages[i]
-		total += message_layout_into(a, &p.emotes, m, &m.card_layout, scale, text_w).height + gap
+		total += message_layout_into(a, &p.emotes, m, &m.card_layout, scale, text_w, hide_reply = m.reply_parent in listed).height + gap
 	}
 
-	header_h := avatar + 2 * pad
-	// No line for a bio they don't have.
-	bio_h := lh_small + pad if c.state != .Loaded || c.info.description != "" else 0
-	mod_h := lh_small + pad if moderating else 0
-	label_h := lh_small + pad / 2
+	// The thread's start, when it's no longer in the chat: as the replies quote it.
+	quoted_root: string
+	if in_thread && !root_shown {
+		for i in shown {
+			if m := &p.view.messages[i]; m.reply_parent == c.thread {
+				quoted_root = strings.trim_prefix(m.reply, "Replying to ")
+				break
+			}
+		}
+	}
+	header_h: f32
+	mod_row := !in_thread && moderating && c.login != app.auth.login
+	if in_thread {
+		header_h = pad + line_height(r, .Bold, size) + (lh_small if quoted_root != "" else 0) + pad / 2
+	} else {
+		// No line for a bio they don't have.
+		bio_h := lh_small + pad if c.state != .Loaded || c.info.description != "" else 0
+		header_h = avatar + 2 * pad + bio_h + (lh_small + pad if mod_row else 0) + lh_small + pad / 2
+	}
 	foot_h := pad + lh_small + pad
-	fixed_h := header_h + bio_h + mod_h + label_h + foot_h
-	list_h := clamp(total, line_height(r, .Regular, CHAT_FONT_SIZE * scale), USER_CARD_LIST_HEIGHT * scale)
-	list_h = max(0, min(list_h, p.rect.h - 16 * scale - fixed_h))
-	card_h := fixed_h + list_h
+	list_h := clamp(total, line_height(r, .Regular, size), USER_CARD_LIST_HEIGHT * scale)
+	list_h = max(0, min(list_h, p.rect.h - 16 * scale - header_h - foot_h))
+	card_h := header_h + list_h + foot_h
 	// Beside the pane, over the video or the split to its left.
 	x := max(8 * scale, p.rect.x - card_w - 8 * scale)
 	y := clamp(c.anchor_y - 24 * scale, 8 * scale, p.rect.h - card_h - 8 * scale)
@@ -231,7 +280,108 @@ draw_user_card :: proc(app: ^App) {
 	draw_rect(r, c.rect, USER_CARD_BORDER)
 	draw_rect(r, {x + scale, y + scale, card_w - 2 * scale, card_h - 2 * scale}, USER_CARD_BACKGROUND)
 
-	// Avatar, name, login.
+	c.mod_links = {}
+	if in_thread {
+		ty := y + pad
+		title := "Thread"
+		draw_text(r, .Bold, size, x + pad, ty, title, CHAT_TEXT)
+		replies := len(shown) - (1 if root_shown else 0)
+		count := fmt.tprintf("%d %s", replies, "reply" if replies == 1 else "replies")
+		draw_text(r, .Regular, small, x + pad + text_width(r, .Bold, size, title) + pad / 2, ty + (line_height(r, .Bold, size) - lh_small) / 2, count, BROWSE_DIM_TEXT)
+		if quoted_root != "" {
+			draw_text_line(a, .Regular, small, x + pad, ty + line_height(r, .Bold, size), quoted_root, CHAT_SYSTEM_TEXT, card_w - 2 * pad)
+		}
+	} else {
+		draw_user_header(app, c, x, y, color, mod_row)
+	}
+
+	// The messages, newest at the bottom, scrolled up by c.scroll.
+	c.list_rect = {x + scale, y + header_h, card_w - 2 * scale, list_h}
+	c.max_scroll = max(0, total - list_h)
+	c.scroll = clamp(c.scroll, 0, c.max_scroll)
+	clear(&c.hits.name_hits)
+	clear(&c.hits.image_hits)
+	clear(&c.hits.message_hits)
+	clear(&c.hits.link_hits)
+	clear(&c.hits.reply_hits)
+	clear(&c.rows)
+	if len(shown) == 0 {
+		empty := "Its messages are gone from this chat." if in_thread else "None in this chat yet."
+		draw_text(r, .Regular, size, x + pad, c.list_rect.y, empty, CHAT_SYSTEM_TEXT)
+	}
+	clip_begin(r, c.list_rect)
+	now_ms := time.to_unix_nanoseconds(time.now()) / 1e6
+	bottom := c.list_rect.y + list_h + c.scroll
+	#reverse for i in shown {
+		m := &p.view.messages[i]
+		l := &m.card_layout
+		top := bottom - l.height
+		bottom = top - gap
+		if top > c.list_rect.y + list_h {
+			continue
+		}
+		if top + l.height < c.list_rect.y {
+			break
+		}
+		row := Card_Row {
+			rect  = {c.list_rect.x, top - gap / 2, c.list_rect.w, l.height + gap},
+			index = i,
+			id    = m.id,
+		}
+		hovered := in_rect(row.rect, app.mouse.x, app.mouse.y) && in_rect(c.list_rect, app.mouse.x, app.mouse.y)
+		if m.mention {
+			draw_rect(r, row.rect, CHAT_MENTION_BACKGROUND)
+		} else if hovered {
+			draw_rect(r, row.rect, MENU_HOVER)
+		}
+		draw_text(r, .Regular, small, x + pad, top, time_ago(now_ms - m.sent_ms), CHAT_SYSTEM_TEXT)
+		draw_message(a, &c.hits, m, l, x + pad + time_w, top)
+		// Deleting it, for moderators: × at its right while hovered.
+		if moderating && hovered && m.id != "" && !m.deleted {
+			side := min(row.rect.h, lh_small + gap)
+			row.delete = {row.rect.x + row.rect.w - side, row.rect.y, side, side}
+			over := in_rect(row.delete, app.mouse.x, app.mouse.y)
+			draw_rect(r, row.delete, CHAT_MENTION_BACKGROUND if over else CHAT_HEADER)
+			draw_centered(r, .Bold, small, row.delete, "×", CHAT_TEXT)
+		}
+		append(&c.rows, row)
+	}
+	clip_end(r)
+
+	// The last line: replying to the thread, or ignoring the user at the left and
+	// their videos at the right.
+	ty := y + card_h - pad - lh_small
+	c.reply_link, c.ignore_link, c.videos_link = {}, {}, {}
+	link :: proc(app: ^App, label: string, x, y, size: f32) -> Rect {
+		r := &app.assets.renderer
+		rect := Rect{x, y, text_width(r, .Bold, size, label), line_height(r, .Regular, size)}
+		hovered := in_rect(rect, app.mouse.x, app.mouse.y)
+		draw_text(r, .Bold, size, x, y, label, BROWSE_TEXT if hovered else BROWSE_ACCENT)
+		return rect
+	}
+	if in_thread {
+		if app.signed_in && !pane_replaying(app, p) && len(shown) > 0 {
+			c.reply_link = link(app, "Reply", x + pad, ty, small)
+		}
+	} else {
+		c.ignore_link = link(app, "Unignore" if chat_ignored(app, c.login) else "Ignore", x + pad, ty, small)
+		videos := "Videos ›"
+		c.videos_link = link(app, videos, x + card_w - pad - text_width(r, .Bold, small, videos), ty, small)
+	}
+}
+
+// A user's avatar, name, login, account age and bio, and the moderation buttons.
+@(private = "file")
+draw_user_header :: proc(app: ^App, c: ^User_Card, x, y: f32, color: Color, mod_row: bool) {
+	a := &app.assets
+	r := &a.renderer
+	scale := app.scale
+	pad := 12 * scale
+	small := BROWSE_CARD_TEXT_SIZE * scale
+	lh_small := line_height(r, .Regular, small)
+	avatar := USER_CARD_AVATAR * scale
+	card_w := USER_CARD_WIDTH * scale
+
 	avatar_rect := Rect{x + pad, y + pad, avatar, avatar}
 	image: ^Image
 	if c.state == .Loaded && c.info.profile_image_url != "" {
@@ -262,16 +412,16 @@ draw_user_card :: proc(app: ^App) {
 		}
 	}
 
-	// Their bio, on one line.
-	ty = y + header_h
-	if c.state == .Loaded && c.info.description != "" {
-		draw_text_line(a, .Regular, small, x + pad, ty, c.info.description, CHAT_TEXT, card_w - 2 * pad)
+	ty = y + avatar + 2 * pad
+	if c.state != .Loaded || c.info.description != "" {
+		if c.state == .Loaded {
+			draw_text_line(a, .Regular, small, x + pad, ty, c.info.description, CHAT_TEXT, card_w - 2 * pad)
+		}
+		ty += lh_small + pad
 	}
-	ty += bio_h
 
 	// Timeouts and bans, for moderators.
-	c.mod_links = {}
-	if moderating {
+	if mod_row {
 		lx := x + pad
 		draw_text(r, .Regular, small, lx, ty, "Timeout", BROWSE_DIM_TEXT)
 		lx += text_width(r, .Regular, small, "Timeout") + pad / 2
@@ -285,72 +435,9 @@ draw_user_card :: proc(app: ^App) {
 			draw_text(r, .Bold, small, lx, ty, action.label, BROWSE_TEXT if hovered else BROWSE_ACCENT)
 			lx += lw + pad * 0.75
 		}
-		ty += mod_h
+		ty += lh_small + pad
 	}
-
-	label := fmt.tprintf("Messages here (%d)", len(theirs)) if len(theirs) > 0 else "Messages here"
-	draw_text(r, .Bold, small, x + pad, ty, label, BROWSE_DIM_TEXT)
-	ty += label_h
-
-	// The messages, newest at the bottom, scrolled up by c.scroll.
-	c.list_rect = {x + scale, ty, card_w - 2 * scale, list_h}
-	c.max_scroll = max(0, total - list_h)
-	c.scroll = clamp(c.scroll, 0, c.max_scroll)
-	clear(&c.hits.name_hits)
-	clear(&c.hits.image_hits)
-	clear(&c.hits.message_hits)
-	clear(&c.hits.link_hits)
-	clear(&c.delete_hits)
-	if len(theirs) == 0 {
-		draw_text(r, .Regular, CHAT_FONT_SIZE * scale, x + pad, ty, "None in this chat yet.", CHAT_SYSTEM_TEXT)
-	}
-	clip_begin(r, c.list_rect)
-	now_ms := time.to_unix_nanoseconds(time.now()) / 1e6
-	bottom := c.list_rect.y + list_h + c.scroll
-	#reverse for i in theirs {
-		m := &p.view.messages[i]
-		l := &m.card_layout
-		top := bottom - l.height
-		bottom = top - gap
-		if top > c.list_rect.y + list_h {
-			continue
-		}
-		if top + l.height < c.list_rect.y {
-			break
-		}
-		row := Rect{c.list_rect.x, top - gap / 2, c.list_rect.w, l.height + gap}
-		hovered := in_rect(row, app.mouse.x, app.mouse.y) && in_rect(c.list_rect, app.mouse.x, app.mouse.y)
-		if m.mention {
-			draw_rect(r, row, CHAT_MENTION_BACKGROUND)
-		} else if hovered {
-			draw_rect(r, row, MENU_HOVER)
-		}
-		draw_text(r, .Regular, small, x + pad, top, time_ago(now_ms - m.sent_ms), CHAT_SYSTEM_TEXT)
-		draw_message(a, &c.hits, m, l, x + pad + time_w, top)
-		// Deleting it, for moderators: × at its right while hovered.
-		if moderating && hovered && m.id != "" && !m.deleted {
-			button := Rect{row.x + row.w - row.h, row.y, row.h, min(row.h, lh_small + gap)}
-			button.w = button.h
-			button.x = row.x + row.w - button.w
-			over := in_rect(button, app.mouse.x, app.mouse.y)
-			draw_rect(r, button, CHAT_MENTION_BACKGROUND if over else CHAT_HEADER)
-			draw_centered(r, .Bold, small, button, "×", CHAT_TEXT)
-			append(&c.delete_hits, Card_Delete_Hit{button, i, m.id})
-		}
-	}
-	clip_end(r)
-
-	ty = y + card_h - pad - lh_small
-	// Ignoring them at the left of the last line, their videos at the right.
-	ignore := "Unignore" if chat_ignored(app, c.login) else "Ignore"
-	c.ignore_link = {x + pad, ty, text_width(r, .Bold, small, ignore), lh_small}
-	ignore_hovered := in_rect(c.ignore_link, app.mouse.x, app.mouse.y)
-	draw_text(r, .Bold, small, c.ignore_link.x, ty, ignore, BROWSE_TEXT if ignore_hovered else BROWSE_ACCENT)
-	videos := "Videos ›"
-	lw := text_width(r, .Bold, small, videos)
-	c.videos_link = {x + card_w - pad - lw, ty, lw, lh_small}
-	hovered := in_rect(c.videos_link, app.mouse.x, app.mouse.y)
-	draw_text(r, .Bold, small, c.videos_link.x, ty, videos, BROWSE_TEXT if hovered else BROWSE_ACCENT)
+	draw_text(r, .Bold, small, x + pad, ty, "Messages here", BROWSE_DIM_TEXT)
 }
 
 // "now", "5m", "3h", "2d": how long ago, for the user card.
@@ -378,6 +465,17 @@ user_card_scroll :: proc(app: ^App, x, y, wheel_y: f32) -> bool {
 	return true
 }
 
+// The message in the card's row at (x, y), if it's still in the chat.
+@(private = "file")
+card_message_at :: proc(c: ^User_Card, p: ^Chat_Pane, x, y: f32) -> (row: Card_Row, m: ^Chat_Message, found: bool) {
+	for r in c.rows {
+		if in_rect(r.rect, x, y) && in_rect(c.list_rect, x, y) && r.index < len(p.view.messages) && p.view.messages[r.index].id == r.id {
+			return r, &p.view.messages[r.index], true
+		}
+	}
+	return {}, nil, false
+}
+
 // Handles a click on the card at (x, y).
 user_card_click :: proc(app: ^App, x, y: f32) {
 	c := &app.watch.card
@@ -394,6 +492,22 @@ user_card_click :: proc(app: ^App, x, y: f32) {
 			chat_ignore(app, c.login)
 		}
 		return
+	case in_rect(c.reply_link, x, y):
+		// To the message that started the thread, or the newest left of it.
+		target: ^Chat_Message
+		for &m in p.view.messages {
+			if m.id == c.thread {
+				target = &m
+				break
+			}
+			if m.thread == c.thread && m.id != "" {
+				target = &m
+			}
+		}
+		if target != nil {
+			pane_reply_start(app, p, target)
+		}
+		return
 	}
 	user_id := c.info.id if c.state == .Loaded else ""
 	for link, i in c.mod_links {
@@ -403,15 +517,32 @@ user_card_click :: proc(app: ^App, x, y: f32) {
 			return
 		}
 	}
-	for hit in c.delete_hits {
-		if in_rect(hit.rect, x, y) && hit.index < len(p.view.messages) && p.view.messages[hit.index].id == hit.id {
-			mod_request(app, p, .Delete, login = c.login, message_id = hit.id)
-			return
-		}
+	if row, m, found := card_message_at(c, p, x, y); found && row.delete.w > 0 && in_rect(row.delete, x, y) {
+		mod_request(app, p, .Delete, login = m.login, message_id = row.id)
+		return
 	}
 	if url, found := chat_view_link_at(&c.hits, x, y); found {
 		open_url(url)
+		return
 	}
+	// Someone's name in a thread opens their card.
+	if login, found := chat_view_name_at(&c.hits, x, y); found && login != c.login {
+		user_card_open(app, p, strings.clone(login, context.temp_allocator), y)
+	}
+}
+
+// A right-click on one of the card's messages replies to it.
+user_card_right_click :: proc(app: ^App, x, y: f32) -> bool {
+	c := &app.watch.card
+	if !c.open || !in_rect(c.rect, x, y) {
+		return false
+	}
+	if p := find_pane(app, c.pane); p != nil {
+		if _, m, found := card_message_at(c, p, x, y); found {
+			pane_reply_start(app, p, m)
+		}
+	}
+	return true
 }
 
 // A message's text with emotes as their names, allocated with the temp allocator.

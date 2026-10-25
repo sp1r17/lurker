@@ -96,6 +96,7 @@ Chat_View :: struct {
 	image_hits:   [dynamic]Image_Hit,
 	message_hits: [dynamic]Message_Hit,
 	link_hits:    [dynamic]Link_Hit,
+	reply_hits:   [dynamic]Rect,
 	// How many messages matched the filter.
 	matches:    int,
 }
@@ -131,6 +132,7 @@ chat_view_destroy :: proc(v: ^Chat_View) {
 	delete(v.image_hits)
 	delete(v.message_hits)
 	delete(v.link_hits)
+	delete(v.reply_hits)
 }
 
 // Adds messages that have just arrived, taking ownership. Moderation messages fade
@@ -279,6 +281,7 @@ chat_view_clear :: proc(v: ^Chat_View) {
 	clear(&v.image_hits)
 	clear(&v.message_hits)
 	clear(&v.link_hits)
+	clear(&v.reply_hits)
 	v.scroll = 0
 	v.max_scroll = 0
 }
@@ -376,6 +379,16 @@ chat_view_link_at :: proc(v: ^Chat_View, x, y: f32) -> (url: string, found: bool
 	return "", false
 }
 
+// Whether (x, y) is on a reply's "Replying to" line.
+chat_view_reply_at :: proc(v: ^Chat_View, x, y: f32) -> bool {
+	for rect in v.reply_hits {
+		if in_rect(rect, x, y) {
+			return true
+		}
+	}
+	return false
+}
+
 // Handles a click at (x, y) in pixels. Returns true if it changed the view.
 chat_view_click :: proc(v: ^Chat_View, x, y: f32) -> bool {
 	if v.more_bar.w > 0 && in_rect(v.more_bar, x, y) {
@@ -398,6 +411,7 @@ draw_chat_view :: proc(a: ^Assets, v: ^Chat_View, rect: Rect, scale: f32, filter
 	clear(&v.image_hits)
 	clear(&v.message_hits)
 	clear(&v.link_hits)
+	clear(&v.reply_hits)
 	clip_begin(r, rect)
 	// Messages are laid out from the newest upwards; `bottom` is the next one's
 	// bottom edge.
@@ -473,6 +487,9 @@ draw_message :: proc(a: ^Assets, v: ^Chat_View, m: ^Chat_Message, layout: ^Messa
 		if item.link != "" {
 			append(&v.link_hits, Link_Hit{rect, item.link})
 		}
+		if item.is_reply {
+			append(&v.reply_hits, rect)
+		}
 		switch item.kind {
 		case .Text:
 			color := item.color
@@ -514,6 +531,8 @@ Layout_Item :: struct {
 	is_name: bool,
 	// Part of a link: clicking it opens `link` (see chat_link) in the browser.
 	link:    string,
+	// Part of the line saying what a reply replies to: clicking it opens the thread.
+	is_reply: bool,
 	// A badge (`text` is its "set/version") or emote (`text` is its name), which
 	// shows a tooltip when hovered.
 	hint:        Item_Hint,
@@ -534,6 +553,7 @@ Message_Layout :: struct {
 	scale:          f32,
 	text_scale:     f32,
 	images_version: int,
+	hide_reply:     bool,
 	height:         f32,
 	items:          [dynamic]Layout_Item,
 }
@@ -545,12 +565,14 @@ message_layout :: proc(a: ^Assets, channel: ^Emotes, m: ^Chat_Message, scale, wi
 	return message_layout_into(a, channel, m, &m.layout, scale, width)
 }
 
-// message_layout, cached in `l` rather than the message's own layout.
-message_layout_into :: proc(a: ^Assets, channel: ^Emotes, m: ^Chat_Message, l: ^Message_Layout, scale, width: f32) -> ^Message_Layout {
-	if l.height > 0 && l.width == width && l.scale == scale && l.text_scale == a.renderer.text_scale && l.images_version == a.images.version {
+// message_layout, cached in `l` rather than the message's own layout. With
+// `hide_reply`, a reply leaves out what it replies to (shown just above it).
+message_layout_into :: proc(a: ^Assets, channel: ^Emotes, m: ^Chat_Message, l: ^Message_Layout, scale, width: f32, hide_reply := false) -> ^Message_Layout {
+	if l.height > 0 && l.width == width && l.scale == scale && l.text_scale == a.renderer.text_scale && l.images_version == a.images.version && l.hide_reply == hide_reply {
 		return l
 	}
 	clear(&l.items)
+	l.hide_reply = hide_reply
 	l.width = width
 	l.scale = scale
 	l.text_scale = a.renderer.text_scale
@@ -576,7 +598,8 @@ message_layout_into :: proc(a: ^Assets, channel: ^Emotes, m: ^Chat_Message, l: ^
 	}
 
 	// A reply starts with what it replies to, on a line of its own, cut to fit.
-	if m.reply != "" {
+	if m.reply != "" && !hide_reply {
+		b.in_reply = m.thread != ""
 		if text_width(&a.renderer, .Regular, b.size, m.reply) <= width {
 			put_text(&b, .Regular, CHAT_SYSTEM_TEXT, m.reply)
 		} else {
@@ -585,6 +608,7 @@ message_layout_into :: proc(a: ^Assets, channel: ^Emotes, m: ^Chat_Message, l: ^
 			put_text(&b, .Regular, CHAT_SYSTEM_TEXT, fit_prefix(&a.renderer, .Regular, b.size, m.reply, room))
 			put_text(&b, .Regular, CHAT_SYSTEM_TEXT, ellipsis)
 		}
+		b.in_reply = false
 		end_line(&b)
 	}
 
@@ -663,8 +687,9 @@ Builder :: struct {
 	line_y:     f32,
 	line_h:     f32,
 	line_start: int,
-	// Words put now are the sender's name, or may be links.
+	// Words put now are the sender's name, a reply's line, or may be links.
 	in_name:    bool,
+	in_reply:   bool,
 	links:      bool,
 	// The link the word being put is part of.
 	link:       string,
@@ -797,7 +822,7 @@ put_word :: proc(b: ^Builder, font: Font, color: Color, word: string) {
 @(private = "file")
 put_text :: proc(b: ^Builder, font: Font, color: Color, text: string) {
 	w := text_width(&b.a.renderer, font, b.size, text)
-	place(b, {kind = .Text, font = font, color = color, text = text, is_name = b.in_name, link = b.link}, w, b.text_h)
+	place(b, {kind = .Text, font = font, color = color, text = text, is_name = b.in_name, link = b.link, is_reply = b.in_reply}, w, b.text_h)
 }
 
 CHAT_TOOLTIP_BACKGROUND :: Color{0x0e, 0x0e, 0x10, 245}

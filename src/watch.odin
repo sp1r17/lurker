@@ -765,6 +765,9 @@ watch_click :: proc(app: ^App, x, y: f32) {
 
 // A right-click: on a chat message, starts a reply to it.
 watch_right_click :: proc(app: ^App, x, y: f32) {
+	if user_card_right_click(app, x, y) {
+		return
+	}
 	p, i := pane_at(app, x, y)
 	if p == nil || !in_rect(p.messages_rect, x, y) {
 		return

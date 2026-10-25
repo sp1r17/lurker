@@ -64,9 +64,10 @@ Outgoing :: struct {
 	reply_echo: string,
 }
 
-// What a message replies to: another message's ID, and its sender and text.
+// What a message replies to: another message's ID, its sender and text, and the
+// thread it's in (the ID of the message that started it).
 Chat_Reply :: struct {
-	id, login, name, body: string,
+	id, login, name, body, thread: string,
 }
 
 // Queues a message to send, as a reply to `reply` if its ID isn't "". Line breaks
@@ -82,10 +83,12 @@ chat_send :: proc(chat: ^Chat, text: string, reply := Chat_Reply{}) {
 	if reply.id != "" && strings.trim_left(reply.id, "0123456789abcdef-") == "" {
 		out.reply_tag = fmt.aprintf("@reply-parent-msg-id=%s ", reply.id)
 		out.reply_echo = fmt.aprintf(
-			"reply-parent-display-name=%s;reply-parent-user-login=%s;reply-parent-msg-body=%s",
+			"reply-parent-display-name=%s;reply-parent-user-login=%s;reply-parent-msg-body=%s;reply-parent-msg-id=%s;reply-thread-parent-msg-id=%s",
 			escape_tag(reply.name),
 			escape_tag(reply.login),
 			escape_tag(reply.body),
+			escape_tag(reply.id),
+			escape_tag(reply.thread if reply.thread != "" else reply.id),
 		)
 	}
 	sync.guard(&chat.mutex)

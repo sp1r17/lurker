@@ -218,6 +218,10 @@ Chat_Message :: struct {
 	// message it is.
 	reply:       string,
 	reply_login: string,
+	// For a reply: the message it replies to, and the one that started its thread
+	// (Twitch's IDs). Empty otherwise.
+	reply_parent: string,
+	thread:       string,
 	fragments: [dynamic]Fragment,
 	// When it was sent, in Unix milliseconds: Twitch's time, or when it arrived.
 	sent_ms:   i64,
@@ -234,6 +238,8 @@ destroy_chat_message :: proc(m: Chat_Message) {
 	delete(m.clear_target)
 	delete(m.reply)
 	delete(m.reply_login)
+	delete(m.reply_parent)
+	delete(m.thread)
 	delete(m.label)
 	for b in m.badges {
 		delete(b)
@@ -322,6 +328,10 @@ privmsg_to_chat :: proc(msg: Irc_Message) -> Chat_Message {
 		}
 		m.reply = fmt.aprintf("Replying to @%s: %s", parent, body)
 		m.reply_login = strings.clone(parent_login)
+		parent_id, _ := irc_tag(msg, "reply-parent-msg-id")
+		thread, has_thread := irc_tag(msg, "reply-thread-parent-msg-id")
+		m.reply_parent = strings.clone(parent_id)
+		m.thread = strings.clone(thread if has_thread else parent_id)
 		strip_reply_mention(&m, parent, parent_login)
 	}
 	if amount, paid := irc_tag(msg, "pinned-chat-paid-amount"); paid {
