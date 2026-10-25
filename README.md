@@ -48,7 +48,7 @@ Download `lurker-<version>-x86_64.flatpak` from the
 [latest release](https://github.com/sp1r17/lurker/releases/latest) and install it:
 
 ```sh
-flatpak install --user lurker-0.3.1-x86_64.flatpak
+flatpak install --user lurker-0.4.0-x86_64.flatpak
 flatpak run io.github.sp1r17.Lurker
 ```
 

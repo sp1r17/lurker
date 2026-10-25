@@ -16,6 +16,7 @@
     <ul>
       <li>Browse followed channels, top streams and categories</li>
       <li>Open other channels' chats as splits beside the video</li>
+      <li>Chat with history, reply threads, highlights and moderator tools</li>
       <li>Watch past broadcasts with seeking and chat replay</li>
       <li>Choose the quality, or switch to low latency</li>
       <li>Get a notification when a channel you follow goes live</li>
@@ -47,6 +48,11 @@
     <category>Video</category>
   </categories>
   <releases>
+    <release version="0.4.0" date="2026-10-25">
+      <description>
+        <p>Streams in 1440p, and the quality menu only lists the qualities a stream has. Chat shows recent messages on joining, clickable links, reply threads and the chat's modes, with your own highlight phrases and ignored users. User cards list everything someone said, and moderators can time out, ban and delete messages.</p>
+      </description>
+    </release>
     <release version="0.3.1" date="2026-10-25">
       <description>
         <p>A desktop notification when a channel you follow goes live, while Lurker is open, with the channel's picture. Click it to watch the stream. Notifications can be turned off at the top of the browse screen.</p>
