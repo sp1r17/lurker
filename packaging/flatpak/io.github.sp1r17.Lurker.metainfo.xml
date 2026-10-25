@@ -48,6 +48,11 @@
     <category>Video</category>
   </categories>
   <releases>
+    <release version="0.5.0" date="2026-10-25">
+      <description>
+        <p>Lurker tells you when a new version is out, with a switch at the top of the browse screen to turn that off. Top no longer shows the last opened category's streams.</p>
+      </description>
+    </release>
     <release version="0.4.0" date="2026-10-25">
       <description>
         <p>Streams in 1440p, and the quality menu only lists the qualities a stream has. Chat shows recent messages on joining, clickable links, reply threads and the chat's modes, with your own highlight phrases and ignored users. User cards list everything someone said, and moderators can time out, ban and delete messages.</p>

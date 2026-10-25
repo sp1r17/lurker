@@ -11,7 +11,7 @@ APP_ID :: "lurker"
 APP_NAME :: "Lurker"
 // This release's version: bumped with the release entry in the metainfo (a test
 // checks they match).
-APP_VERSION :: "0.4.0"
+APP_VERSION :: "0.5.0"
 
 // The client ID SmartTwitchTV signs in with (it belongs to Twitch's Android TV app),
 // so signing in needs no app registered on dev.twitch.tv. Twitch could restrict it
