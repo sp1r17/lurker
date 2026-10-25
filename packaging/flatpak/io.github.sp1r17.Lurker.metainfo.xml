@@ -47,7 +47,7 @@
     <category>Video</category>
   </categories>
   <releases>
-    <release version="0.3.0" date="2026-10-25">
+    <release version="0.3.1" date="2026-10-25">
       <description>
         <p>A desktop notification when a channel you follow goes live, while Lurker is open, with the channel's picture. Click it to watch the stream. Notifications can be turned off at the top of the browse screen.</p>
       </description>
