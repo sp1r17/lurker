@@ -260,7 +260,7 @@ draw_text_line :: proc(a: ^Assets, font: Font, size, x, y: f32, text: string, co
 				draw_image(r, texture, {pen, y + (lh - emoji_h) / 2, emoji_h, emoji_h})
 			case .Failed:
 				draw_text(r, font, size, pen, y, s.text, color)
-			case .Loading:
+			case .Loading, .Evicted:
 			// Its space stays empty until it arrives.
 			}
 		}

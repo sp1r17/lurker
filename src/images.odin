@@ -10,10 +10,19 @@ import img "vendor:sdl3/image"
 MIN_FRAME_DELAY_MS :: 20
 DEFAULT_FRAME_DELAY_MS :: 100
 
+// Images in the disk cache that go this long without being drawn are evicted:
+// their textures are freed, and they're read back from the cache when next drawn.
+IMAGE_IDLE_MS :: 5 * 60_000
+// How often images_evict looks for idle images.
+IMAGE_EVICT_EVERY_MS :: 30_000
+
 Image_State :: enum {
 	Loading,
 	Ready,
 	Failed,
+	// Its textures freed for going unused. image_get and image_use load it again,
+	// so callers never see this.
+	Evicted,
 }
 
 Image_Frame :: struct {
@@ -23,30 +32,40 @@ Image_Frame :: struct {
 }
 
 // A downloaded emote or badge. Owned by Images; the pointer stays valid until
-// images_destroy.
+// images_destroy (or image_release), evicted or not.
 Image :: struct {
 	state:       Image_State,
+	// Its key in Images.by_url, not separately owned.
+	url:         string,
+	// Whether it's in the disk cache, and so can be evicted and read back.
+	cache:       bool,
 	// Image pixels per logical pixel: 2 for a 2x image fetched for a high-DPI screen.
 	pixel_scale: f32,
-	// In logical pixels.
+	// In logical pixels; kept through eviction, so nothing moves when it's
+	// evicted or reloaded.
 	size:        [2]f32,
 	frames:      [dynamic]Image_Frame,
 	duration_ms: int,
 	// Released while still downloading: freed when the download finishes.
 	orphaned:    bool,
+	// Whether it's been drawn since images_evict last looked, and how many of its
+	// looks in a row found it not drawn.
+	used:        bool,
+	idle_looks:  int,
 }
 
 // Every image by URL, each downloaded once. `version` goes up whenever an image
-// finishes loading, since that can change its size and so the chat layout.
+// finishes loading with a new size (or fails), since that changes the chat layout.
 //
-// TODO: evict images that haven't been drawn for a while (or whose channel was
-// left) and reload them from the disk cache when they come back. Nothing is freed
-// before exit, and drivers can keep a copy of each texture in RAM (NVIDIA does,
-// mipmaps included), so a long session in an emote-heavy chat grows by a few
-// hundred MB.
+// Images go unused when their chat is scrolled away or left, but drivers can keep
+// a copy of each texture in RAM (NVIDIA does, mipmaps included), so images_evict
+// frees idle ones; otherwise a long session in an emote-heavy chat would grow by a
+// few hundred MB.
 Images :: struct {
-	by_url:  map[string]^Image,
-	version: int,
+	by_url:     map[string]^Image,
+	version:    int,
+	// When images_evict last looked (Assets.now_ms).
+	last_evict: int,
 }
 
 images_destroy :: proc(images: ^Images) {
@@ -60,12 +79,18 @@ images_destroy :: proc(images: ^Images) {
 
 @(private = "file")
 free_image :: proc(image: ^Image) {
+	free_textures(image)
+	delete(image.frames)
+	free(image)
+}
+
+@(private = "file")
+free_textures :: proc(image: ^Image) {
 	for f in image.frames {
 		tex := f.texture
 		gl.DeleteTextures(1, &tex)
 	}
-	delete(image.frames)
-	free(image)
+	clear(&image.frames)
 }
 
 // Forgets the image for `url`, for images that are replaced over time (stream
@@ -76,6 +101,7 @@ image_release :: proc(images: ^Images, url: string) {
 		return
 	}
 	delete(key)
+	image.url = ""
 	if image.state == .Loading {
 		image.orphaned = true
 	} else {
@@ -87,13 +113,53 @@ image_release :: proc(images: ^Images, url: string) {
 // `cache` keeps it on disk for later runs: only for URLs whose image never changes.
 image_get :: proc(images: ^Images, jobs: ^Jobs, url: string, pixel_scale: f32, cache := true) -> ^Image {
 	if image, ok := images.by_url[url]; ok {
+		image_use(jobs, image)
 		return image
 	}
 	image := new(Image)
+	image.url = strings.clone(url)
+	image.cache = cache
 	image.pixel_scale = pixel_scale
-	images.by_url[strings.clone(url)] = image
+	image.used = true
+	images.by_url[image.url] = image
 	jobs_add(jobs, run_image_job, Image_Job{url = strings.clone(url), image = image, cache = cache})
 	return image
+}
+
+// Marks an image as drawn, loading it again if it was evicted. image_get does
+// this; it's for images kept from an earlier image_get (a chat line's layout).
+image_use :: proc(jobs: ^Jobs, image: ^Image) {
+	image.used = true
+	if image.state == .Evicted {
+		image.state = .Loading
+		jobs_add(jobs, run_image_job, Image_Job{url = strings.clone(image.url), image = image, cache = true})
+	}
+}
+
+// Every IMAGE_EVICT_EVERY_MS, frees the textures of images in the disk cache
+// that haven't been drawn for IMAGE_IDLE_MS. Call after drawing.
+images_evict :: proc(images: ^Images, now_ms: int) {
+	if now_ms - images.last_evict < IMAGE_EVICT_EVERY_MS {
+		return
+	}
+	images.last_evict = now_ms
+	evicted := 0
+	for _, image in images.by_url {
+		if image.used {
+			image.used = false
+			image.idle_looks = 0
+			continue
+		}
+		image.idle_looks += 1
+		if image.state == .Ready && image.cache && image.idle_looks * IMAGE_EVICT_EVERY_MS >= IMAGE_IDLE_MS {
+			free_textures(image)
+			image.state = .Evicted
+			evicted += 1
+		}
+	}
+	if evicted > 0 {
+		log.debugf("evicted %d idle images", evicted)
+	}
 }
 
 // The frame to show `now_ms` into the animation, and how long until the next one
@@ -213,6 +279,7 @@ finish_image_job :: proc(images: ^Images, p: ^Image_Job) {
 		images.version += 1
 		return
 	}
+	size := [2]f32{f32(p.size.x), f32(p.size.y)} / image.pixel_scale
 	end: int
 	for f in p.frames {
 		tex: u32
@@ -231,7 +298,10 @@ finish_image_job :: proc(images: ^Images, p: ^Image_Job) {
 		append(&image.frames, Image_Frame{tex, end})
 	}
 	image.duration_ms = end
-	image.size = {f32(p.size.x), f32(p.size.y)} / image.pixel_scale
 	image.state = .Ready
-	images.version += 1
+	// Read back after eviction, it's the same size, and the layout stands.
+	if image.size != size {
+		image.size = size
+		images.version += 1
+	}
 }

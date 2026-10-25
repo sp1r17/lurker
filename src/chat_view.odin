@@ -321,6 +321,7 @@ draw_message :: proc(a: ^Assets, v: ^Chat_View, m: ^Chat_Message, layout: ^Messa
 			color.a = u8(u32(color.a) * u32(alpha) / 255)
 			draw_text(&a.renderer, item.font, size, rect.x, rect.y, item.text, color)
 		case .Image:
+			image_use(&a.jobs, item.image)
 			if item.image.state != .Ready {
 				continue
 			}
@@ -525,11 +526,11 @@ space :: proc(b: ^Builder, font: Font) {
 }
 
 // Logical height in, pixel size out: `height` tall, as wide as the image's shape
-// allows (square until it has loaded).
+// allows (square until it has first loaded; an evicted image keeps its size).
 @(private = "file")
 image_size :: proc(b: ^Builder, image: ^Image, height: f32) -> [2]f32 {
 	aspect: f32 = 1
-	if image.state == .Ready && image.size.y > 0 {
+	if image.size.y > 0 {
 		aspect = image.size.x / image.size.y
 	}
 	return {height * aspect, height} * b.scale
