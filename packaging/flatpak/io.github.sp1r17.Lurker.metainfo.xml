@@ -48,6 +48,11 @@
     <category>Video</category>
   </categories>
   <releases>
+    <release version="0.5.1" date="2026-10-25">
+      <description>
+        <p>Fixes for Windows: the video's controls show when the mouse is over a stream, dragging the video moves the window, and chat badges and emotes load. Badges also show on chat messages that arrived before they loaded.</p>
+      </description>
+    </release>
     <release version="0.5.0" date="2026-10-25">
       <description>
         <p>Lurker tells you when a new version is out, with a switch at the top of the browse screen to turn that off. Top no longer shows the last opened category's streams.</p>
