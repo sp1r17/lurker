@@ -161,8 +161,9 @@ App :: struct {
 	watched:             Watched,
 	// Which followed channels have gone live (notify.odin).
 	live:                Live_Notifier,
-	// Whether a notification has added the notification area icon (Windows).
-	notify_icon:         bool,
+	// Desktop notifications, and clicks on them (notify_linux.odin,
+	// notify_windows.odin).
+	notifications:       Notifications,
 }
 
 // Opens the window on the browse screen, or watching `channel` if it's not "".
@@ -259,6 +260,7 @@ run :: proc(channels: []string, config: Config, video: Maybe(Twitch_Link) = nil)
 	app.chat_wake_event = sdl.RegisterEvents(1)
 	defer browse_destroy(&app.browse)
 	defer live_notifier_destroy(&app.live)
+	notifications_init(&app)
 	defer notifications_destroy(&app)
 	defer sign_in_destroy(&app.sign_in)
 	defer if app.screen == .Watch {
@@ -528,6 +530,9 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 	case u32(e.type) == app.assets.jobs.wake_event:
 		finish_jobs(app)
 		redraw^ = true
+	case u32(e.type) == app.notifications.click_event:
+		notifications_clicked(app)
+		redraw^ = true
 	case u32(e.type) == app.player.events_event:
 		events := player_handle_events(&app.player)
 		if .Shutdown in events {
@@ -601,7 +606,6 @@ finish_jobs :: proc(app: ^App) {
 		case Emoji_Job:
 			finish_emoji_job(a, &p)
 		case Cache_Prune_Job:
-		case Notify_Job:
 		}
 		destroy_job(job)
 	}

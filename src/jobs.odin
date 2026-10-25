@@ -36,7 +36,6 @@ Job_Payload :: union {
 	Vod_Extras_Job,
 	Emoji_Job,
 	Cache_Prune_Job,
-	Notify_Job,
 }
 
 Jobs :: struct {
@@ -166,8 +165,6 @@ destroy_job :: proc(job: ^Job) {
 	case Emoji_Job:
 		destroy_emoji_job(&p)
 	case Cache_Prune_Job:
-	case Notify_Job:
-		destroy_notify_job(&p)
 	}
 	free(job)
 }

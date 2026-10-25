@@ -2,6 +2,7 @@ package app
 
 import "core:fmt"
 import "core:strings"
+import sdl "vendor:sdl3"
 
 // Followed channels are checked this often off the Following tab (which refreshes
 // every BROWSE_REFRESH_MS anyway), to notice them going live.
@@ -114,12 +115,12 @@ live_notify :: proc(app: ^App, streams: []Stream) {
 	}
 	if len(announce) > LIVE_NOTIFY_MAX {
 		title, body := live_notification_summary(announce[:])
-		show_notification(app, title, body)
+		show_notification(app, title, body, "")
 		return
 	}
 	for s in announce {
 		title, body := live_notification(s)
-		show_notification(app, title, body)
+		show_notification(app, title, body, s.user_login)
 	}
 }
 
@@ -156,16 +157,64 @@ live_notification_summary :: proc(streams: []Stream) -> (title, body: string) {
 	return title, strings.to_string(b)
 }
 
-// Sends one notification (on Linux; Windows shows them on the main thread).
-Notify_Job :: struct {
-	// The desktop file's name, for the icon and for grouping.
-	app_id: string,
-	title:  string,
-	body:   string,
+// A click on a notification: the channel it's about, or "" for the one about many
+// channels. Owned.
+Notify_Click :: struct {
+	login: string,
+	// From the notification server, to raise the window with on Wayland; "" if
+	// it gave none.
+	token: string,
 }
 
-destroy_notify_job :: proc(p: ^Notify_Job) {
-	delete(p.app_id)
-	delete(p.title)
-	delete(p.body)
+destroy_notify_click :: proc(c: Notify_Click) {
+	delete(c.login)
+	delete(c.token)
+}
+
+// On the main thread, when notifications have been clicked.
+notifications_clicked :: proc(app: ^App) {
+	clicks := make([dynamic]Notify_Click, context.temp_allocator)
+	notifications_take(&app.notifications, &clicks)
+	for c in clicks {
+		notification_clicked(app, c)
+		destroy_notify_click(c)
+	}
+}
+
+// Brings the window up and watches the channel, or for the notification about
+// many, shows the Following tab.
+@(private = "file")
+notification_clicked :: proc(app: ^App, c: Notify_Click) {
+	window_activate(app, c.token)
+	if c.login == "" {
+		if app.screen == .Watch {
+			watch_stop(app)
+		}
+		browse_set_view(app, .Following)
+		return
+	}
+	if app.screen == .Watch && app.watch.channel == c.login {
+		return
+	}
+	for &s in app.browse.following.streams {
+		if s.user_login == c.login {
+			watch_start(app, s.user_login, info = &s)
+			return
+		}
+	}
+	watch_start(app, c.login)
+}
+
+// Restores the window if it's minimized and asks to bring it to the front. On
+// Wayland that takes an activation token; without one the compositor may only
+// mark the window as wanting attention.
+@(private = "file")
+window_activate :: proc(app: ^App, token: string) {
+	if .MINIMIZED in sdl.GetWindowFlags(app.window) {
+		sdl.RestoreWindow(app.window)
+	}
+	if token != "" && wayland_activate(&app.wayland_drag, token) {
+		return
+	}
+	sdl.RaiseWindow(app.window)
 }

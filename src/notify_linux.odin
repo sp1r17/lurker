@@ -6,24 +6,114 @@ import "core:c"
 import "core:log"
 import "core:os"
 import "core:strings"
+import "core:sync"
 import "core:sys/posix"
+import "core:thread"
+import sdl "vendor:sdl3"
 
 // Notifications go to the desktop's notification server over the session D-Bus
 // (org.freedesktop.Notifications), spoken directly rather than through libdbus.
+// A thread keeps the connection open to hear which notifications are clicked.
 
-// How long to wait for the bus to answer each step.
+// How long to wait for the bus to answer while connecting.
 DBUS_TIMEOUT_MS :: 2000
+// Longer messages than this from the bus are taken for garbage.
+DBUS_MAX_MESSAGE :: 1 << 20
 
-show_notification :: proc(app: ^App, title, body: string) {
-	jobs_add(
-		&app.assets.jobs,
-		run_notify_job,
-		Notify_Job {
-			app_id = strings.clone(app_icon_name()),
-			title = strings.clone(title),
-			body = strings.clone(body),
-		},
-	)
+Notifications :: struct {
+	// Pushed when a click arrives, for notifications_take.
+	click_event: u32,
+	// The desktop file's name, for the icon and for grouping. Owned.
+	app_id:      string,
+	thread:      ^thread.Thread,
+	mutex:       sync.Mutex,
+	// Waiting for the thread to send, and clicks waiting for the main thread.
+	// Owned.
+	outgoing:    [dynamic]Notification,
+	clicks:      [dynamic]Notify_Click,
+	stop:        bool,
+	// A pipe whose write end ([1]) wakes the thread.
+	wake:        [2]posix.FD,
+}
+
+// A notification waiting to be sent, and the channel a click on it opens ("" for
+// the one about many). Owned.
+@(private = "file")
+Notification :: struct {
+	title: string,
+	body:  string,
+	login: string,
+}
+
+notifications_init :: proc(app: ^App) {
+	n := &app.notifications
+	n.click_event = sdl.RegisterEvents(1)
+	n.app_id = strings.clone(app_icon_name())
+	if posix.pipe(&n.wake) != .OK {
+		log.warn("notification: can't make a pipe; no notifications")
+		return
+	}
+	for fd in n.wake {
+		posix.fcntl(fd, .SETFD, posix.FD_CLOEXEC)
+	}
+	n.thread = thread.create_and_start_with_poly_data(n, notify_thread, context)
+}
+
+notifications_destroy :: proc(app: ^App) {
+	n := &app.notifications
+	if n.thread != nil {
+		{
+			sync.guard(&n.mutex)
+			n.stop = true
+		}
+		notify_wake(n)
+		thread.join(n.thread)
+		thread.destroy(n.thread)
+		posix.close(n.wake[0])
+		posix.close(n.wake[1])
+	}
+	for m in n.outgoing {
+		destroy_notification(m)
+	}
+	delete(n.outgoing)
+	for c in n.clicks {
+		destroy_notify_click(c)
+	}
+	delete(n.clicks)
+	delete(n.app_id)
+	n^ = {}
+}
+
+show_notification :: proc(app: ^App, title, body, login: string) {
+	n := &app.notifications
+	if n.thread == nil {
+		return
+	}
+	sync.lock(&n.mutex)
+	append(&n.outgoing, Notification{strings.clone(title), strings.clone(body), strings.clone(login)})
+	sync.unlock(&n.mutex)
+	notify_wake(n)
+}
+
+// Moves the clicks that arrived since the last call onto the end of `into`. The
+// caller owns them.
+notifications_take :: proc(n: ^Notifications, into: ^[dynamic]Notify_Click) {
+	sync.guard(&n.mutex)
+	append(into, ..n.clicks[:])
+	clear(&n.clicks)
+}
+
+@(private = "file")
+destroy_notification :: proc(m: Notification) {
+	delete(m.title)
+	delete(m.body)
+	delete(m.login)
+}
+
+@(private = "file")
+notify_wake :: proc(n: ^Notifications) {
+	b := [1]byte{1}
+	posix.write(n.wake[1], &b[0], 1)
 }
 
 // The desktop file's name: lurker, or in a Flatpak its ID. Allocated with the
@@ -35,32 +125,232 @@ app_icon_name :: proc() -> string {
 	return APP_ID
 }
 
-@(private = "file")
-run_notify_job :: proc(job: ^Job) {
-	p := &job.payload.(Notify_Job)
-	send_notification(p.app_id, p.title, p.body)
+// The notifier thread's connection, and what it knows of the notifications it
+// sent. Notification IDs are the server's, so they're dropped with the connection.
+Notify_Bus :: struct {
+	sock:      posix.FD,
+	connected: bool,
+	serial:    u32,
+	// What's arrived and isn't a whole message yet.
+	buf:       [dynamic]byte,
+	// By serial, Notify calls waiting for their ID; then by ID, the notifications
+	// shown. Each with the channel a click opens. Owned values.
+	pending:   map[u32]string,
+	shown:     map[u32]string,
+	// By notification ID, the token to raise the window with when it's clicked.
+	// Owned values.
+	tokens:    map[u32]string,
 }
 
-// Sends a notification and waits for the server to take it.
-send_notification :: proc(app_id, title, body: string) -> bool {
+@(private = "file")
+notify_thread :: proc(n: ^Notifications) {
+	bus: Notify_Bus
+	defer notify_bus_destroy(&bus)
+	for {
+		fds := [2]posix.pollfd{{fd = n.wake[0], events = {.IN}}, {fd = bus.sock if bus.connected else -1, events = {.IN}}}
+		if posix.poll(&fds[0], 2, -1) < 0 && posix.errno() != .EINTR {
+			log.warnf("notification: poll failed: %v", posix.errno())
+			return
+		}
+		if .IN in fds[0].revents {
+			drain: [64]byte
+			posix.read(n.wake[0], &drain[0], len(drain))
+		}
+		outgoing: [dynamic]Notification
+		{
+			sync.guard(&n.mutex)
+			if n.stop {
+				return
+			}
+			outgoing, n.outgoing = n.outgoing, {}
+		}
+		for m in outgoing {
+			notify_bus_send(&bus, n.app_id, m)
+			destroy_notification(m)
+		}
+		delete(outgoing)
+		if bus.connected && fds[1].revents & {.IN, .HUP, .ERR} != {} {
+			notify_bus_read(&bus, n)
+		}
+		free_all(context.temp_allocator)
+	}
+}
+
+// Sends a Notify call, connecting first if need be. A connection that's gone stale
+// gets one more try.
+@(private = "file")
+notify_bus_send :: proc(bus: ^Notify_Bus, app_id: string, m: Notification) {
+	for attempt in 0 ..< 2 {
+		if !bus.connected && !notify_bus_connect(bus) {
+			return
+		}
+		bus.serial += 1
+		// The body takes a little markup, so its own <, > and & are escaped.
+		msg := dbus_notify_message(bus.serial, app_id, m.title, notify_escape(m.body), "Watch" if m.login != "" else "Open")
+		if dbus_send(bus.sock, msg) {
+			bus.pending[bus.serial] = strings.clone(m.login)
+			return
+		}
+		notify_bus_close(bus)
+		if attempt == 1 {
+			log.warn("notification: can't send to the session bus")
+		}
+	}
+}
+
+// Connects, then asks for the notification server's signals.
+@(private = "file")
+notify_bus_connect :: proc(bus: ^Notify_Bus) -> bool {
 	sock, ok := dbus_connect()
 	if !ok {
 		return false
 	}
-	defer posix.close(sock)
-	// The body takes a little markup, so its own <, > and & are escaped.
-	msg := dbus_notify_message(2, app_id, title, notify_escape(body))
-	if !dbus_send(sock, msg) {
-		log.warn("notification: can't send to the session bus")
+	posix.fcntl(sock, .SETFD, posix.FD_CLOEXEC)
+	rule := "type='signal',sender='org.freedesktop.Notifications',interface='org.freedesktop.Notifications'"
+	body := Dbus_Writer{buf = make([dynamic]byte, context.temp_allocator)}
+	dbus_string(&body, rule)
+	add_match := dbus_method_call(2, "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "AddMatch", "s", body.buf[:])
+	if !dbus_send(sock, add_match) {
+		posix.close(sock)
 		return false
 	}
-	// Leaving before the reply could drop the call: the second reply is Notify's
-	// (the first is Hello's).
-	if !dbus_await_replies(sock, 2) {
-		log.warn("notification: no notification server took it")
-		return false
-	}
+	bus.sock, bus.connected, bus.serial = sock, true, 2
 	return true
+}
+
+// Reads what's arrived and handles each whole message. Clicks go to the main
+// thread.
+@(private = "file")
+notify_bus_read :: proc(bus: ^Notify_Bus, n: ^Notifications) {
+	chunk: [4096]byte
+	got := posix.recv(bus.sock, &chunk[0], len(chunk), {})
+	if got <= 0 {
+		// The bus went away (or restarted); the next notification reconnects.
+		notify_bus_close(bus)
+		return
+	}
+	append(&bus.buf, ..chunk[:got])
+	for len(bus.buf) >= 16 {
+		size := dbus_message_size(bus.buf[:])
+		if size > DBUS_MAX_MESSAGE {
+			log.warn("notification: garbage from the session bus")
+			notify_bus_close(bus)
+			return
+		}
+		if len(bus.buf) < size {
+			break
+		}
+		if click, ok := notify_bus_handle(bus, bus.buf[:size]).?; ok {
+			{
+				sync.guard(&n.mutex)
+				append(&n.clicks, click)
+			}
+			e: sdl.Event
+			e.type = sdl.EventType(n.click_event)
+			// Fails only when SDL's event queue is full; the click is taken with
+			// the next one.
+			_ = sdl.PushEvent(&e)
+		}
+		remove_range(&bus.buf, 0, size)
+	}
+}
+
+// Handles one message: a Notify call's reply, or a signal about a notification
+// we sent. Returns a click, owned by the caller.
+notify_bus_handle :: proc(bus: ^Notify_Bus, msg: []byte) -> Maybe(Notify_Click) {
+	m, ok := dbus_parse(msg)
+	if !ok {
+		return nil
+	}
+	switch m.type {
+	case DBUS_METHOD_RETURN, DBUS_ERROR:
+		login, sent := bus.pending[m.reply_serial]
+		if !sent {
+			// Hello's or AddMatch's.
+			return nil
+		}
+		delete_key(&bus.pending, m.reply_serial)
+		if m.type == DBUS_ERROR || m.signature != "u" {
+			log.warn("notification: no notification server took it")
+			delete(login)
+			return nil
+		}
+		id := dbus_read_u32(&m.body)
+		if old, had := bus.shown[id]; had {
+			delete(old)
+		}
+		bus.shown[id] = login
+	case DBUS_SIGNAL:
+		if m.interface != "org.freedesktop.Notifications" {
+			return nil
+		}
+		switch m.member {
+		case "ActivationToken":
+			// Sent just before ActionInvoked, when the server has one.
+			if m.signature != "us" {
+				return nil
+			}
+			id := dbus_read_u32(&m.body)
+			token := dbus_read_string(&m.body)
+			if _, mine := bus.shown[id]; mine && m.body.ok {
+				if old, had := bus.tokens[id]; had {
+					delete(old)
+				}
+				bus.tokens[id] = strings.clone(token)
+			}
+		case "ActionInvoked":
+			if m.signature != "us" {
+				return nil
+			}
+			id := dbus_read_u32(&m.body)
+			action := dbus_read_string(&m.body)
+			login, mine := bus.shown[id]
+			if !mine || !m.body.ok || action != "default" {
+				return nil
+			}
+			_, token := delete_key(&bus.tokens, id)
+			return Notify_Click{login = strings.clone(login), token = token}
+		case "NotificationClosed":
+			if m.signature != "uu" {
+				return nil
+			}
+			id := dbus_read_u32(&m.body)
+			_, login := delete_key(&bus.shown, id)
+			delete(login)
+			_, token := delete_key(&bus.tokens, id)
+			delete(token)
+		}
+	}
+	return nil
+}
+
+@(private = "file")
+notify_bus_close :: proc(bus: ^Notify_Bus) {
+	if bus.connected {
+		posix.close(bus.sock)
+	}
+	bus.connected = false
+	clear(&bus.buf)
+	for _, v in bus.pending {
+		delete(v)
+	}
+	for _, v in bus.shown {
+		delete(v)
+	}
+	for _, v in bus.tokens {
+		delete(v)
+	}
+	clear(&bus.pending)
+	clear(&bus.shown)
+	clear(&bus.tokens)
+}
+
+notify_bus_destroy :: proc(bus: ^Notify_Bus) {
+	notify_bus_close(bus)
+	delete(bus.buf)
+	delete(bus.pending)
+	delete(bus.shown)
+	delete(bus.tokens)
 }
 
 // Connects and authenticates to the session bus, then says Hello (serial 1), as
@@ -237,34 +527,6 @@ dbus_read_line :: proc(sock: posix.FD) -> (line: string, ok: bool) {
 	return strings.to_string(b), false
 }
 
-// Reads messages until `count` method returns or errors have arrived, skipping
-// signals such as NameAcquired. False if the last is an error.
-@(private = "file")
-dbus_await_replies :: proc(sock: posix.FD, count: int) -> bool {
-	buf := make([dynamic]byte, context.temp_allocator)
-	replies := 0
-	for replies < count {
-		// A whole message: its fixed header, its header fields padded to 8, its body.
-		for len(buf) < 16 || len(buf) < dbus_message_size(buf[:]) {
-			chunk: [4096]byte
-			n := dbus_recv(sock, chunk[:])
-			if n == 0 {
-				return false
-			}
-			append(&buf, ..chunk[:n])
-		}
-		size := dbus_message_size(buf[:])
-		if buf[1] == DBUS_METHOD_RETURN || buf[1] == DBUS_ERROR {
-			replies += 1
-			if replies == count && buf[1] == DBUS_ERROR {
-				return false
-			}
-		}
-		remove_range(&buf, 0, size)
-	}
-	return true
-}
-
 // A whole message's length, from its first 16 bytes.
 dbus_message_size :: proc(header: []byte) -> int {
 	order: endian.Byte_Order = .Little if header[0] == 'l' else .Big
@@ -276,6 +538,7 @@ dbus_message_size :: proc(header: []byte) -> int {
 DBUS_METHOD_CALL :: 1
 DBUS_METHOD_RETURN :: 2
 DBUS_ERROR :: 3
+DBUS_SIGNAL :: 4
 
 @(private = "file")
 dbus_align :: proc(n, to: int) -> int {
@@ -284,7 +547,6 @@ dbus_align :: proc(n, to: int) -> int {
 
 // Builds a message in the little-endian wire format. Offsets count from the
 // start of the header, or of the body, both of which start 8-aligned.
-@(private = "file")
 Dbus_Writer :: struct {
 	buf: [dynamic]byte,
 }
@@ -296,7 +558,6 @@ dbus_pad :: proc(w: ^Dbus_Writer, to: int) {
 	}
 }
 
-@(private = "file")
 dbus_u32 :: proc(w: ^Dbus_Writer, v: u32) {
 	dbus_pad(w, 4)
 	b: [4]byte
@@ -305,7 +566,6 @@ dbus_u32 :: proc(w: ^Dbus_Writer, v: u32) {
 }
 
 // A string or object path: its length, its bytes and a NUL.
-@(private = "file")
 dbus_string :: proc(w: ^Dbus_Writer, s: string) {
 	dbus_u32(w, u32(len(s)))
 	append(&w.buf, s)
@@ -350,7 +610,6 @@ dbus_header_field :: proc(w: ^Dbus_Writer, code: u8, type: string, value: string
 
 // A method call message, its body already marshalled with `signature`.
 // Allocated with the temp allocator.
-@(private = "file")
 dbus_method_call :: proc(serial: u32, destination, path, interface, member, signature: string, body: []byte) -> []byte {
 	w := Dbus_Writer{buf = make([dynamic]byte, context.temp_allocator)}
 	append(&w.buf, 'l', DBUS_METHOD_CALL, 0, 1)
@@ -371,8 +630,9 @@ dbus_method_call :: proc(serial: u32, destination, path, interface, member, sign
 }
 
 // org.freedesktop.Notifications.Notify, showing `title` and `body` (already
-// escaped) with the app's icon. Allocated with the temp allocator.
-dbus_notify_message :: proc(serial: u32, app_id, title, body: string) -> []byte {
+// escaped) with the app's icon. A click on it invokes its default action, named
+// `action`. Allocated with the temp allocator.
+dbus_notify_message :: proc(serial: u32, app_id, title, body, action: string) -> []byte {
 	w := Dbus_Writer{buf = make([dynamic]byte, context.temp_allocator)}
 	dbus_string(&w, APP_NAME) // app_name
 	dbus_u32(&w, 0) // replaces_id
@@ -380,6 +640,8 @@ dbus_notify_message :: proc(serial: u32, app_id, title, body: string) -> []byte 
 	dbus_string(&w, title) // summary
 	dbus_string(&w, body)
 	actions_at, actions_start := dbus_array_begin(&w, 4)
+	dbus_string(&w, "default")
+	dbus_string(&w, action)
 	dbus_array_end(&w, actions_at, actions_start)
 	hints_at, hints_start := dbus_array_begin(&w, 8)
 	// Which desktop file it's from, for the app's name and settings.
@@ -400,5 +662,111 @@ dbus_notify_message :: proc(serial: u32, app_id, title, body: string) -> []byte 
 	)
 }
 
-// Nothing to tidy up: each notification has its own connection.
-notifications_destroy :: proc(app: ^App) {}
+// A received message's header fields, and its body to read.
+Dbus_Message :: struct {
+	type:         u8,
+	reply_serial: u32,
+	interface:    string,
+	member:       string,
+	signature:    string,
+	body:         Dbus_Reader,
+}
+
+// Reads values from a whole message, in its byte order. Offsets count from the
+// message's start, like the writer's. `ok` goes false on running off the end.
+Dbus_Reader :: struct {
+	data:  []byte,
+	pos:   int,
+	order: endian.Byte_Order,
+	ok:    bool,
+}
+
+// Reads a whole message's header fields; its strings point into `msg`.
+dbus_parse :: proc(msg: []byte) -> (m: Dbus_Message, ok: bool) {
+	r := Dbus_Reader {
+		data  = msg,
+		pos   = 12,
+		order = .Little if msg[0] == 'l' else .Big,
+		ok    = true,
+	}
+	m.type = msg[1]
+	end := 16 + int(dbus_read_u32(&r))
+	for r.ok {
+		r.pos = dbus_align(r.pos, 8)
+		if r.pos >= end {
+			break
+		}
+		code := msg[r.pos]
+		r.pos += 1
+		switch dbus_read_signature(&r) {
+		case "s", "o":
+			value := dbus_read_string(&r)
+			switch code {
+			case 2:
+				m.interface = value
+			case 3:
+				m.member = value
+			}
+		case "u":
+			value := dbus_read_u32(&r)
+			if code == 5 {
+				m.reply_serial = value
+			}
+		case "g":
+			value := dbus_read_signature(&r)
+			if code == 8 {
+				m.signature = value
+			}
+		case:
+			// No header field has any other type.
+			return m, false
+		}
+	}
+	m.body = {
+		data  = msg,
+		pos   = dbus_align(end, 8),
+		order = r.order,
+		ok    = true,
+	}
+	return m, r.ok
+}
+
+dbus_read_u32 :: proc(r: ^Dbus_Reader) -> u32 {
+	r.pos = dbus_align(r.pos, 4)
+	if r.pos + 4 > len(r.data) {
+		r.ok = false
+		return 0
+	}
+	v, _ := endian.get_u32(r.data[r.pos:r.pos + 4], r.order)
+	r.pos += 4
+	return v
+}
+
+// A string or object path.
+dbus_read_string :: proc(r: ^Dbus_Reader) -> string {
+	n := int(dbus_read_u32(r))
+	return dbus_read_bytes(r, n)
+}
+
+@(private = "file")
+dbus_read_signature :: proc(r: ^Dbus_Reader) -> string {
+	if r.pos >= len(r.data) {
+		r.ok = false
+		return ""
+	}
+	n := int(r.data[r.pos])
+	r.pos += 1
+	return dbus_read_bytes(r, n)
+}
+
+// `n` bytes and the NUL after them.
+@(private = "file")
+dbus_read_bytes :: proc(r: ^Dbus_Reader, n: int) -> string {
+	if !r.ok || r.pos + n + 1 > len(r.data) {
+		r.ok = false
+		return ""
+	}
+	s := string(r.data[r.pos:r.pos + n])
+	r.pos += n + 1
+	return s
+}

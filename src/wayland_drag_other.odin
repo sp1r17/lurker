@@ -16,3 +16,7 @@ wayland_drag_destroy :: proc(d: ^Wayland_Drag) {}
 wayland_drag_update :: proc(d: ^Wayland_Drag) {}
 
 wayland_drag_start :: proc(d: ^Wayland_Drag) {}
+
+wayland_activate :: proc(d: ^Wayland_Drag, token: string) -> bool {
+	return false
+}

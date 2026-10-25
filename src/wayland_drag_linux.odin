@@ -2,6 +2,7 @@ package app
 
 import "core:c"
 import "core:log"
+import "core:strings"
 import sdl "vendor:sdl3"
 
 // Dragging the borderless window from the video, as mpv does on Wayland: the app
@@ -13,6 +14,9 @@ import sdl "vendor:sdl3"
 // the press's serial, which SDL doesn't expose, so this binds its own wl_seat on
 // SDL's connection, on its own event queue, and keeps its own wl_pointer's latest
 // press serial. Any wl_seat object of the client is accepted for the request.
+//
+// The same way, it binds xdg_activation_v1 to raise the window with a token from
+// elsewhere (a clicked notification), since SDL only uses one at startup.
 
 foreign import wl "system:wayland-client"
 
@@ -29,12 +33,19 @@ wl_interface :: struct {
 	event_count:  c.int,
 	events:       rawptr,
 }
+@(private = "file")
+wl_message :: struct {
+	name:      cstring,
+	signature: cstring,
+	types:     [^]^wl_interface,
+}
 
 @(private = "file", default_calling_convention = "c")
 foreign wl {
 	wl_registry_interface: wl_interface
 	wl_seat_interface: wl_interface
 	wl_pointer_interface: wl_interface
+	wl_surface_interface: wl_interface
 
 	wl_display_create_queue :: proc(display: ^wl_proxy) -> ^wl_event_queue ---
 	wl_event_queue_destroy :: proc(queue: ^wl_event_queue) ---
@@ -60,21 +71,48 @@ WL_SEAT_GET_POINTER :: 0
 @(private = "file")
 XDG_TOPLEVEL_MOVE :: 5
 @(private = "file")
+XDG_ACTIVATION_V1_ACTIVATE :: 2
+@(private = "file")
 WL_SEAT_CAPABILITY_POINTER :: 1
 @(private = "file")
 BTN_LEFT :: 0x110
 @(private = "file")
+WL_MARSHAL_FLAG_DESTROY :: 1
+@(private = "file")
 WL_POINTER_BUTTON_STATE_PRESSED :: 1
+
+// xdg_activation_v1 isn't in libwayland-client, so its interface is spelled out
+// here, from xdg-activation-v1.xml. Only `activate` is used; it creates nothing.
+@(private = "file")
+xdg_activation_no_types := [2]^wl_interface{}
+@(private = "file")
+xdg_activation_activate_types := [2]^wl_interface{nil, &wl_surface_interface}
+@(private = "file")
+xdg_activation_methods := [3]wl_message {
+	{"destroy", "", raw_data(xdg_activation_no_types[:])},
+	{"get_activation_token", "n", raw_data(xdg_activation_no_types[:])},
+	{"activate", "so", raw_data(xdg_activation_activate_types[:])},
+}
+@(private = "file")
+xdg_activation_v1_interface := wl_interface {
+	name         = "xdg_activation_v1",
+	version      = 1,
+	method_count = 3,
+	methods      = raw_data(xdg_activation_methods[:]),
+}
 
 Wayland_Drag :: struct {
 	display:    ^wl_proxy,
 	toplevel:   ^wl_proxy,
+	surface:    ^wl_proxy,
 	queue:      ^wl_event_queue,
 	registry:   ^wl_proxy,
 	seat:       ^wl_proxy,
 	pointer:    ^wl_proxy,
 	// The serial of the latest left-button press, for starting a move.
 	press:      u32,
+	// For raising the window; nil if the compositor hasn't got it.
+	activation: ^wl_proxy,
 }
 
 @(private = "file")
@@ -103,11 +141,12 @@ Pointer_Listener :: struct {
 registry_listener := Registry_Listener {
 	global = proc "c" (data: rawptr, registry: ^wl_proxy, name: u32, interface: cstring, version: u32) {
 		d := (^Wayland_Drag)(data)
-		if d.seat != nil || interface != wl_seat_interface.name {
-			return
+		if d.seat == nil && interface == wl_seat_interface.name {
+			d.seat = wl_proxy_marshal_flags(registry, WL_REGISTRY_BIND, &wl_seat_interface, 1, 0, name, wl_seat_interface.name, u32(1), rawptr(nil))
+			wl_proxy_add_listener(d.seat, &seat_listener, d)
+		} else if d.activation == nil && interface == xdg_activation_v1_interface.name {
+			d.activation = wl_proxy_marshal_flags(registry, WL_REGISTRY_BIND, &xdg_activation_v1_interface, 1, 0, name, xdg_activation_v1_interface.name, u32(1), rawptr(nil))
 		}
-		d.seat = wl_proxy_marshal_flags(registry, WL_REGISTRY_BIND, &wl_seat_interface, 1, 0, name, wl_seat_interface.name, u32(1), rawptr(nil))
-		wl_proxy_add_listener(d.seat, &seat_listener, d)
 	},
 	global_remove = proc "c" (data: rawptr, registry: ^wl_proxy, name: u32) {},
 }
@@ -144,7 +183,8 @@ wayland_drag_init :: proc(d: ^Wayland_Drag, window: ^sdl.Window) -> bool {
 	props := sdl.GetWindowProperties(window)
 	d.display = (^wl_proxy)(sdl.GetPointerProperty(props, sdl.PROP_WINDOW_WAYLAND_DISPLAY_POINTER, nil))
 	d.toplevel = (^wl_proxy)(sdl.GetPointerProperty(props, sdl.PROP_WINDOW_WAYLAND_XDG_TOPLEVEL_POINTER, nil))
-	if d.display == nil || d.toplevel == nil {
+	d.surface = (^wl_proxy)(sdl.GetPointerProperty(props, sdl.PROP_WINDOW_WAYLAND_SURFACE_POINTER, nil))
+	if d.display == nil || d.toplevel == nil || d.surface == nil {
 		return false
 	}
 	// Our own queue: SDL reads the connection and our events wait here until we
@@ -167,6 +207,10 @@ wayland_drag_init :: proc(d: ^Wayland_Drag, window: ^sdl.Window) -> bool {
 }
 
 wayland_drag_destroy :: proc(d: ^Wayland_Drag) {
+	if d.activation != nil {
+		// Its destroy request.
+		wl_proxy_marshal_flags(d.activation, 0, nil, wl_proxy_get_version(d.activation), WL_MARSHAL_FLAG_DESTROY)
+	}
 	if d.pointer != nil {
 		wl_proxy_destroy(d.pointer)
 	}
@@ -199,4 +243,15 @@ wayland_drag_start :: proc(d: ^Wayland_Drag) {
 	}
 	wl_proxy_marshal_flags(d.toplevel, XDG_TOPLEVEL_MOVE, nil, wl_proxy_get_version(d.toplevel), 0, d.seat, d.press)
 	wl_display_flush(d.display)
+}
+
+// Asks the compositor to focus the window with an activation token. False if it
+// can't be asked.
+wayland_activate :: proc(d: ^Wayland_Drag, token: string) -> bool {
+	if d.activation == nil {
+		return false
+	}
+	wl_proxy_marshal_flags(d.activation, XDG_ACTIVATION_V1_ACTIVATE, nil, wl_proxy_get_version(d.activation), 0, strings.clone_to_cstring(token, context.temp_allocator), d.surface)
+	wl_display_flush(d.display)
+	return true
 }
