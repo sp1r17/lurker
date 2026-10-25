@@ -391,9 +391,7 @@ pane_click :: proc(app: ^App, p: ^Chat_Pane, x, y: f32) {
 	}
 	box_unfocus(app)
 	if url, found := chat_view_link_at(&p.view, x, y); found {
-		if !sdl.OpenURL(strings.clone_to_cstring(url, context.temp_allocator)) {
-			log.warnf("can't open %s: %s", url, sdl.GetError())
-		}
+		open_url(url)
 		return
 	}
 	if login, found := chat_view_name_at(&p.view, x, y); found {
@@ -719,6 +717,13 @@ draw_reply_bar :: proc(app: ^App, p: ^Chat_Pane) {
 	label := fmt.tprintf("Replying to @%s: %s", p.reply.name, p.reply.body)
 	tx := bar.x + pad
 	draw_text(r, .Regular, size, tx, bar.y + (bar.h - lh) / 2, fit_text(r, .Regular, size, label, p.reply_close.x - tx - pad / 2), CHAT_SYSTEM_TEXT)
+}
+
+// Opens a link from chat in the browser.
+open_url :: proc(url: string) {
+	if !sdl.OpenURL(strings.clone_to_cstring(url, context.temp_allocator)) {
+		log.warnf("can't open %s: %s", url, sdl.GetError())
+	}
 }
 
 // Shows a message from the app in the pane's chat.

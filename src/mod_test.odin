@@ -23,3 +23,12 @@ helix_errors_are_readable :: proc(t: ^testing.T) {
 	testing.expect_value(t, helix_error_message(transmute([]byte)string(body), 400), "The user specified in the user_id field is already banned.")
 	testing.expect_value(t, helix_error_message(nil, 500), "Twitch said 500")
 }
+
+@(test)
+times_ago_are_short :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	testing.expect_value(t, time_ago(30_000), "now")
+	testing.expect_value(t, time_ago(5 * 60_000), "5m")
+	testing.expect_value(t, time_ago(3 * 3_600_000), "3h")
+	testing.expect_value(t, time_ago(50 * 3_600_000), "2d")
+}

@@ -457,7 +457,8 @@ draw_chat_view :: proc(a: ^Assets, v: ^Chat_View, rect: Rect, scale: f32, filter
 	clip_end(r)
 }
 
-@(private = "file")
+// Draws a laid-out message with its top left at (x, y), noting in `v` where its
+// name, badges, emotes and links are.
 draw_message :: proc(a: ^Assets, v: ^Chat_View, m: ^Chat_Message, layout: ^Message_Layout, x, y: f32) {
 	size := CHAT_FONT_SIZE * layout.scale
 	alpha: u8 = CHAT_DELETED_ALPHA if m.deleted else CHAT_HISTORICAL_ALPHA if m.historical else 255
@@ -541,7 +542,11 @@ Message_Layout :: struct {
 // "Badges Name: text" for chat, "Badges Name text" in the name's colour for /me,
 // grey text for system messages.
 message_layout :: proc(a: ^Assets, channel: ^Emotes, m: ^Chat_Message, scale, width: f32) -> ^Message_Layout {
-	l := &m.layout
+	return message_layout_into(a, channel, m, &m.layout, scale, width)
+}
+
+// message_layout, cached in `l` rather than the message's own layout.
+message_layout_into :: proc(a: ^Assets, channel: ^Emotes, m: ^Chat_Message, l: ^Message_Layout, scale, width: f32) -> ^Message_Layout {
 	if l.height > 0 && l.width == width && l.scale == scale && l.text_scale == a.renderer.text_scale && l.images_version == a.images.version {
 		return l
 	}

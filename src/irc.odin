@@ -5,6 +5,7 @@ import "core:hash"
 import "core:slice"
 import "core:strconv"
 import "core:strings"
+import "core:time"
 import "core:unicode/utf8"
 
 // One IRC line, with Twitch's IRCv3 tags. All strings point into the line.
@@ -218,8 +219,11 @@ Chat_Message :: struct {
 	reply:       string,
 	reply_login: string,
 	fragments: [dynamic]Fragment,
-	// Cached by the chat view.
-	layout:    Message_Layout,
+	// When it was sent, in Unix milliseconds: Twitch's time, or when it arrived.
+	sent_ms:   i64,
+	// Cached by the chat view, and by the user card, which is narrower.
+	layout:      Message_Layout,
+	card_layout: Message_Layout,
 }
 
 destroy_chat_message :: proc(m: Chat_Message) {
@@ -238,6 +242,7 @@ destroy_chat_message :: proc(m: Chat_Message) {
 	destroy_fragments(m.fragments[:])
 	delete(m.fragments)
 	delete(m.layout.items)
+	delete(m.card_layout.items)
 }
 
 destroy_fragments :: proc(fragments: []Fragment) {
@@ -287,8 +292,14 @@ privmsg_to_chat :: proc(msg: Irc_Message) -> Chat_Message {
 
 	id, _ := irc_tag(msg, "id")
 	user_id, _ := irc_tag(msg, "user-id")
+	sent_tag, _ := irc_tag(msg, "tmi-sent-ts")
+	sent_ms, has_sent := strconv.parse_i64(sent_tag, 10)
+	if !has_sent {
+		sent_ms = time.to_unix_nanoseconds(time.now()) / 1e6
+	}
 	m := Chat_Message {
 		kind    = kind,
+		sent_ms = sent_ms,
 		name    = strings.clone(name),
 		color   = readable_on_dark(color),
 		id      = strings.clone(id),

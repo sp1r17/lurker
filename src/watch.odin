@@ -739,13 +739,7 @@ pane_at :: proc(app: ^App, x, y: f32) -> (p: ^Chat_Pane, index: int) {
 watch_click :: proc(app: ^App, x, y: f32) {
 	w := &app.watch
 	if w.card.open && in_rect(w.card.rect, x, y) {
-		if in_rect(w.card.videos_link, x, y) {
-			watch_open_videos(app, w.card.login, w.card.info.display_name if w.card.state == .Loaded else "")
-		} else if in_rect(w.card.ignore_link, x, y) && valid_login(w.card.login) {
-			if !chat_unignore(app, w.card.login) {
-				chat_ignore(app, w.card.login)
-			}
-		}
+		user_card_click(app, x, y)
 		return
 	}
 	if controls_click(app, x, y) {
@@ -792,6 +786,9 @@ watch_open_videos :: proc(app: ^App, login, name: string) {
 
 // The wheel scrolls a chat, or over the video, changes the volume as in mpv.
 watch_scroll :: proc(app: ^App, x, y, wheel_y: f32) {
+	if user_card_scroll(app, x, y, wheel_y) {
+		return
+	}
 	if p, _ := pane_at(app, x, y); p != nil {
 		if in_rect(p.messages_rect, x, y) {
 			chat_view_scroll(&p.view, wheel_y, app.scale)
@@ -896,7 +893,13 @@ draw_watch :: proc(app: ^App) {
 	hovered := in_rect(w.hide_button, app.mouse.x, app.mouse.y)
 	draw_centered(r, .Bold, 18 * scale, w.hide_button, "»", BROWSE_TEXT if hovered else BROWSE_DIM_TEXT)
 	draw_user_card(app)
-	if !w.card.open {
+	if w.card.open {
+		screen := Rect{0, 0, w.video_rect.w, w.video_rect.h}
+		for p in w.panes {
+			screen.w = max(screen.w, p.rect.x + p.rect.w)
+		}
+		draw_chat_tooltip(&app.assets, &w.card.hits, w.card.list_rect, screen, app.mouse.x, app.mouse.y, scale)
+	} else {
 		// Over everything, so it can reach past its own split.
 		screen := Rect{0, 0, w.video_rect.w, w.video_rect.h}
 		for p in w.panes {
