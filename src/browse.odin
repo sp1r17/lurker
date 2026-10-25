@@ -356,7 +356,8 @@ stream_list_refresh :: proc(app: ^App, view: Browse_View) {
 			client_id = strings.clone(app.client_id),
 			auth = clone_auth(app.auth),
 			view = view,
-			game_id = strings.clone(b.category_id),
+			// Only a category's list is filtered by it: Top is every category's.
+			game_id = strings.clone(b.category_id) if view == .Category else "",
 		},
 	)
 }
