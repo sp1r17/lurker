@@ -93,6 +93,10 @@ modules:
       - type: archive
         url: https://github.com/mpv-player/mpv/archive/refs/tags/v0.41.0.tar.gz
         sha256: ee21092a5ee427353392360929dc64645c54479aefdb5babc5cfbb5fad626209
+      # Upstream f74adc424, not yet released: 0.41.0 leaks a GL fence for every
+      # frame drawn through the render API (about 1 GB an hour on NVIDIA).
+      - type: patch
+        path: mpv-fence-leak.patch
 
   - python3-streamlink.json
 
