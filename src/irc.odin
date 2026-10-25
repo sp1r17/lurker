@@ -5,6 +5,7 @@ import "core:hash"
 import "core:slice"
 import "core:strconv"
 import "core:strings"
+import "core:time"
 import "core:unicode/utf8"
 
 // One IRC line, with Twitch's IRCv3 tags. All strings point into the line.
@@ -143,6 +144,18 @@ Chat_Message_Kind :: enum {
 	System,
 }
 
+// Messages Twitch marks out, drawn on a background of their own with a line saying
+// why above them.
+Message_Accent :: enum {
+	None,
+	// Someone's first message in the channel.
+	First,
+	// Sent with bits.
+	Cheer,
+	// A paid, pinned message (Hype Chat).
+	Paid,
+}
+
 Fragment_Kind :: enum {
 	Text,
 	Emote,
@@ -190,6 +203,11 @@ Chat_Message :: struct {
 	deleted:   bool,
 	// Mentions the signed-in user.
 	mention:   bool,
+	// Said before the chat joined (chat_history.odin): drawn dimmed.
+	historical: bool,
+	// Why it's marked out ("First message"), shown above it, or "".
+	accent:    Message_Accent,
+	label:     string,
 	// For moderation messages: what to clear when this arrives, and whose
 	// (a message ID or a login).
 	clear:     Clear_Kind,
@@ -200,9 +218,16 @@ Chat_Message :: struct {
 	// message it is.
 	reply:       string,
 	reply_login: string,
+	// For a reply: the message it replies to, and the one that started its thread
+	// (Twitch's IDs). Empty otherwise.
+	reply_parent: string,
+	thread:       string,
 	fragments: [dynamic]Fragment,
-	// Cached by the chat view.
-	layout:    Message_Layout,
+	// When it was sent, in Unix milliseconds: Twitch's time, or when it arrived.
+	sent_ms:   i64,
+	// Cached by the chat view, and by the user card, which is narrower.
+	layout:      Message_Layout,
+	card_layout: Message_Layout,
 }
 
 destroy_chat_message :: proc(m: Chat_Message) {
@@ -213,6 +238,9 @@ destroy_chat_message :: proc(m: Chat_Message) {
 	delete(m.clear_target)
 	delete(m.reply)
 	delete(m.reply_login)
+	delete(m.reply_parent)
+	delete(m.thread)
+	delete(m.label)
 	for b in m.badges {
 		delete(b)
 	}
@@ -220,6 +248,7 @@ destroy_chat_message :: proc(m: Chat_Message) {
 	destroy_fragments(m.fragments[:])
 	delete(m.fragments)
 	delete(m.layout.items)
+	delete(m.card_layout.items)
 }
 
 destroy_fragments :: proc(fragments: []Fragment) {
@@ -269,8 +298,14 @@ privmsg_to_chat :: proc(msg: Irc_Message) -> Chat_Message {
 
 	id, _ := irc_tag(msg, "id")
 	user_id, _ := irc_tag(msg, "user-id")
+	sent_tag, _ := irc_tag(msg, "tmi-sent-ts")
+	sent_ms, has_sent := strconv.parse_i64(sent_tag, 10)
+	if !has_sent {
+		sent_ms = time.to_unix_nanoseconds(time.now()) / 1e6
+	}
 	m := Chat_Message {
 		kind    = kind,
+		sent_ms = sent_ms,
 		name    = strings.clone(name),
 		color   = readable_on_dark(color),
 		id      = strings.clone(id),
@@ -293,9 +328,44 @@ privmsg_to_chat :: proc(msg: Irc_Message) -> Chat_Message {
 		}
 		m.reply = fmt.aprintf("Replying to @%s: %s", parent, body)
 		m.reply_login = strings.clone(parent_login)
+		parent_id, _ := irc_tag(msg, "reply-parent-msg-id")
+		thread, has_thread := irc_tag(msg, "reply-thread-parent-msg-id")
+		m.reply_parent = strings.clone(parent_id)
+		m.thread = strings.clone(thread if has_thread else parent_id)
 		strip_reply_mention(&m, parent, parent_login)
 	}
+	if amount, paid := irc_tag(msg, "pinned-chat-paid-amount"); paid {
+		currency, _ := irc_tag(msg, "pinned-chat-paid-currency")
+		exponent, _ := irc_tag(msg, "pinned-chat-paid-exponent")
+		m.accent = .Paid
+		m.label = fmt.aprintf("Hype Chat · %s %s", format_amount(amount, exponent), currency)
+	} else if bits, cheer := irc_tag(msg, "bits"); cheer {
+		m.accent = .Cheer
+		m.label = fmt.aprintf("Cheered %s bits", bits)
+	} else if first, _ := irc_tag(msg, "first-msg"); first == "1" {
+		m.accent = .First
+		m.label = strings.clone("First message")
+	}
 	return m
+}
+
+// "5.00" from an amount in the currency's smallest unit ("500") and how many
+// decimal places it has ("2"). Allocated with the temp allocator.
+format_amount :: proc(amount, exponent: string) -> string {
+	n, n_ok := strconv.parse_int(amount, 10)
+	places, places_ok := strconv.parse_int(exponent, 10)
+	if !n_ok || !places_ok || places <= 0 || places > 6 {
+		return amount
+	}
+	unit := 1
+	for _ in 0 ..< places {
+		unit *= 10
+	}
+	cents := fmt.tprintf("%d", n % unit)
+	for len(cents) < places {
+		cents = strings.concatenate({"0", cents}, context.temp_allocator)
+	}
+	return fmt.tprintf("%d.%s", n / unit, cents)
 }
 
 // Twitch starts a reply's text with "@name " for clients that don't show
@@ -468,10 +538,14 @@ apply_third_party_emotes :: proc(m: ^Chat_Message, channel, global: ^Emotes, own
 	old := m.fragments
 	m.fragments = make([dynamic]Fragment)
 	pending := strings.builder_make(context.temp_allocator)
-	flush :: proc(pending: ^strings.Builder, out: ^[dynamic]Fragment) {
+	// Whether the next fragment joins the one before: an emoji's neighbour keeps that
+	// when this runs again, after more emotes have loaded (chat_view_refresh_emotes).
+	glue := false
+	flush :: proc(pending: ^strings.Builder, out: ^[dynamic]Fragment, glue: ^bool) {
 		if strings.builder_len(pending^) > 0 {
-			append(out, Fragment{kind = .Text, text = strings.clone(strings.to_string(pending^))})
+			append(out, Fragment{kind = .Text, text = strings.clone(strings.to_string(pending^)), attached = glue^})
 			strings.builder_reset(pending)
+			glue^ = false
 		}
 	}
 	for f in old {
@@ -479,6 +553,7 @@ apply_third_party_emotes :: proc(m: ^Chat_Message, channel, global: ^Emotes, own
 			append(&m.fragments, f)
 			continue
 		}
+		glue = f.attached && len(f.text) > 0 && f.text[0] != ' '
 		rest := f.text
 		for word in strings.fields_iterator(&rest) {
 			e: User_Emote
@@ -487,13 +562,14 @@ apply_third_party_emotes :: proc(m: ^Chat_Message, channel, global: ^Emotes, own
 				e, is_own = own[word]
 			}
 			if is_own {
-				flush(&pending, &m.fragments)
+				flush(&pending, &m.fragments, &glue)
 				append(
 					&m.fragments,
 					Fragment{kind = .Emote, text = strings.clone(word), url_1x = strings.clone(e.emote.url_1x), url_2x = strings.clone(e.emote.url_2x)},
 				)
+				glue = false
 			} else if emote, source, found := emote_lookup(channel, global, word); found {
-				flush(&pending, &m.fragments)
+				flush(&pending, &m.fragments, &glue)
 				append(
 					&m.fragments,
 					Fragment {
@@ -504,8 +580,10 @@ apply_third_party_emotes :: proc(m: ^Chat_Message, channel, global: ^Emotes, own
 						zero_width = emote.zero_width,
 						third_party = true,
 						source = source,
+						attached = glue,
 					},
 				)
+				glue = false
 			} else {
 				if strings.builder_len(pending) > 0 {
 					strings.write_byte(&pending, ' ')
@@ -513,7 +591,7 @@ apply_third_party_emotes :: proc(m: ^Chat_Message, channel, global: ^Emotes, own
 				strings.write_string(&pending, word)
 			}
 		}
-		flush(&pending, &m.fragments)
+		flush(&pending, &m.fragments, &glue)
 		delete(f.text)
 	}
 	delete(old)

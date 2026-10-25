@@ -24,7 +24,13 @@ pre-roll or mid-roll ads.
   search channels and categories
 - Chat with 7TV, BTTV and FFZ emotes, badges, replies and an emote picker; open
   other channels' chats as splits beside the video
-- Mentions are highlighted, with a count of unread ones on each chat
+- Recent chat history on joining, clickable links, reply threads (click a reply's
+  "Replying to" line), and the chat's modes (slow, subscribers only...) above the
+  chat box
+- Mentions are highlighted, with a count of unread ones on each chat; add your own
+  highlight phrases (`/highlight`) and hide people's messages (`/ignore`)
+- User cards with everything someone said in the chat; moderators can time out,
+  ban and delete from them, or with `/timeout`, `/ban` and `/clear`
 - Hover a stream card for its full title, or an emote or badge for its name
 - Each channel's past broadcasts, highlights, uploads and clips, with chat replay,
   chapters, seek-bar previews, playback speed, and resuming where you left off

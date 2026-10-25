@@ -39,6 +39,9 @@ Chat :: struct {
 	// The tags of the last USERSTATE (our name, colour and badges in this channel),
 	// for showing our own messages. Only the chat thread uses it.
 	user_tags:  string,
+	// The chat's settings, and what we are in it. Guarded by mutex.
+	room:       Room_State,
+	self:       Chat_Self,
 	thread:     ^thread.Thread,
 }
 
@@ -61,9 +64,10 @@ Outgoing :: struct {
 	reply_echo: string,
 }
 
-// What a message replies to: another message's ID, and its sender and text.
+// What a message replies to: another message's ID, its sender and text, and the
+// thread it's in (the ID of the message that started it).
 Chat_Reply :: struct {
-	id, login, name, body: string,
+	id, login, name, body, thread: string,
 }
 
 // Queues a message to send, as a reply to `reply` if its ID isn't "". Line breaks
@@ -79,10 +83,12 @@ chat_send :: proc(chat: ^Chat, text: string, reply := Chat_Reply{}) {
 	if reply.id != "" && strings.trim_left(reply.id, "0123456789abcdef-") == "" {
 		out.reply_tag = fmt.aprintf("@reply-parent-msg-id=%s ", reply.id)
 		out.reply_echo = fmt.aprintf(
-			"reply-parent-display-name=%s;reply-parent-user-login=%s;reply-parent-msg-body=%s",
+			"reply-parent-display-name=%s;reply-parent-user-login=%s;reply-parent-msg-body=%s;reply-parent-msg-id=%s;reply-thread-parent-msg-id=%s",
 			escape_tag(reply.name),
 			escape_tag(reply.login),
 			escape_tag(reply.body),
+			escape_tag(reply.id),
+			escape_tag(reply.thread if reply.thread != "" else reply.id),
 		)
 	}
 	sync.guard(&chat.mutex)
@@ -119,6 +125,12 @@ chat_stop :: proc(chat: ^Chat) {
 chat_room_id :: proc(chat: ^Chat) -> string {
 	sync.guard(&chat.mutex)
 	return strings.clone(chat.room_id, context.temp_allocator)
+}
+
+// The chat's settings, and what the signed-in user is in it.
+chat_room :: proc(chat: ^Chat) -> (room: Room_State, self: Chat_Self) {
+	sync.guard(&chat.mutex)
+	return chat.room, chat.self
 }
 
 // Moves the messages that arrived since the last call onto the end of `into`.
@@ -307,32 +319,57 @@ handle_payload :: proc(chat: ^Chat, h: ^curl.CURL, payload: string) -> bool {
 				if chat.room_id == "" {
 					chat.room_id = strings.clone(id)
 				}
+				apply_roomstate(&chat.room, msg)
 			}
 			if _, has_slow := irc_tag(msg, "slow"); has_slow {
 				chat_post(chat, system_message(fmt.tprintf("Joined #%s", chat.channel)))
 			}
-		case "PRIVMSG":
-			chat_post(chat, privmsg_to_chat(msg))
 		case "USERSTATE":
 			delete(chat.user_tags)
 			chat.user_tags = strings.clone(msg.tags)
-		case "USERNOTICE":
-			// Subs, gifts, raids: Twitch's own wording, then the user's message if any.
-			if text, has_text := irc_tag(msg, "system-msg"); has_text {
-				chat_post(chat, system_message(text))
-			}
-			if len(msg.params) > 1 {
-				chat_post(chat, privmsg_to_chat(msg))
-			}
-		case "NOTICE":
-			chat_post(chat, system_message(irc_trailing(msg)))
-		case "CLEARCHAT", "CLEARMSG":
-			if m, is_mod := moderation_message(msg); is_mod {
+			sync.guard(&chat.mutex)
+			chat.self = chat_self_from_tags(msg)
+		case "PRIVMSG", "USERNOTICE", "NOTICE", "CLEARCHAT", "CLEARMSG":
+			messages := make([dynamic]Chat_Message, context.temp_allocator)
+			irc_chat_messages(msg, &messages)
+			for m in messages {
 				chat_post(chat, m)
 			}
 		}
 	}
 	return true
+}
+
+// The chat messages an IRC line makes: someone's message, Twitch's notices, or a
+// moderation action. For `history` (chat_history.odin), they're marked historical,
+// and NOTICEs, which were about someone else's connection, are left out.
+irc_chat_messages :: proc(msg: Irc_Message, out: ^[dynamic]Chat_Message, history := false) {
+	start := len(out)
+	switch msg.command {
+	case "PRIVMSG":
+		append(out, privmsg_to_chat(msg))
+	case "USERNOTICE":
+		// Subs, gifts, raids: Twitch's own wording, then the user's message if any.
+		if text, has_text := irc_tag(msg, "system-msg"); has_text {
+			append(out, system_message(text))
+		}
+		if len(msg.params) > 1 {
+			append(out, privmsg_to_chat(msg))
+		}
+	case "NOTICE":
+		if !history {
+			append(out, system_message(irc_trailing(msg)))
+		}
+	case "CLEARCHAT", "CLEARMSG":
+		if m, is_mod := moderation_message(msg); is_mod {
+			append(out, m)
+		}
+	}
+	if history {
+		for &m in out[start:] {
+			m.historical = true
+		}
+	}
 }
 
 // Sends the queued messages, showing each in chat: Twitch doesn't echo our own

@@ -1,5 +1,6 @@
 package app
 
+import "core:slice"
 import "core:strings"
 import "core:unicode/utf8"
 
@@ -30,8 +31,18 @@ CHAT_SYSTEM_TEXT :: Color{0x9a, 0x9a, 0xa3, 255}
 CHAT_MORE_BAR :: Color{0x2a, 0x2a, 0x30, 235}
 // Chatterino's colour for messages that mention you.
 CHAT_MENTION_BACKGROUND :: Color{0x7f, 0x3f, 0x49, 110}
-// How opaque messages removed by a moderator are drawn.
+CHAT_LINK :: Color{0x8c, 0xb4, 0xff, 255}
+// Backgrounds for messages Twitch marks out (Message_Accent).
+@(rodata)
+CHAT_ACCENT_BACKGROUNDS := [Message_Accent]Color {
+	.None  = {},
+	.First = {0x2e, 0x9d, 0x5f, 60},
+	.Cheer = {0x91, 0x47, 0xff, 60},
+	.Paid  = {0xd8, 0x8a, 0x0e, 70},
+}
+// How opaque messages removed by a moderator, and ones from before joining, are drawn.
 CHAT_DELETED_ALPHA :: 90
+CHAT_HISTORICAL_ALPHA :: 170
 
 // What the chat view draws with.
 Assets :: struct {
@@ -48,12 +59,32 @@ Assets :: struct {
 	next_frame_ms: int,
 }
 
+// The user's own chat rules, kept in layout.json: phrases that highlight a message,
+// and people whose messages are hidden. Lowercase and owned.
+Chat_Rules :: struct {
+	highlights: [dynamic]string,
+	ignored:    [dynamic]string,
+}
+
+chat_rules_destroy :: proc(r: ^Chat_Rules) {
+	for s in r.highlights {
+		delete(s)
+	}
+	delete(r.highlights)
+	for s in r.ignored {
+		delete(s)
+	}
+	delete(r.ignored)
+}
+
 // The scrolling list of chat messages. `scroll` is how far the view is above the
 // newest message, in pixels; 0 follows new messages as they arrive.
 Chat_View :: struct {
 	messages:   [dynamic]Chat_Message,
 	// The channel's own emotes and badges (owned by the pane), or nil.
 	emotes:     ^Emotes,
+	// The user's highlights and ignores (owned by the app), or nil.
+	rules:      ^Chat_Rules,
 	scroll:     f32,
 	// Set while drawing: the furthest the view can scroll, where the "more
 	// messages below" bar is (zero size when hidden), and where names are.
@@ -64,6 +95,8 @@ Chat_View :: struct {
 	// (an index into `messages`), for replying to it.
 	image_hits:   [dynamic]Image_Hit,
 	message_hits: [dynamic]Message_Hit,
+	link_hits:    [dynamic]Link_Hit,
+	reply_hits:   [dynamic]Rect,
 	// How many messages matched the filter.
 	matches:    int,
 }
@@ -84,6 +117,12 @@ Message_Hit :: struct {
 	index: int,
 }
 
+Link_Hit :: struct {
+	rect: Rect,
+	// The link as written (see chat_link), valid until the next draw.
+	link: string,
+}
+
 chat_view_destroy :: proc(v: ^Chat_View) {
 	for m in v.messages {
 		destroy_chat_message(m)
@@ -92,14 +131,21 @@ chat_view_destroy :: proc(v: ^Chat_View) {
 	delete(v.name_hits)
 	delete(v.image_hits)
 	delete(v.message_hits)
+	delete(v.link_hits)
+	delete(v.reply_hits)
 }
 
 // Adds messages that have just arrived, taking ownership. Moderation messages fade
-// what they remove; messages mentioning `self_login` are highlighted. When the view
+// what they remove; messages mentioning `self_login`, or a highlight phrase, are
+// highlighted, and ignored people's are dropped. When the view
 // is scrolled up, it moves by the new messages' height so the messages being read
 // stay put. Returns how many of them mention `self_login`.
 chat_view_add :: proc(v: ^Chat_View, a: ^Assets, scale, width: f32, new_messages: []Chat_Message, self_login := "") -> (mentions_added: int) {
 	for m in new_messages {
+		if v.rules != nil && m.kind != .System && slice.contains(v.rules.ignored[:], m.login) {
+			destroy_chat_message(m)
+			continue
+		}
 		if m.clear != .None {
 			apply_clear(v, m)
 			// A deleted message leaves no line of its own.
@@ -114,7 +160,8 @@ chat_view_add :: proc(v: ^Chat_View, a: ^Assets, scale, width: f32, new_messages
 		own := added.id == "" && added.kind != .System && self_login != "" && added.login == self_login
 		apply_third_party_emotes(added, v.emotes, &a.emotes, &a.user_emotes if own else nil)
 		apply_emoji(added, &a.emoji)
-		added.mention = mentions(added, self_login)
+		mine := self_login != "" && added.login == self_login
+		added.mention = mentions(added, self_login) || (!mine && highlighted(added, v.rules))
 		if added.mention {
 			mentions_added += 1
 		}
@@ -122,13 +169,106 @@ chat_view_add :: proc(v: ^Chat_View, a: ^Assets, scale, width: f32, new_messages
 			v.scroll += message_layout(a, v.emotes, added, scale, width).height + CHAT_MESSAGE_GAP * scale
 		}
 	}
+	trim_messages(v)
+	return
+}
+
+// Adds messages from before the chat joined, taking ownership. They go before the
+// messages already there, leaving out any of those (by ID), and don't count as new
+// mentions.
+chat_view_prepend :: proc(v: ^Chat_View, a: ^Assets, scale, width: f32, older: []Chat_Message, self_login := "") {
+	shown := make(map[string]bool, allocator = context.temp_allocator)
+	for m in v.messages {
+		if m.id != "" {
+			shown[m.id] = true
+		}
+	}
+	keep := make([dynamic]Chat_Message, context.temp_allocator)
+	for m in older {
+		if m.id != "" && m.id in shown {
+			destroy_chat_message(m)
+		} else {
+			append(&keep, m)
+		}
+	}
+	newer := v.messages
+	defer delete(newer)
+	v.messages = make([dynamic]Chat_Message, 0, len(keep) + len(newer))
+	// Measured from the newest message, so older ones don't move the view.
+	scroll := v.scroll
+	v.scroll = 0
+	chat_view_add(v, a, scale, width, keep[:], self_login)
+	v.scroll = scroll
+	append(&v.messages, ..newer[:])
+	trim_messages(v)
+}
+
+// Looks for third-party emotes again in every message, after a set of them loaded:
+// messages that arrived first were shown without.
+chat_view_refresh_emotes :: proc(v: ^Chat_View, a: ^Assets) {
+	for &m in v.messages {
+		apply_third_party_emotes(&m, v.emotes, &a.emotes)
+		m.layout.height = 0
+	}
+}
+
+// Drops `login`'s messages, when they've just been ignored.
+chat_view_remove_user :: proc(v: ^Chat_View, login: string) {
+	for i := len(v.messages) - 1; i >= 0; i -= 1 {
+		if v.messages[i].kind != .System && v.messages[i].login == login {
+			destroy_chat_message(v.messages[i])
+			ordered_remove(&v.messages, i)
+		}
+	}
+}
+
+// Whether the message's text has one of the user's highlight phrases, as whole
+// words, ignoring case.
+highlighted :: proc(m: ^Chat_Message, rules: ^Chat_Rules) -> bool {
+	if rules == nil || len(rules.highlights) == 0 || m.kind == .System {
+		return false
+	}
+	text := strings.to_lower(message_plain_text(m), context.temp_allocator)
+	for phrase in rules.highlights {
+		if contains_words(text, phrase) {
+			return true
+		}
+	}
+	return false
+}
+
+// Whether `phrase` is in `text` with no letter or digit right before or after it.
+contains_words :: proc(text, phrase: string) -> bool {
+	if phrase == "" {
+		return false
+	}
+	word_byte :: proc(c: u8) -> bool {
+		return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c >= 0x80
+	}
+	for start := 0; start < len(text); {
+		i := strings.index(text[start:], phrase)
+		if i < 0 {
+			return false
+		}
+		i += start
+		end := i + len(phrase)
+		if (i == 0 || !word_byte(text[i - 1]) || !word_byte(phrase[0])) && (end == len(text) || !word_byte(text[end]) || !word_byte(phrase[len(phrase) - 1])) {
+			return true
+		}
+		start = i + 1
+	}
+	return false
+}
+
+// Keeps the newest CHAT_MAX_MESSAGES.
+@(private = "file")
+trim_messages :: proc(v: ^Chat_View) {
 	if over := len(v.messages) - CHAT_MAX_MESSAGES; over > 0 {
 		for m in v.messages[:over] {
 			destroy_chat_message(m)
 		}
 		remove_range(&v.messages, 0, over)
 	}
-	return
 }
 
 // Forgets every message (for a past broadcast's chat starting over).
@@ -140,6 +280,8 @@ chat_view_clear :: proc(v: ^Chat_View) {
 	clear(&v.name_hits)
 	clear(&v.image_hits)
 	clear(&v.message_hits)
+	clear(&v.link_hits)
+	clear(&v.reply_hits)
 	v.scroll = 0
 	v.max_scroll = 0
 }
@@ -225,6 +367,28 @@ chat_view_scroll :: proc(v: ^Chat_View, wheel_y, scale: f32) {
 	v.scroll = clamp(v.scroll + wheel_y * CHAT_SCROLL_STEP * scale, 0, v.max_scroll)
 }
 
+// The address of the link at (x, y), if one is drawn there. Allocated with the
+// temp allocator.
+chat_view_link_at :: proc(v: ^Chat_View, x, y: f32) -> (url: string, found: bool) {
+	for hit in v.link_hits {
+		if in_rect(hit.rect, x, y) {
+			_, url, found = chat_link(hit.link)
+			return
+		}
+	}
+	return "", false
+}
+
+// Whether (x, y) is on a reply's "Replying to" line.
+chat_view_reply_at :: proc(v: ^Chat_View, x, y: f32) -> bool {
+	for rect in v.reply_hits {
+		if in_rect(rect, x, y) {
+			return true
+		}
+	}
+	return false
+}
+
 // Handles a click at (x, y) in pixels. Returns true if it changed the view.
 chat_view_click :: proc(v: ^Chat_View, x, y: f32) -> bool {
 	if v.more_bar.w > 0 && in_rect(v.more_bar, x, y) {
@@ -246,6 +410,8 @@ draw_chat_view :: proc(a: ^Assets, v: ^Chat_View, rect: Rect, scale: f32, filter
 	clear(&v.name_hits)
 	clear(&v.image_hits)
 	clear(&v.message_hits)
+	clear(&v.link_hits)
+	clear(&v.reply_hits)
 	clip_begin(r, rect)
 	// Messages are laid out from the newest upwards; `bottom` is the next one's
 	// bottom edge.
@@ -267,6 +433,8 @@ draw_chat_view :: proc(a: ^Assets, v: ^Chat_View, rect: Rect, scale: f32, filter
 		if top < rect.y + rect.h {
 			if m.mention {
 				draw_rect(r, {rect.x, top - gap / 2, rect.w, layout.height + gap}, CHAT_MENTION_BACKGROUND)
+			} else if m.accent != .None {
+				draw_rect(r, {rect.x, top - gap / 2, rect.w, layout.height + gap}, CHAT_ACCENT_BACKGROUNDS[m.accent])
 			}
 			draw_message(a, v, m, layout, rect.x + pad, top)
 			append(&v.message_hits, Message_Hit{{rect.x, top - gap / 2, rect.w, layout.height + gap}, i})
@@ -303,10 +471,11 @@ draw_chat_view :: proc(a: ^Assets, v: ^Chat_View, rect: Rect, scale: f32, filter
 	clip_end(r)
 }
 
-@(private = "file")
+// Draws a laid-out message with its top left at (x, y), noting in `v` where its
+// name, badges, emotes and links are.
 draw_message :: proc(a: ^Assets, v: ^Chat_View, m: ^Chat_Message, layout: ^Message_Layout, x, y: f32) {
 	size := CHAT_FONT_SIZE * layout.scale
-	alpha: u8 = CHAT_DELETED_ALPHA if m.deleted else 255
+	alpha: u8 = CHAT_DELETED_ALPHA if m.deleted else CHAT_HISTORICAL_ALPHA if m.historical else 255
 	for item in layout.items {
 		rect := Rect{x + item.rect.x, y + item.rect.y, item.rect.w, item.rect.h}
 		if item.is_name {
@@ -315,11 +484,21 @@ draw_message :: proc(a: ^Assets, v: ^Chat_View, m: ^Chat_Message, layout: ^Messa
 		if item.hint != .None {
 			append(&v.image_hits, Image_Hit{rect, item})
 		}
+		if item.link != "" {
+			append(&v.link_hits, Link_Hit{rect, item.link})
+		}
+		if item.is_reply {
+			append(&v.reply_hits, rect)
+		}
 		switch item.kind {
 		case .Text:
 			color := item.color
 			color.a = u8(u32(color.a) * u32(alpha) / 255)
 			draw_text(&a.renderer, item.font, size, rect.x, rect.y, item.text, color)
+			if item.link != "" {
+				line := max(1, layout.scale)
+				draw_rect(&a.renderer, {rect.x, rect.y + rect.h - line, rect.w, line}, color)
+			}
 		case .Image:
 			image_use(&a.jobs, item.image)
 			if item.image.state != .Ready {
@@ -350,6 +529,10 @@ Layout_Item :: struct {
 	image:   ^Image,
 	// Part of the sender's name: clicking it opens their user card.
 	is_name: bool,
+	// Part of a link: clicking it opens `link` (see chat_link) in the browser.
+	link:    string,
+	// Part of the line saying what a reply replies to: clicking it opens the thread.
+	is_reply: bool,
 	// A badge (`text` is its "set/version") or emote (`text` is its name), which
 	// shows a tooltip when hovered.
 	hint:        Item_Hint,
@@ -370,6 +553,7 @@ Message_Layout :: struct {
 	scale:          f32,
 	text_scale:     f32,
 	images_version: int,
+	hide_reply:     bool,
 	height:         f32,
 	items:          [dynamic]Layout_Item,
 }
@@ -378,11 +562,17 @@ Message_Layout :: struct {
 // "Badges Name: text" for chat, "Badges Name text" in the name's colour for /me,
 // grey text for system messages.
 message_layout :: proc(a: ^Assets, channel: ^Emotes, m: ^Chat_Message, scale, width: f32) -> ^Message_Layout {
-	l := &m.layout
-	if l.height > 0 && l.width == width && l.scale == scale && l.text_scale == a.renderer.text_scale && l.images_version == a.images.version {
+	return message_layout_into(a, channel, m, &m.layout, scale, width)
+}
+
+// message_layout, cached in `l` rather than the message's own layout. With
+// `hide_reply`, a reply leaves out what it replies to (shown just above it).
+message_layout_into :: proc(a: ^Assets, channel: ^Emotes, m: ^Chat_Message, l: ^Message_Layout, scale, width: f32, hide_reply := false) -> ^Message_Layout {
+	if l.height > 0 && l.width == width && l.scale == scale && l.text_scale == a.renderer.text_scale && l.images_version == a.images.version && l.hide_reply == hide_reply {
 		return l
 	}
 	clear(&l.items)
+	l.hide_reply = hide_reply
 	l.width = width
 	l.scale = scale
 	l.text_scale = a.renderer.text_scale
@@ -401,8 +591,15 @@ message_layout :: proc(a: ^Assets, channel: ^Emotes, m: ^Chat_Message, scale, wi
 	b.line_h = b.text_h
 	pixel_scale: f32 = 2 if image_scale > 1 else 1
 
+	// Why Twitch marks it out, on a line of its own.
+	if m.label != "" {
+		put_text(&b, .Bold, CHAT_SYSTEM_TEXT, m.label)
+		end_line(&b)
+	}
+
 	// A reply starts with what it replies to, on a line of its own, cut to fit.
-	if m.reply != "" {
+	if m.reply != "" && !hide_reply {
+		b.in_reply = m.thread != ""
 		if text_width(&a.renderer, .Regular, b.size, m.reply) <= width {
 			put_text(&b, .Regular, CHAT_SYSTEM_TEXT, m.reply)
 		} else {
@@ -411,6 +608,7 @@ message_layout :: proc(a: ^Assets, channel: ^Emotes, m: ^Chat_Message, scale, wi
 			put_text(&b, .Regular, CHAT_SYSTEM_TEXT, fit_prefix(&a.renderer, .Regular, b.size, m.reply, room))
 			put_text(&b, .Regular, CHAT_SYSTEM_TEXT, ellipsis)
 		}
+		b.in_reply = false
 		end_line(&b)
 	}
 
@@ -447,7 +645,9 @@ message_layout :: proc(a: ^Assets, channel: ^Emotes, m: ^Chat_Message, scale, wi
 	for f in m.fragments {
 		switch f.kind {
 		case .Text:
+			b.links = m.kind != .System
 			put_words(&b, .Regular, text_color, f.text, f.attached)
+			b.links = false
 		case .Emote:
 			image := image_get(&a.images, &a.jobs, f.url_2x if pixel_scale > 1 && f.url_2x != "" else f.url_1x, pixel_scale)
 			switch {
@@ -487,8 +687,12 @@ Builder :: struct {
 	line_y:     f32,
 	line_h:     f32,
 	line_start: int,
-	// Words put now are the sender's name.
+	// Words put now are the sender's name, a reply's line, or may be links.
 	in_name:    bool,
+	in_reply:   bool,
+	links:      bool,
+	// The link the word being put is part of.
+	link:       string,
 }
 
 // Finishes the current line: centres its items vertically on the tallest one.
@@ -580,7 +784,13 @@ put_words :: proc(b: ^Builder, font: Font, color: Color, text: string, attached 
 			space(b, font)
 		}
 		glued = false
-		put_word(b, font, color, word)
+		if link, _, is_link := chat_link(word); b.links && is_link {
+			b.link = link
+			put_word(b, font, CHAT_LINK, word)
+			b.link = ""
+		} else {
+			put_word(b, font, color, word)
+		}
 	}
 }
 
@@ -612,7 +822,7 @@ put_word :: proc(b: ^Builder, font: Font, color: Color, word: string) {
 @(private = "file")
 put_text :: proc(b: ^Builder, font: Font, color: Color, text: string) {
 	w := text_width(&b.a.renderer, font, b.size, text)
-	place(b, {kind = .Text, font = font, color = color, text = text, is_name = b.in_name}, w, b.text_h)
+	place(b, {kind = .Text, font = font, color = color, text = text, is_name = b.in_name, link = b.link, is_reply = b.in_reply}, w, b.text_h)
 }
 
 CHAT_TOOLTIP_BACKGROUND :: Color{0x0e, 0x0e, 0x10, 245}

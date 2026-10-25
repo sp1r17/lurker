@@ -44,6 +44,10 @@ Chat_Pane :: struct {
 	reply:            Chat_Reply,
 	reply_rect:       Rect,
 	reply_close:      Rect,
+	// The chat's modes (slow, subscribers only...) from the last draw, shown above
+	// the chat box, and when the user last sent a message here, for slow mode.
+	modes_rect:       Rect,
+	last_sent_ms:     int,
 	// Messages that mentioned the user while they couldn't see them (see
 	// pane_seen), shown as a count on the header; and from the last draw, where.
 	unread_mentions:  int,
@@ -63,6 +67,7 @@ pane_new :: proc(app: ^App) -> ^Chat_Pane {
 	p := new(Chat_Pane)
 	p.id = app.next_pane_id
 	p.view.emotes = &p.emotes
+	p.view.rules = &app.layout.chat
 	return p
 }
 
@@ -75,6 +80,7 @@ pane_join :: proc(app: ^App, p: ^Chat_Pane, channel: string) {
 	} else {
 		chat_start(p.chat, p.channel, app.chat_wake_event)
 	}
+	history_request(app, p)
 }
 
 pane_destroy :: proc(app: ^App, p: ^Chat_Pane) {
@@ -147,7 +153,6 @@ pane_replaying :: proc(app: ^App, p: ^Chat_Pane) -> bool {
 }
 
 // The width messages wrap to.
-@(private = "file")
 pane_text_width :: proc(app: ^App, p: ^Chat_Pane) -> f32 {
 	return p.messages_rect.w - 2 * CHAT_PADDING * app.scale
 }
@@ -174,6 +179,12 @@ pane_layout :: proc(app: ^App, p: ^Chat_Pane, rect: Rect) {
 		reply_h := line_height(&app.assets.renderer, .Regular, CHAT_FONT_SIZE * scale) + pad
 		p.reply_rect = {p.input_rect.x, p.input_rect.y - reply_h, p.input_rect.w, reply_h}
 		bottom = p.reply_rect.y - pad / 2
+	}
+	p.modes_rect = {}
+	if pane_modes(app, p) != "" {
+		modes_h := line_height(&app.assets.renderer, .Regular, BROWSE_CARD_TEXT_SIZE * scale) + pad / 2
+		p.modes_rect = {rect.x, bottom - modes_h, rect.w, modes_h}
+		bottom = p.modes_rect.y
 	}
 	p.messages_rect = {rect.x, top, rect.w, bottom - top}
 }
@@ -212,9 +223,18 @@ draw_pane :: proc(app: ^App, p: ^Chat_Pane, focused: bool) {
 		draw_chat_view(a, &p.view, p.messages_rect, scale, filter)
 	}
 
+	if p.modes_rect.w > 0 {
+		draw_rect(r, p.modes_rect, CHAT_HEADER)
+		modes := pane_modes(app, p)
+		draw_centered(r, .Regular, size, p.modes_rect, fit_text(r, .Regular, size, modes, p.modes_rect.w - 16 * scale), CHAT_SYSTEM_TEXT)
+	}
+
 	hint := "Channel name, then Enter (Esc to cancel)"
 	if p.channel != "" {
 		hint = "Send a message (Enter)" if app.signed_in else "Sign in to chat"
+		if app.signed_in && pane_subs_only(p) {
+			hint = "Subscribers-only chat"
+		}
 		if p.reply.id != "" {
 			hint = "Reply (Enter, or Esc to cancel)"
 		}
@@ -370,9 +390,20 @@ pane_click :: proc(app: ^App, p: ^Chat_Pane, x, y: f32) {
 		return
 	}
 	box_unfocus(app)
+	if url, found := chat_view_link_at(&p.view, x, y); found {
+		open_url(url)
+		return
+	}
 	if login, found := chat_view_name_at(&p.view, x, y); found {
 		user_card_open(app, p, login, y)
 		return
+	}
+	// A reply's "Replying to" line opens its thread.
+	if chat_view_reply_at(&p.view, x, y) {
+		if m, found := chat_view_message_at(&p.view, x, y); found && m.thread != "" {
+			thread_card_open(app, p, m.thread, y)
+			return
+		}
 	}
 	user_card_close(app)
 	chat_view_click(&p.view, x, y)
@@ -561,8 +592,7 @@ completion_names :: proc(app: ^App, p: ^Chat_Pane) -> (emote_names, user_names: 
 	return emotes[:], users[:]
 }
 
-// Sends what's typed. "/me" is the only command: Twitch's IRC no longer runs the
-// others.
+// Sends what's typed, or runs it if it's a command (chat_commands.odin).
 @(private = "file")
 pane_send :: proc(app: ^App, p: ^Chat_Pane) {
 	w := &app.watch
@@ -570,12 +600,26 @@ pane_send :: proc(app: ^App, p: ^Chat_Pane) {
 	if text == "" {
 		return
 	}
+	if strings.has_prefix(text, "/") && !strings.has_prefix(text, "/me ") {
+		if !pane_command(app, p, text) {
+			pane_notice(app, p, CHAT_COMMANDS_HELP)
+			return
+		}
+		input_clear(&p.boxes[.Chat])
+		return
+	}
+	room, self := chat_room(p.chat)
+	if pane_subs_only(p) {
+		pane_notice(app, p, "This chat is for subscribers only.")
+		return
+	}
+	if wait := p.last_sent_ms + room.slow * 1000 - app.assets.now_ms; room.slow > 0 && p.last_sent_ms > 0 && wait > 0 && !chat_self_exempt(self) {
+		pane_notice(app, p, fmt.tprintf("Slow mode: wait %ds.", (wait + 999) / 1000))
+		return
+	}
 	line := text
 	if strings.has_prefix(text, "/me ") {
 		line = strings.concatenate({"\x01ACTION ", text[len("/me "):], "\x01"}, context.temp_allocator)
-	} else if strings.has_prefix(text, "/") {
-		notice(app, p, "Only /me works here so far.")
-		return
 	}
 
 	// Twitch's limit counts every channel the account chats in.
@@ -584,10 +628,11 @@ pane_send :: proc(app: ^App, p: ^Chat_Pane) {
 		ordered_remove(&w.sent_at, 0)
 	}
 	if len(w.sent_at) >= CHAT_RATE_LIMIT {
-		notice(app, p, "Slow down: Twitch allows 20 messages every 30 seconds.")
+		pane_notice(app, p, "Slow down: Twitch allows 20 messages every 30 seconds.")
 		return
 	}
 	append(&w.sent_at, now)
+	p.last_sent_ms = now
 	if p.reply.id != "" && !strings.has_prefix(line, "\x01") {
 		// As twitch.tv does, for chats that don't show replies.
 		mention := strings.concatenate({"@", p.reply.name, " "}, context.temp_allocator)
@@ -598,6 +643,26 @@ pane_send :: proc(app: ^App, p: ^Chat_Pane) {
 	chat_send(p.chat, line, p.reply)
 	pane_reply_cancel(p)
 	input_clear(&p.boxes[.Chat])
+}
+
+// The chat's modes that are on, as shown above the chat box, or "".
+@(private = "file")
+pane_modes :: proc(app: ^App, p: ^Chat_Pane) -> string {
+	if p.chat == nil || pane_replaying(app, p) {
+		return ""
+	}
+	room, _ := chat_room(p.chat)
+	return room_modes_label(room)
+}
+
+// Whether the chat is subscribers-only and the user can't chat in it.
+@(private = "file")
+pane_subs_only :: proc(p: ^Chat_Pane) -> bool {
+	if p.chat == nil {
+		return false
+	}
+	room, self := chat_room(p.chat)
+	return room.subs_only && !self.subscriber && !chat_self_exempt(self)
 }
 
 // Starts a reply to `m` (on a right-click), if it can have one: it's from
@@ -624,6 +689,7 @@ pane_reply_start :: proc(app: ^App, p: ^Chat_Pane, m: ^Chat_Message) {
 		login = strings.clone(m.login),
 		name  = strings.clone(name),
 		body  = strings.clone(strings.to_string(body)),
+		thread = strings.clone(m.thread if m.thread != "" else m.id),
 	}
 	box_focus(app, p, .Chat)
 }
@@ -633,6 +699,7 @@ pane_reply_cancel :: proc(p: ^Chat_Pane) {
 	delete(p.reply.login)
 	delete(p.reply.name)
 	delete(p.reply.body)
+	delete(p.reply.thread)
 	p.reply = {}
 }
 
@@ -661,9 +728,15 @@ draw_reply_bar :: proc(app: ^App, p: ^Chat_Pane) {
 	draw_text(r, .Regular, size, tx, bar.y + (bar.h - lh) / 2, fit_text(r, .Regular, size, label, p.reply_close.x - tx - pad / 2), CHAT_SYSTEM_TEXT)
 }
 
+// Opens a link from chat in the browser.
+open_url :: proc(url: string) {
+	if !sdl.OpenURL(strings.clone_to_cstring(url, context.temp_allocator)) {
+		log.warnf("can't open %s: %s", url, sdl.GetError())
+	}
+}
+
 // Shows a message from the app in the pane's chat.
-@(private = "file")
-notice :: proc(app: ^App, p: ^Chat_Pane, text: string) {
+pane_notice :: proc(app: ^App, p: ^Chat_Pane, text: string) {
 	messages := []Chat_Message{system_message(text)}
 	chat_view_add(&p.view, &app.assets, app.scale, pane_text_width(app, p), messages)
 }

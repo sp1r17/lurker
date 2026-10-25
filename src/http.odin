@@ -30,13 +30,14 @@ Http_Response :: struct {
 	body:   []byte,
 }
 
-// A blocking request, for worker threads. A non-empty `post_body` makes it a POST.
-// curl.global_init must have been called.
+// A blocking request, for worker threads. A non-empty `post_body` makes it a POST;
+// `method` sets another ("DELETE"). curl.global_init must have been called.
 http_request :: proc(
 	url: string,
 	headers: []string = nil,
 	post_body := "",
 	allocator := context.allocator,
+	method := "",
 ) -> (
 	res: Http_Response,
 	ok: bool,
@@ -91,13 +92,16 @@ http_request :: proc(
 	if post_body != "" {
 		curl.easy_setopt(h, .POSTFIELDS, strings.clone_to_cstring(post_body, context.temp_allocator))
 	}
+	if method != "" {
+		curl.easy_setopt(h, .CUSTOMREQUEST, strings.clone_to_cstring(method, context.temp_allocator))
+	}
 
 	if rc := curl.easy_perform(h); rc != .E_OK {
 		if rc == .E_ABORTED_BY_CALLBACK {
 			delete(sink.body)
 			return {}, false
 		}
-		log.warnf("%s %s failed: %s", "POST" if post_body != "" else "GET", url, curl.easy_strerror(rc))
+		log.warnf("%s %s failed: %s", method if method != "" else "POST" if post_body != "" else "GET", url, curl.easy_strerror(rc))
 		delete(sink.body)
 		return {}, false
 	}
