@@ -48,6 +48,11 @@
     <category>Video</category>
   </categories>
   <releases>
+    <release version="0.6.0" date="2026-10-26">
+      <description>
+        <p>Block channels and categories to hide them everywhere: right-click a card, or open Blocked at the top. Pick a primary language, and streams in other languages are grayed out or hidden. When the channel you're watching raids another, Lurker follows the raid.</p>
+      </description>
+    </release>
     <release version="0.5.1" date="2026-10-25">
       <description>
         <p>Fixes for Windows: the video's controls show when the mouse is over a stream, dragging the video moves the window, and chat badges and emotes load. Badges also show on chat messages that arrived before they loaded.</p>

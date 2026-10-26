@@ -37,9 +37,15 @@ pre-roll or mid-roll ads.
 - Watch a live stream from its start, then jump back to live
 - Quality selection, low-latency mode, volume boost up to 130%
 - Follow and unfollow channels
+- Block channels and categories (right-click a card, or "Blocked" at the top) to
+  hide them everywhere
+- Pick a primary language at the top: streams in other languages on Top and in
+  categories are grayed out or hidden
+- Follows the channel you're watching when it raids another (switch it off in
+  the quality menu)
 - A desktop notification when a channel you follow goes live, while Lurker is
   open, with its picture; click it to watch, or turn them off at the top
-- Remembers volume, quality, splits, chat visibility and text size
+- Remembers volume, quality, splits, chat visibility, text size and language
 - Tells you when a new version is out (turn it off at the top); on Windows, it
   updates itself
 
@@ -50,7 +56,7 @@ Download `lurker-<version>-x86_64.flatpak` from the
 [latest release](https://github.com/sp1r17/lurker/releases/latest) and install it:
 
 ```sh
-flatpak install --user lurker-0.5.1-x86_64.flatpak
+flatpak install --user lurker-0.6.0-x86_64.flatpak
 flatpak run io.github.sp1r17.Lurker
 ```
 
