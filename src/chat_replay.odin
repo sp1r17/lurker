@@ -197,7 +197,7 @@ replay_tick :: proc(app: ^App) -> int {
 	if app.screen != .Watch || !r.active || w.status != .Playing || len(w.panes) == 0 {
 		return -1
 	}
-	pos, ok := player_number(&app.player, "time-pos")
+	pos, ok := player_position(&app.player)
 	if !ok {
 		return REPLAY_TICK_MS
 	}
