@@ -41,6 +41,10 @@ Layout :: struct {
 	// to skip (owned).
 	update_checks_off: bool,
 	skipped_version:   string,
+	// The primary language (a Twitch language code; "" for any; owned), and
+	// whether streams in others are hidden rather than grayed out (language.odin).
+	language:          string,
+	language_hide:     bool,
 }
 
 layout_destroy :: proc(l: ^Layout) {
@@ -54,6 +58,7 @@ layout_destroy :: proc(l: ^Layout) {
 	delete(l.splits)
 	chat_rules_destroy(&l.chat)
 	delete(l.skipped_version)
+	delete(l.language)
 }
 
 // layout.json; other saved state goes beside it (watched.json).
@@ -94,6 +99,8 @@ parse_layout :: proc(data: []byte, l: ^Layout) -> bool {
 		ignored:     []string,
 		update_checks_off: bool,
 		skipped_version:   string,
+		language:          string,
+		language_hide:     bool,
 	}
 	if json.unmarshal(data, &saved, allocator = context.temp_allocator) != nil {
 		log.warn("layout.json is unreadable; starting without saved splits")
@@ -111,6 +118,11 @@ parse_layout :: proc(data: []byte, l: ^Layout) -> bool {
 	l.hide_chat = saved.hide_chat
 	l.notifications_off = saved.notifications_off
 	l.update_checks_off = saved.update_checks_off
+	if language_name(saved.language) != "" {
+		delete(l.language)
+		l.language = strings.clone(saved.language)
+	}
+	l.language_hide = saved.language_hide
 	if _, ok := parse_version(saved.skipped_version); ok {
 		delete(l.skipped_version)
 		l.skipped_version = strings.clone(saved.skipped_version)
@@ -165,7 +177,9 @@ layout_save :: proc(l: ^Layout) {
 		ignored:     []string,
 		update_checks_off: bool,
 		skipped_version:   string,
-	}{l.splits, l.volume, l.muted, QUALITY_LABELS[l.quality], l.low_latency, l.hide_chat, l.text_size, l.notifications_off, l.chat.highlights[:], l.chat.ignored[:], l.update_checks_off, l.skipped_version}
+		language:          string,
+		language_hide:     bool,
+	}{l.splits, l.volume, l.muted, QUALITY_LABELS[l.quality], l.low_latency, l.hide_chat, l.text_size, l.notifications_off, l.chat.highlights[:], l.chat.ignored[:], l.update_checks_off, l.skipped_version, l.language, l.language_hide}
 	data, err := json.marshal(saved, {pretty = true}, context.temp_allocator)
 	if err != nil {
 		return

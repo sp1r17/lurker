@@ -166,6 +166,9 @@ Browse :: struct {
 	notify_button:        Rect,
 	updates_button:       Rect,
 	blocked_button:       Rect,
+	// The header's language picker, and its menu (language.odin).
+	language_button:      Rect,
+	language_menu:        Language_Menu,
 	header_h:             f32,
 	// The right-click menu, and the Blocked page (blocked.odin).
 	block_menu:           Block_Menu,
@@ -209,6 +212,7 @@ browse_destroy :: proc(b: ^Browse) {
 	delete(b.cards)
 	delete(b.follow_buttons)
 	block_menu_destroy(&b.block_menu)
+	language_menu_destroy(&b.language_menu)
 	blocked_page_destroy(&b.blocked)
 }
 
@@ -373,6 +377,7 @@ stream_list_refresh :: proc(app: ^App, view: Browse_View) {
 			view = view,
 			// Only a category's list is filtered by it: Top is every category's.
 			game_id = strings.clone(b.category_id) if view == .Category else "",
+			language = strings.clone(language_fetch_filter(app, view)),
 		},
 	)
 }
@@ -386,6 +391,8 @@ Streams_Job :: struct {
 	view:      Browse_View,
 	// For the Category view.
 	game_id:   string,
+	// Only streams in this language, if it isn't "".
+	language:  string,
 	ok:        bool,
 	// Owned.
 	streams:   [dynamic]Stream,
@@ -398,6 +405,7 @@ destroy_streams_job :: proc(p: ^Streams_Job) {
 	delete(p.streams)
 	delete(p.client_id)
 	delete(p.game_id)
+	delete(p.language)
 	destroy_auth(p.auth)
 }
 
@@ -408,7 +416,7 @@ run_streams_job :: proc(job: ^Job) {
 		if p.view == .Following {
 			return get_followed_streams(p.client_id, p.auth.access_token, p.auth.user_id)
 		}
-		return get_top_streams(p.client_id, p.auth.access_token, p.game_id)
+		return get_top_streams(p.client_id, p.auth.access_token, p.game_id, p.language)
 	}
 	p.check = .Valid
 	streams, err := fetch(p)
@@ -429,13 +437,18 @@ run_streams_job :: proc(job: ^Job) {
 }
 
 // On the main thread: replaces the list, releasing the old thumbnails. A category's
-// streams arriving after another category was opened are dropped.
+// streams arriving after another category was opened are dropped, and streams
+// fetched for another language are fetched again.
 finish_streams_job :: proc(app: ^App, p: ^Streams_Job) {
 	b := &app.browse
 	if p.view == .Category && p.game_id != b.category_id {
 		return
 	}
 	l := browse_list(b, p.view)
+	if p.language != language_fetch_filter(app, p.view) {
+		l.state = .Empty
+		return
+	}
 	l.last_refresh = app.assets.now_ms
 	if !p.ok {
 		l.state = .Failed if len(l.streams) == 0 else .Loaded
@@ -962,6 +975,10 @@ browse_back :: proc(app: ^App) -> bool {
 		block_menu_close(&b.block_menu)
 		return true
 	}
+	if b.language_menu.open {
+		b.language_menu.open = false
+		return true
+	}
 	#partial switch b.view {
 	case .Blocked:
 		blocked_back(app)
@@ -1002,6 +1019,9 @@ browse_click :: proc(app: ^App, x, y: f32) -> bool {
 	if block_menu_click(app, x, y) {
 		return true
 	}
+	if language_menu_click(app, x, y) {
+		return true
+	}
 	if sign_in_click(app, x, y) {
 		return true
 	}
@@ -1015,6 +1035,10 @@ browse_click :: proc(app: ^App, x, y: f32) -> bool {
 	}
 	if b.blocked_button.w > 0 && in_rect(b.blocked_button, x, y) {
 		browse_open_blocked(app)
+		return true
+	}
+	if b.language_button.w > 0 && in_rect(b.language_button, x, y) {
+		b.language_menu.open = true
 		return true
 	}
 	if update_bar_click(app, x, y) {
@@ -1119,6 +1143,9 @@ on_browse_header_controls :: proc(app: ^App, x, y: f32) -> bool {
 	if b.blocked_button.w > 0 && in_rect(b.blocked_button, x, y) {
 		return true
 	}
+	if b.language_button.w > 0 && in_rect(b.language_button, x, y) {
+		return true
+	}
 	if app.update.bar.w > 0 && in_rect(app.update.bar, x, y) {
 		return true
 	}
@@ -1165,6 +1192,7 @@ draw_browse :: proc(app: ^App, screen: Rect) {
 		draw_blocked(app, content)
 	}
 	draw_block_menu(app, screen)
+	draw_language_menu(app, b.language_button, screen)
 }
 
 // The tabs and search box at the left; who's signed in and the window buttons at
@@ -1189,9 +1217,10 @@ draw_browse_header :: proc(app: ^App, screen: Rect) {
 	b.notify_button = {}
 	b.updates_button = {}
 	b.blocked_button = {}
+	b.language_button = {}
 	if app.signed_in {
-		// "R to refresh  ·  Blocked  ·  Updates on  ·  Notifications on  ·  login  ·
-		// Sign out", with the switches, "Blocked" and "Sign out" clickable.
+		// "R to refresh  ·  English  ·  Blocked  ·  Updates on  ·  Notifications on  ·
+		// login  ·  Sign out", with all but the hint and login clickable.
 		label := "Sign out"
 		lw := text_width(r, .Regular, text_size, label)
 		app.sign_in.sign_out = {right - lw, text_y, lw, line_height(r, .Regular, text_size)}
@@ -1220,8 +1249,15 @@ draw_browse_header :: proc(app: ^App, screen: Rect) {
 		b.blocked_button = {right - lw, text_y, lw, line_height(r, .Regular, text_size)}
 		hovered = in_rect(b.blocked_button, app.mouse.x, app.mouse.y) || b.view == .Blocked
 		draw_text(r, .Regular, text_size, b.blocked_button.x, text_y, label, BROWSE_TEXT if hovered else BROWSE_ACCENT)
+		right = b.blocked_button.x - text_width(r, .Regular, text_size, separator)
+		draw_text(r, .Regular, text_size, right, text_y, separator, BROWSE_DIM_TEXT)
+		label = language_label(app)
+		lw = text_width(r, .Regular, text_size, label)
+		b.language_button = {right - lw, text_y, lw, line_height(r, .Regular, text_size)}
+		hovered = in_rect(b.language_button, app.mouse.x, app.mouse.y) || b.language_menu.open
+		draw_text(r, .Regular, text_size, b.language_button.x, text_y, label, BROWSE_TEXT if hovered else BROWSE_ACCENT)
 		hint := "R to refresh  ·  "
-		right = b.blocked_button.x - text_width(r, .Regular, text_size, hint)
+		right = b.language_button.x - text_width(r, .Regular, text_size, hint)
 		draw_text(r, .Regular, text_size, right, text_y, hint, BROWSE_DIM_TEXT)
 	}
 
@@ -1337,12 +1373,19 @@ draw_stream_list :: proc(app: ^App, l: ^Stream_List, content: Rect, empty_messag
 			draw_rect(r, card, BROWSE_CARD_HOVER)
 		}
 
+		// Not in the primary language: faded, with the language over the thumbnail.
+		grayed := language_grayed(app, b.view, s)
+		text_color, name_color := BROWSE_TEXT, BROWSE_ACCENT
+		if grayed {
+			text_color, name_color = BROWSE_DIM_TEXT, BROWSE_DIM_TEXT
+		}
+
 		thumb := Rect{card.x, card.y, card.w, thumb_h}
 		// Thumbnails change every few minutes: not worth keeping on disk.
 		image := image_get(&a.images, &a.jobs, l.thumbnails[i], 1, cache = false)
 		if image.state == .Ready {
 			texture, _ := image_frame(image, a.now_ms)
-			draw_image(r, texture, thumb)
+			draw_image(r, texture, thumb, {255, 255, 255, 90} if grayed else {255, 255, 255, 255})
 		} else {
 			draw_rect(r, thumb, BROWSE_PLACEHOLDER)
 		}
@@ -1356,15 +1399,21 @@ draw_stream_list :: proc(app: ^App, l: ^Stream_List, content: Rect, empty_messag
 		draw_rect(r, badge, VIEWERS_BACKGROUND)
 		draw_rect(r, {badge.x + 5 * scale, badge.y + (badge.h - dot) / 2, dot, dot}, LIVE_RED)
 		draw_text(r, .Regular, text_size, badge.x + dot + 9 * scale, badge.y + 2 * scale, viewers, BROWSE_TEXT)
+		if grayed {
+			code := language_badge(s)
+			tag := Rect{thumb.x + inset, thumb.y + inset, text_width(r, .Bold, text_size, code) + 12 * scale, lh_text + 4 * scale}
+			draw_rect(r, tag, VIEWERS_BACKGROUND)
+			draw_centered(r, .Bold, text_size, tag, code, BROWSE_TEXT)
+		}
 
 		tx := card.x + text_pad
 		tw := card.w - 2 * text_pad
 		ty := thumb.y + thumb.h + text_pad
-		if _, cut := draw_text_line(a, .Bold, card_title_size, tx, ty, s.title, BROWSE_TEXT, tw); cut && i == b.hovered {
+		if _, cut := draw_text_line(a, .Bold, card_title_size, tx, ty, s.title, text_color, tw); cut && i == b.hovered {
 			tooltip, tooltip_title = {tx, ty, tw, card.y + card.h - ty}, s.title
 		}
 		ty += lh_title
-		draw_text(r, .Regular, text_size, tx, ty, fit_text(r, .Regular, text_size, s.user_name, tw), BROWSE_ACCENT)
+		draw_text(r, .Regular, text_size, tx, ty, fit_text(r, .Regular, text_size, s.user_name, tw), name_color)
 		ty += lh_text
 		draw_text(r, .Regular, text_size, tx, ty, fit_text(r, .Regular, text_size, s.game_name, tw), BROWSE_DIM_TEXT)
 	}
