@@ -197,6 +197,8 @@ watch_play_vod :: proc(app: ^App, start: f64 = -1) {
 	player_clear(&app.player)
 	w.status = .Starting
 	w.ended_at = 0
+	w.retry_at = 0
+	w.retrying = false
 	w.playing_vod = true
 	w.vod_pending = true
 	qualities_request(app, vod_page(w.vod.id, w.vod.kind))
