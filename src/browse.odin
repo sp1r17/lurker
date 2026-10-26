@@ -64,6 +64,8 @@ Browse_View :: enum {
 	Search,
 	// A channel's past broadcasts, highlights, uploads and clips (videos.odin).
 	Videos,
+	// What's blocked (blocked.odin).
+	Blocked,
 }
 
 Search_Kind :: enum {
@@ -80,6 +82,7 @@ BROWSE_TAB_LABELS := [Browse_View]string {
 	.Category            = "",
 	.Search              = "",
 	.Videos              = "",
+	.Blocked             = "",
 }
 
 // Live streams as a grid of cards: the followed channels, Twitch's top streams, or
@@ -162,7 +165,11 @@ Browse :: struct {
 	// The header's switch for live notifications.
 	notify_button:        Rect,
 	updates_button:       Rect,
+	blocked_button:       Rect,
 	header_h:             f32,
+	// The right-click menu, and the Blocked page (blocked.odin).
+	block_menu:           Block_Menu,
+	blocked:              Blocked_Page,
 }
 
 browse_destroy :: proc(b: ^Browse) {
@@ -201,6 +208,8 @@ browse_destroy :: proc(b: ^Browse) {
 	delete(b.results)
 	delete(b.cards)
 	delete(b.follow_buttons)
+	block_menu_destroy(&b.block_menu)
+	blocked_page_destroy(&b.blocked)
 }
 
 // The stream list `view` shows, or nil if it doesn't show one.
@@ -228,6 +237,8 @@ browse_tick :: proc(app: ^App) -> (wait_ms: int) {
 	state: Browse_State
 	refreshed: int
 	switch b.view {
+	case .Blocked:
+		return -1
 	case .Videos:
 		return videos_tick(app)
 	case .Following, .Top, .Category:
@@ -275,6 +286,8 @@ browse_tick :: proc(app: ^App) -> (wait_ms: int) {
 browse_clear :: proc(app: ^App) {
 	b := &app.browse
 	browse_search_close(app)
+	blocked_unfocus(app)
+	block_menu_close(&b.block_menu)
 	for l in ([]^Stream_List{&b.following, &b.top, &b.category}) {
 		stream_list_clear(app, l)
 	}
@@ -339,6 +352,7 @@ browse_refresh :: proc(app: ^App) {
 		search_start(app)
 	case .Videos:
 		videos_refresh(app)
+	case .Blocked:
 	}
 }
 
@@ -439,6 +453,7 @@ finish_streams_job :: proc(app: ^App, p: ^Streams_Job) {
 		append(&l.thumbnails, fmt.aprintf("%s?r=%v%d", url, p.view, l.refresh_count))
 	}
 	clear(&p.streams)
+	stream_list_drop_blocked(app, l)
 	l.state = .Loaded
 	if p.view == .Following {
 		live_notify(app, l.streams[:])
@@ -524,6 +539,8 @@ finish_categories_job :: proc(app: ^App, p: ^Categories_Job) {
 	b.top_categories, p.top = p.top, {}
 	delete(b.categories_next)
 	b.categories_next, p.next = p.next, ""
+	categories_drop_blocked(app, &b.followed_categories)
+	categories_drop_blocked(app, &b.top_categories)
 	b.categories_state = .Loaded
 }
 
@@ -563,6 +580,9 @@ finish_more_categories :: proc(app: ^App, p: ^Categories_Job) {
 		return
 	}
 	outer: for c in p.top {
+		if is_blocked(&app.blocked, .Category, c.name) {
+			continue
+		}
 		for have in b.top_categories {
 			if have.id == c.id {
 				continue outer
@@ -677,6 +697,8 @@ finish_search_job :: proc(app: ^App, p: ^Search_Job) {
 	results_clear(app)
 	b.results, p.channels = p.channels, {}
 	b.category_results, p.categories = p.categories, {}
+	results_drop_blocked(app)
+	categories_drop_blocked(app, &b.category_results)
 	b.search_state = .Loaded
 	b.selected = 0
 	b.unfollow_armed = 0
@@ -738,7 +760,6 @@ search_go_to :: proc(b: ^Browse) -> (login: string, ok: bool) {
 	return login, true
 }
 
-@(private = "file")
 search_row_count :: proc(b: ^Browse) -> int {
 	if b.search_kind == .Categories {
 		return len(b.category_results)
@@ -794,6 +815,7 @@ browse_search_focus :: proc(app: ^App) {
 	if b.search.focused || !app.signed_in {
 		return
 	}
+	blocked_unfocus(app)
 	b.search.focused = true
 	_ = sdl.StartTextInput(app.window)
 }
@@ -904,6 +926,7 @@ browse_set_view :: proc(app: ^App, view: Browse_View) {
 	if b.view == .Search {
 		browse_search_close(app)
 	}
+	blocked_unfocus(app)
 	b.view = view
 	if view == .Categories {
 		b.view = b.categories_section if b.categories_section == .Followed_Categories else .Categories
@@ -935,7 +958,13 @@ browse_open_category :: proc(app: ^App, c: Category) {
 // so Esc can do what it does on the browse screen otherwise.
 browse_back :: proc(app: ^App) -> bool {
 	b := &app.browse
+	if b.block_menu.open {
+		block_menu_close(&b.block_menu)
+		return true
+	}
 	#partial switch b.view {
+	case .Blocked:
+		blocked_back(app)
 	case .Category:
 		category_back(app)
 	case .Videos:
@@ -950,6 +979,7 @@ browse_back :: proc(app: ^App) -> bool {
 }
 
 browse_scroll :: proc(b: ^Browse, wheel_y, scale: f32) {
+	block_menu_close(&b.block_menu)
 	b.scroll[b.view] = clamp(b.scroll[b.view] - wheel_y * BROWSE_SCROLL_STEP * scale, 0, b.max_scroll[b.view])
 }
 
@@ -969,6 +999,9 @@ browse_card_at :: proc(b: ^Browse, x, y: f32) -> int {
 // A left click on the browse screen. Returns true if it hit something.
 browse_click :: proc(app: ^App, x, y: f32) -> bool {
 	b := &app.browse
+	if block_menu_click(app, x, y) {
+		return true
+	}
 	if sign_in_click(app, x, y) {
 		return true
 	}
@@ -978,6 +1011,10 @@ browse_click :: proc(app: ^App, x, y: f32) -> bool {
 	}
 	if b.updates_button.w > 0 && in_rect(b.updates_button, x, y) {
 		update_checks_toggle(app)
+		return true
+	}
+	if b.blocked_button.w > 0 && in_rect(b.blocked_button, x, y) {
+		browse_open_blocked(app)
 		return true
 	}
 	if update_bar_click(app, x, y) {
@@ -996,15 +1033,21 @@ browse_click :: proc(app: ^App, x, y: f32) -> bool {
 	}
 	browse_search_unfocus(app)
 	if b.back_button.w > 0 && in_rect(b.back_button, x, y) {
-		if b.view == .Videos {
+		#partial switch b.view {
+		case .Videos:
 			videos_back(app)
-		} else {
+		case .Blocked:
+			blocked_back(app)
+		case:
 			category_back(app)
 		}
 		return true
 	}
 	if b.view == .Videos {
 		return videos_click(app, x, y, browse_card_at(b, x, y))
+	}
+	if b.view == .Blocked {
+		return blocked_click(app, x, y)
 	}
 	for button, i in b.section_buttons {
 		if button.w > 0 && in_rect(button, x, y) {
@@ -1044,7 +1087,7 @@ browse_click :: proc(app: ^App, x, y: f32) -> bool {
 		}
 	case .Search:
 		search_open_row(app, i)
-	case .Videos:
+	case .Videos, .Blocked:
 	// Handled above.
 	}
 	return true
@@ -1071,6 +1114,9 @@ on_browse_header_controls :: proc(app: ^App, x, y: f32) -> bool {
 		return true
 	}
 	if b.updates_button.w > 0 && in_rect(b.updates_button, x, y) {
+		return true
+	}
+	if b.blocked_button.w > 0 && in_rect(b.blocked_button, x, y) {
 		return true
 	}
 	if app.update.bar.w > 0 && in_rect(app.update.bar, x, y) {
@@ -1115,7 +1161,10 @@ draw_browse :: proc(app: ^App, screen: Rect) {
 		draw_search(app, content)
 	case .Videos:
 		draw_videos(app, content)
+	case .Blocked:
+		draw_blocked(app, content)
 	}
+	draw_block_menu(app, screen)
 }
 
 // The tabs and search box at the left; who's signed in and the window buttons at
@@ -1139,9 +1188,10 @@ draw_browse_header :: proc(app: ^App, screen: Rect) {
 	app.sign_in.sign_out = {}
 	b.notify_button = {}
 	b.updates_button = {}
+	b.blocked_button = {}
 	if app.signed_in {
-		// "R to refresh  ·  Updates on  ·  Notifications on  ·  login  ·  Sign out",
-		// with the switches and "Sign out" clickable.
+		// "R to refresh  ·  Blocked  ·  Updates on  ·  Notifications on  ·  login  ·
+		// Sign out", with the switches, "Blocked" and "Sign out" clickable.
 		label := "Sign out"
 		lw := text_width(r, .Regular, text_size, label)
 		app.sign_in.sign_out = {right - lw, text_y, lw, line_height(r, .Regular, text_size)}
@@ -1163,8 +1213,15 @@ draw_browse_header :: proc(app: ^App, screen: Rect) {
 		b.updates_button = {right - lw, text_y, lw, line_height(r, .Regular, text_size)}
 		hovered = in_rect(b.updates_button, app.mouse.x, app.mouse.y)
 		draw_text(r, .Regular, text_size, b.updates_button.x, text_y, label, BROWSE_TEXT if hovered else BROWSE_ACCENT)
+		right = b.updates_button.x - text_width(r, .Regular, text_size, separator)
+		draw_text(r, .Regular, text_size, right, text_y, separator, BROWSE_DIM_TEXT)
+		label = "Blocked"
+		lw = text_width(r, .Regular, text_size, label)
+		b.blocked_button = {right - lw, text_y, lw, line_height(r, .Regular, text_size)}
+		hovered = in_rect(b.blocked_button, app.mouse.x, app.mouse.y) || b.view == .Blocked
+		draw_text(r, .Regular, text_size, b.blocked_button.x, text_y, label, BROWSE_TEXT if hovered else BROWSE_ACCENT)
 		hint := "R to refresh  ·  "
-		right = b.updates_button.x - text_width(r, .Regular, text_size, hint)
+		right = b.blocked_button.x - text_width(r, .Regular, text_size, hint)
 		draw_text(r, .Regular, text_size, right, text_y, hint, BROWSE_DIM_TEXT)
 	}
 
