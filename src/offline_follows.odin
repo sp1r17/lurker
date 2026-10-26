@@ -135,6 +135,7 @@ finish_offline_follows_job :: proc(app: ^App, p: ^Offline_Follows_Job) {
 	clear(&o.channels)
 	append(&o.channels, ..p.channels[:])
 	clear(&p.channels)
+	offline_drop_blocked(app, o)
 	o.state = .Loaded
 }
 

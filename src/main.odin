@@ -158,6 +158,8 @@ App :: struct {
 	watched:             Watched,
 	// Which followed channels have gone live (notify.odin).
 	live:                Live_Notifier,
+	// The channels and categories hidden everywhere (blocked.odin).
+	blocked:             Blocked,
 	// Desktop notifications, and clicks on them (notify_linux.odin,
 	// notify_windows.odin).
 	notifications:       Notifications,
@@ -255,6 +257,8 @@ run :: proc(channels: []string, config: Config, video: Maybe(Twitch_Link) = nil)
 		watched_save(&app.watched)
 		watched_destroy(&app.watched)
 	}
+	app.blocked = blocked_load()
+	defer blocked_destroy(&app.blocked)
 	app.chat_wake_event = sdl.RegisterEvents(1)
 	defer browse_destroy(&app.browse)
 	defer live_notifier_destroy(&app.live)
@@ -375,6 +379,9 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 		} else if app.browse.search.focused {
 			browse_search_text(app, string(e.text.text))
 			redraw^ = true
+		} else {
+			blocked_text(app, string(e.text.text))
+			redraw^ = true
 		}
 	case e.type == .KEY_DOWN && text_size_key(app, e.key):
 		redraw^ = true
@@ -384,6 +391,9 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 		redraw^ = true
 	case e.type == .KEY_DOWN && app.screen == .Browse && app.browse.search.focused:
 		browse_search_key(app, e.key)
+		redraw^ = true
+	case e.type == .KEY_DOWN && app.screen == .Browse && blocked_typing(&app.browse):
+		blocked_key(app, e.key)
 		redraw^ = true
 	case e.type == .KEY_DOWN:
 		switch e.key.key {
@@ -504,6 +514,12 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 		// A right-click on a chat message replies to it.
 		if e.button.button == sdl.BUTTON_RIGHT && app.screen == .Watch {
 			watch_right_click(app, e.button.x * density, e.button.y * density)
+			redraw^ = true
+			return true
+		}
+		// On a card, a menu for blocking its channel or category.
+		if e.button.button == sdl.BUTTON_RIGHT && app.screen == .Browse && app.signed_in {
+			browse_right_click(app, e.button.x * density, e.button.y * density)
 			redraw^ = true
 			return true
 		}
