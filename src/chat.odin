@@ -171,65 +171,15 @@ chat_thread :: proc(chat: ^Chat) {
 	}
 }
 
-// Runs the connection added to `multi`, checking for a stop every
-// CHAT_STOP_CHECK_MS meanwhile: connecting can take until the timeout, and leaving
-// a channel mustn't wait for it. (curl's progress callback, tried first, wasn't
-// called while connecting everywhere.) Returns false if it didn't connect.
-@(private = "file")
-chat_connect :: proc(chat: ^Chat, multi: ^curl.CURLM) -> bool {
-	for {
-		running: c.int
-		curl.multi_perform(multi, &running)
-		if running == 0 {
-			break
-		}
-		if stopping(chat) {
-			return false
-		}
-		curl.multi_poll(multi, nil, 0, CHAT_STOP_CHECK_MS, nil)
-	}
-	queued: c.int
-	msg := curl.multi_info_read(multi, &queued)
-	if msg == nil || msg.msg != .DONE {
-		return false
-	}
-	if msg.data.result != .E_OK {
-		log.warnf("chat: can't connect: %s", curl.easy_strerror(msg.data.result))
-		return false
-	}
-	return true
-}
-
 // Connects, joins the channel and reads until the connection drops, Twitch asks for
 // a reconnect, or the chat is stopped.
 @(private = "file")
 chat_session :: proc(chat: ^Chat) {
 	defer free_all(context.temp_allocator)
 
-	h := curl.easy_init()
-	if h == nil {
-		log.error("chat: curl init failed")
-		return
-	}
-	defer curl.easy_cleanup(h)
-	curl.easy_setopt(h, .URL, strings.clone_to_cstring(chat.url if chat.url != "" else CHAT_URL, context.temp_allocator))
-	// 2 = connect, do the WebSocket upgrade, then hand the socket to ws_send/ws_recv.
-	curl.easy_setopt(h, .CONNECT_ONLY, c.long(2))
-	curl.easy_setopt(h, .CONNECTTIMEOUT, c.long(10))
-	when ODIN_OS == .Windows {
-		// Windows' certificate revocation check fails outright when it can't reach
-		// the revocation servers (often under Wine); certificates are still checked.
-		curl.easy_setopt(h, .SSL_OPTIONS, c.long(curl.SSLOPT_REVOKE_BEST_EFFORT))
-	}
-	// The WebSocket stays with the multi handle that connected it, until the end.
-	multi := curl.multi_init()
-	if multi == nil {
-		return
-	}
-	defer curl.multi_cleanup(multi)
-	curl.multi_add_handle(multi, h)
-	defer curl.multi_remove_handle(multi, h)
-	if !chat_connect(chat, multi) {
+	h, multi, connected := ws_open(chat.url if chat.url != "" else CHAT_URL, &chat.stop, "chat")
+	defer ws_close(h, multi)
+	if !connected {
 		return
 	}
 

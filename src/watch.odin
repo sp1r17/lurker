@@ -85,6 +85,10 @@ Watch :: struct {
 	quality_button:   Rect,
 	quality_items:    [Quality]Rect,
 	latency_item:     Rect,
+	raids_item:       Rect,
+	// Listens for the channel raiding another, to follow it (raid.odin); nil when
+	// not listening.
+	raids:            ^Raid_Listener,
 	back_button:      Rect,
 	// Whether the user follows the channel, and its user ID for changing that;
 	// whether a lookup or change is running, and whether a click would unfollow.
@@ -171,6 +175,7 @@ watch_start :: proc(app: ^App, channel: string, restore := true, info: ^Stream =
 	}
 	set_title(app, w.channel)
 	app.screen = .Watch
+	watch_listen_for_raids(app)
 }
 
 // Opens `channel`'s chat as a split.
@@ -184,6 +189,7 @@ watch_add_split :: proc(app: ^App, channel: string) {
 watch_stop :: proc(app: ^App) {
 	w := &app.watch
 	watched_note(app)
+	raid_listener_stop(w.raids)
 	player_command(&app.player, {"stop"})
 	streamlink_stop(&w.streamlink)
 	// So the next channel doesn't start on this one's last frame.
@@ -362,7 +368,7 @@ on_controls :: proc(app: ^App, x, y: f32) -> bool {
 				return true
 			}
 		}
-		if in_rect(w.latency_item, x, y) {
+		if in_rect(w.latency_item, x, y) || in_rect(w.raids_item, x, y) {
 			return true
 		}
 	}
@@ -404,6 +410,10 @@ controls_click :: proc(app: ^App, x, y: f32) -> bool {
 			watch_toggle_low_latency(app)
 			return true
 		}
+		if in_rect(w.raids_item, x, y) {
+			watch_toggle_raids(app)
+			return true
+		}
 	}
 	if w.quality_button.w > 0 && in_rect(w.quality_button, x, y) {
 		w.quality_menu = !w.quality_menu
@@ -431,6 +441,7 @@ draw_controls :: proc(app: ^App) {
 	w.quality_button = {}
 	w.quality_items = {}
 	w.latency_item = {}
+	w.raids_item = {}
 	if !controls_visible(app) {
 		return
 	}
@@ -463,14 +474,14 @@ draw_controls :: proc(app: ^App) {
 		return
 	}
 
-	// The qualities, a divider, then the low latency switch.
+	// The qualities, a divider, then the low latency and raid switches.
 	// Grows with the text size, to fit its labels.
 	item_h := MENU_ITEM_HEIGHT * scale * r.text_scale
 	divider := 9 * scale
 	menu_w := max(MENU_WIDTH * scale * r.text_scale, bw)
 	offered := watch_qualities(app)
 	items := card(offered)
-	menu_h := item_h * f32(items + 1) + divider
+	menu_h := item_h * f32(items + 2) + divider
 	menu := Rect{w.quality_button.x + w.quality_button.w - menu_w, w.quality_button.y - 6 * scale - menu_h, menu_w, menu_h}
 	draw_rect(r, menu, USER_CARD_BACKGROUND)
 	row := 0
@@ -482,8 +493,10 @@ draw_controls :: proc(app: ^App) {
 	}
 	line_y := menu.y + item_h * f32(items) + divider / 2
 	draw_rect(r, {menu.x + pad, line_y, menu.w - 2 * pad, scale}, USER_CARD_BORDER)
-	w.latency_item = {menu.x, menu.y + menu_h - item_h, menu.w, item_h}
+	w.latency_item = {menu.x, menu.y + menu_h - 2 * item_h, menu.w, item_h}
 	draw_menu_item(app, w.latency_item, "Low latency", app.layout.low_latency)
+	w.raids_item = {menu.x, menu.y + menu_h - item_h, menu.w, item_h}
+	draw_menu_item(app, w.raids_item, "Follow raids", !app.layout.raids_off)
 }
 
 draw_menu_item :: proc(app: ^App, item: Rect, label: string, checked: bool) {

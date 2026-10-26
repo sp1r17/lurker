@@ -29,6 +29,8 @@ Layout :: struct {
 	// The stream quality picked last, for every channel.
 	quality:     Quality,
 	low_latency: bool,
+	// Not following the watched channel's raids (raid.odin).
+	raids_off:   bool,
 	// The chats were hidden last, for every channel.
 	hide_chat:   bool,
 	// MIN_TEXT_SIZE to MAX_TEXT_SIZE percent.
@@ -92,6 +94,7 @@ parse_layout :: proc(data: []byte, l: ^Layout) -> bool {
 		muted:       bool,
 		quality:     string,
 		low_latency: bool,
+		raids_off:   bool,
 		hide_chat:   bool,
 		text_size:   int,
 		notifications_off: bool,
@@ -115,6 +118,7 @@ parse_layout :: proc(data: []byte, l: ^Layout) -> bool {
 	l.muted = saved.muted
 	l.quality = quality_from_label(saved.quality)
 	l.low_latency = saved.low_latency
+	l.raids_off = saved.raids_off
 	l.hide_chat = saved.hide_chat
 	l.notifications_off = saved.notifications_off
 	l.update_checks_off = saved.update_checks_off
@@ -170,6 +174,7 @@ layout_save :: proc(l: ^Layout) {
 		muted:       bool,
 		quality:     string,
 		low_latency: bool,
+		raids_off:   bool,
 		hide_chat:   bool,
 		text_size:   int,
 		notifications_off: bool,
@@ -179,7 +184,7 @@ layout_save :: proc(l: ^Layout) {
 		skipped_version:   string,
 		language:          string,
 		language_hide:     bool,
-	}{l.splits, l.volume, l.muted, QUALITY_LABELS[l.quality], l.low_latency, l.hide_chat, l.text_size, l.notifications_off, l.chat.highlights[:], l.chat.ignored[:], l.update_checks_off, l.skipped_version, l.language, l.language_hide}
+	}{l.splits, l.volume, l.muted, QUALITY_LABELS[l.quality], l.low_latency, l.raids_off, l.hide_chat, l.text_size, l.notifications_off, l.chat.highlights[:], l.chat.ignored[:], l.update_checks_off, l.skipped_version, l.language, l.language_hide}
 	data, err := json.marshal(saved, {pretty = true}, context.temp_allocator)
 	if err != nil {
 		return

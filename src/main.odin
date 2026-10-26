@@ -128,6 +128,8 @@ App :: struct {
 	next_pane_id:    int,
 	layout:          Layout,
 	chat_wake_event: u32,
+	// Pushed when the raid listener has news (raid.odin).
+	raid_event:      u32,
 	// From the last draw: the display scale, and the mouse in pixels.
 	scale:           f32,
 	mouse:           [2]f32,
@@ -260,6 +262,7 @@ run :: proc(channels: []string, config: Config, video: Maybe(Twitch_Link) = nil)
 	app.blocked = blocked_load()
 	defer blocked_destroy(&app.blocked)
 	app.chat_wake_event = sdl.RegisterEvents(1)
+	app.raid_event = sdl.RegisterEvents(1)
 	defer browse_destroy(&app.browse)
 	defer live_notifier_destroy(&app.live)
 	notifications_init(&app)
@@ -539,6 +542,9 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 		case .Browse:
 			browse_click(app, x, y)
 		}
+	case u32(e.type) == app.raid_event:
+		raid_events_arrived(app)
+		redraw^ = true
 	case u32(e.type) == app.chat_wake_event:
 		watch_chat_arrived(app)
 		redraw^ = true
@@ -641,6 +647,8 @@ finish_jobs :: proc(app: ^App) {
 			finish_update_check_job(app, &p)
 		case Update_Download_Job:
 			finish_update_download_job(app, &p)
+		case Raid_Subscribe_Job:
+			finish_raid_subscribe_job(app, &p)
 		}
 		destroy_job(job)
 	}
