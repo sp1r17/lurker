@@ -28,6 +28,10 @@ CONTROLS_MS :: 2000
 CONTROLS_START_MS :: 3000
 // How often streamlink is checked for exiting once the stream has ended.
 STREAM_END_POLL_MS :: 50
+// After a live stream ends, it's checked for coming back after each of these in
+// turn, then every last one: a quick restart is caught quickly, and a stream
+// that's over isn't checked for as often.
+STREAM_RETRY_MS :: [?]int{5_000, 10_000, 20_000, 40_000, 80_000, 160_000, 300_000}
 MENU_ITEM_HEIGHT :: 34
 MENU_WIDTH :: 160
 MENU_HOVER :: Color{0x3a, 0x3a, 0x44, 255}
@@ -76,6 +80,12 @@ Watch :: struct {
 	ended_at:         int,
 	// When the stream was started, for STREAMLINK_SERVES_HTTP's retries.
 	started_at:       int,
+	// After the live stream ended: when to check for it coming back (Assets.now_ms;
+	// 0 for not checking), how many checks found it still offline, and whether a
+	// check is under way (the stream is starting again).
+	retry_at:         int,
+	retries:          int,
+	retrying:         bool,
 	quality_menu:     bool,
 	// The qualities the stream playing has (empty until known), and the page they
 	// were looked up for. Owned.
@@ -269,6 +279,7 @@ start_stream :: proc(app: ^App, signed: bool) {
 	w.signed_stream = signed
 	w.ended_at = 0
 	w.started_at = app.assets.now_ms
+	w.retry_at = 0
 	s: Streamlink
 	ok: bool
 	l := &app.layout
@@ -538,6 +549,11 @@ watch_player_events :: proc(app: ^App, events: Player_Events) {
 		}
 		// The first frame is ready: draw it now rather than on mpv's next redraw.
 		w.new_video_frame = true
+		if w.retrying {
+			w.retrying = false
+			w.retries = 0
+			pane_notice(app, w.panes[0], "The stream is back.")
+		}
 	}
 	if .Ended in events && w.ended_at == 0 {
 		w.ended_at = max(app.assets.now_ms, 1)
@@ -578,11 +594,14 @@ watch_stream_ended :: proc(app: ^App) -> bool {
 	}
 	w.ended_at = 0
 	switch outcome {
-	case .None, .Ended:
-		w.status = .Ended
-		vod_lookup(app)
-	case .Offline:
-		w.status = .Offline
+	case .None, .Ended, .Offline:
+		if w.retrying || (outcome != .Offline && !w.playing_vod) {
+			// The live stream ended while watching it, or a check found it still
+			// offline.
+			stream_retry_later(app)
+		} else {
+			w.status = .Offline if outcome == .Offline else .Ended
+		}
 		vod_lookup(app)
 	case .Streamlink_Failed:
 		if w.signed_stream && w.status == .Starting {
@@ -592,9 +611,42 @@ watch_stream_ended :: proc(app: ^App) -> bool {
 			start_stream(app, signed = false)
 			return true
 		}
+		if w.retrying {
+			stream_retry_later(app)
+			return true
+		}
 		w.status = .Failed
 	}
 	return true
+}
+
+// Shows the stream as ended, and checks for it coming back after the next of
+// STREAM_RETRY_MS.
+stream_retry_later :: proc(app: ^App) {
+	w := &app.watch
+	if w.retrying {
+		w.retries += 1
+	}
+	w.retrying = false
+	w.status = .Ended
+	delays := STREAM_RETRY_MS
+	w.retry_at = app.assets.now_ms + delays[min(w.retries, len(delays) - 1)]
+}
+
+// Starts the stream again once a check for it coming back is due. Returns ms
+// until then, for the main loop's wait.
+stream_retry_tick :: proc(app: ^App) -> int {
+	w := &app.watch
+	if app.screen != .Watch || w.retry_at == 0 || w.playing_vod {
+		return -1
+	}
+	if left := w.retry_at - app.assets.now_ms; left > 0 {
+		return left
+	}
+	w.retrying = true
+	streamlink_stop(&w.streamlink)
+	start_stream(app, signed = app.signed_in)
+	return -1
 }
 
 // ms until streamlink is next checked for exiting after the stream's end, for the
@@ -863,10 +915,21 @@ draw_watch :: proc(app: ^App) {
 			draw_image(&a.renderer, app.player.texture, video)
 		}
 	case .Starting:
+		if w.retrying {
+			draw_centered(&a.renderer, .Regular, text_size, video, "The stream has ended. Checking whether it's back...", BROWSE_DIM_TEXT)
+			draw_vod_offer(app, video)
+			break
+		}
 		loading := fmt.tprintf("Loading the %s...", strings.to_lower(VIDEO_KIND_NAMES[w.vod.kind], context.temp_allocator)) if w.playing_vod else fmt.tprintf("Loading %s...", w.channel)
 		draw_centered(&a.renderer, .Regular, text_size, video, loading, BROWSE_DIM_TEXT)
 	case .Ended:
-		ended := fmt.tprintf("That's the end of the %s. Esc to go back.", strings.to_lower(VIDEO_KIND_NAMES[w.vod.kind], context.temp_allocator)) if w.playing_vod else "The stream has ended. Esc to go back."
+		ended := "The stream has ended. Esc to go back."
+		switch {
+		case w.playing_vod:
+			ended = fmt.tprintf("That's the end of the %s. Esc to go back.", strings.to_lower(VIDEO_KIND_NAMES[w.vod.kind], context.temp_allocator))
+		case w.retry_at != 0:
+			ended = "The stream has ended. Lurker will play it if it comes back."
+		}
 		draw_centered(&a.renderer, .Regular, text_size, video, ended, BROWSE_DIM_TEXT)
 		draw_vod_offer(app, video)
 	case .Offline:
@@ -877,7 +940,7 @@ draw_watch :: proc(app: ^App) {
 	}
 	r := &a.renderer
 	scale := app.scale
-	if w.status != .Offline && w.status != .Ended {
+	if w.status != .Offline && w.status != .Ended && !w.retrying {
 		w.vod_button = {}
 		w.videos_button = {}
 	}
