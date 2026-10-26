@@ -118,9 +118,10 @@ modules:
       - install -Dm644 assets/install/lurker-24.png ${FLATPAK_DEST}/share/icons/hicolor/24x24/apps/${FLATPAK_ID}.png
       - install -Dm644 assets/install/lurker-16.png ${FLATPAK_DEST}/share/icons/hicolor/16x16/apps/${FLATPAK_ID}.png
       - install -Dm644 packaging/flatpak/${FLATPAK_ID}.metainfo.xml ${FLATPAK_DEST}/share/metainfo/${FLATPAK_ID}.metainfo.xml
-    # Run when the module has run-tests set, as the GitHub workflow does.
+    # Run when the module has run-tests set, as the GitHub workflow does. Linked
+    # like the app: tests that reach the player need libmpv from /app/lib.
     test-commands:
-      - odin test src -out:lurker-tests
+      - odin test src -out:lurker-tests -extra-linker-flags:"-L/app/lib"
     sources:
       - type: dir
         path: ../..
