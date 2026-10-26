@@ -25,6 +25,8 @@ Stream :: struct {
 	user_name:     string,
 	game_name:     string,
 	title:         string,
+	// ISO 639-1 ("en"), or "other".
+	language:      string,
 	viewer_count:  int,
 	started_at:    string,
 	// With "{width}" and "{height}" placeholders.
@@ -38,6 +40,7 @@ clone_stream :: proc(s: Stream) -> Stream {
 		user_name = strings.clone(s.user_name),
 		game_name = strings.clone(s.game_name),
 		title = strings.clone(s.title),
+		language = strings.clone(s.language),
 		viewer_count = s.viewer_count,
 		started_at = strings.clone(s.started_at),
 		thumbnail_url = strings.clone(s.thumbnail_url),
@@ -50,6 +53,7 @@ destroy_stream :: proc(s: Stream) {
 	delete(s.user_name)
 	delete(s.game_name)
 	delete(s.title)
+	delete(s.language)
 	delete(s.started_at)
 	delete(s.thumbnail_url)
 }
@@ -159,11 +163,15 @@ get_followed_streams :: proc(client_id, token, user_id: string) -> (streams: []S
 }
 
 // The most watched live streams on Twitch, or in one category if `game_id` isn't
-// "": the first 100, most viewers first. Allocated with the temp allocator.
-get_top_streams :: proc(client_id, token: string, game_id := "") -> (streams: []Stream, err: Twitch_Error) {
+// "", and only in one language if `language` isn't "": the first 100, most
+// viewers first. Allocated with the temp allocator.
+get_top_streams :: proc(client_id, token: string, game_id := "", language := "") -> (streams: []Stream, err: Twitch_Error) {
 	path := "/streams?first=100"
 	if game_id != "" {
 		path = fmt.tprintf("%s&game_id=%s", path, net.percent_encode(game_id, context.temp_allocator))
+	}
+	if language != "" {
+		path = fmt.tprintf("%s&language=%s", path, net.percent_encode(language, context.temp_allocator))
 	}
 	body := helix_get(client_id, token, path) or_return
 	return parse_streams_response(body)
