@@ -172,7 +172,7 @@ watched_note :: proc(app: ^App) {
 	if !w.playing_vod || w.status != .Playing || w.vod.kind == .Clip {
 		return
 	}
-	if pos, ok := player_number(&app.player, "time-pos"); ok {
+	if pos, ok := player_position(&app.player); ok {
 		watched_set(&app.watched, w.vod.id, int(pos), w.vod.length)
 	}
 	app.watched.noted_at = app.assets.now_ms

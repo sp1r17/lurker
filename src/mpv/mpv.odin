@@ -37,6 +37,7 @@ Event_Id :: enum c.int {
 	File_Loaded        = 8,
 	Idle               = 11,
 	Playback_Restart   = 21,
+	Property_Change    = 22,
 }
 
 Event :: struct {
@@ -67,6 +68,14 @@ Event_End_File :: struct {
 	playlist_entry_id: i64,
 	playlist_insert_id: i64,
 	playlist_insert_num_entries: c.int,
+}
+
+// The data of a Property_Change event. `format` is None when the property has
+// no value now (nothing playing, say).
+Event_Property :: struct {
+	name:   cstring,
+	format: Format,
+	data:   rawptr,
 }
 
 Render_Param_Type :: enum c.int {
@@ -109,7 +118,8 @@ foreign lib {
 	terminate_destroy :: proc(ctx: ^Handle) ---
 	set_option_string :: proc(ctx: ^Handle, name, data: cstring) -> Error ---
 	set_property_string :: proc(ctx: ^Handle, name, data: cstring) -> Error ---
-	get_property :: proc(ctx: ^Handle, name: cstring, format: Format, data: rawptr) -> Error ---
+	// Sends a Property_Change event now and whenever the property changes.
+	observe_property :: proc(ctx: ^Handle, reply_userdata: u64, name: cstring, format: Format) -> Error ---
 	// args is a nil-terminated array.
 	command :: proc(ctx: ^Handle, args: [^]cstring) -> Error ---
 	command_async :: proc(ctx: ^Handle, reply_userdata: u64, args: [^]cstring) -> Error ---

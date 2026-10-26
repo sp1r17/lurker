@@ -199,7 +199,7 @@ vod_chapter_step :: proc(app: ^App, by: int) {
 	if len(w.chapters) == 0 {
 		return
 	}
-	pos, _ := player_number(&app.player, "time-pos")
+	pos, _ := player_position(&app.player)
 	ms := int(pos * 1000)
 	i := chapter_at(w.chapters[:], ms)
 	target := 0
@@ -274,7 +274,7 @@ draw_chapter_menu :: proc(app: ^App) {
 	scale := app.scale
 	size := BROWSE_CARD_TEXT_SIZE * scale
 	item_h := MENU_ITEM_HEIGHT * scale * r.text_scale
-	pos, _ := player_number(&app.player, "time-pos")
+	pos, _ := player_position(&app.player)
 	playing := chapter_at(w.chapters[:], int(pos * 1000))
 	labels := make([]string, len(w.chapters), context.temp_allocator)
 	menu_w := w.chapters_button.w

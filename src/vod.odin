@@ -260,7 +260,7 @@ watch_start_vod :: proc(app: ^App, vod: Vod, start: f64 = -1) {
 // Where the past broadcast is, in seconds, for picking it up again after a
 // quality change.
 vod_position :: proc(app: ^App) -> f64 {
-	pos, _ := player_number(&app.player, "time-pos")
+	pos, _ := player_position(&app.player)
 	return pos
 }
 
@@ -364,7 +364,7 @@ vod_click :: proc(app: ^App, x, y: f32) -> bool {
 		return true
 	}
 	if w.seek_bar.w > 0 && in_rect(w.seek_bar, x, y) {
-		if duration, ok := player_number(&app.player, "duration"); ok && duration > 0 {
+		if duration, ok := player_duration(&app.player); ok && duration > 0 {
 			at := clamp((x - w.seek_bar.x) / w.seek_bar.w, 0, 1) * f32(duration)
 			player_command(&app.player, {"seek", fmt.ctprintf("%.1f", at), "absolute"})
 		}
@@ -449,8 +449,8 @@ draw_vod_seek :: proc(app: ^App, right: f32) {
 		w.chapter_menu = false
 		return
 	}
-	pos, has_pos := player_number(&app.player, "time-pos")
-	duration, has_duration := player_number(&app.player, "duration")
+	pos, has_pos := player_position(&app.player)
+	duration, has_duration := player_duration(&app.player)
 	if !has_pos || !has_duration || duration <= 0 {
 		return
 	}

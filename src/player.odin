@@ -10,6 +10,10 @@ import sdl "vendor:sdl3"
 // Embedded mpv, drawing into the window's OpenGL context through libmpv's render API.
 // mpv calls back from its own threads; the callbacks only push SDL events, and the
 // main thread does the work when they arrive.
+//
+// The main thread renders, so it must never wait on mpv's core (render.h,
+// "Threading"): a stuck core would freeze the window. Commands are async, and
+// what's playing comes from observed properties rather than mpv_get_property.
 Player :: struct {
 	handle:        ^mpv.Handle,
 	render:        ^mpv.Render_Context,
@@ -20,6 +24,10 @@ Player :: struct {
 	fbo:           u32,
 	texture:       u32,
 	target_size:   [2]i32,
+	// What's playing, as mpv last reported it; nil while it has no value.
+	position:      Maybe(f64),
+	duration:      Maybe(f64),
+	paused:        bool,
 }
 
 Player_Error :: enum {
@@ -41,6 +49,12 @@ player_init :: proc(p: ^Player) -> Player_Error {
 	}
 	mpv.set_option_string(p.handle, "vo", "libmpv")
 	mpv.set_option_string(p.handle, "hwdec", "auto-safe")
+	when ODIN_OS == .Linux {
+		// Through pipewire-pulse rather than PipeWire directly: mpv 0.41's PipeWire
+		// output can hang for good while closing when the audio graph changes,
+		// taking mpv's core with it. The trailing comma falls back to the others.
+		mpv.set_option_string(p.handle, "ao", "pulse,")
+	}
 	// "warn" includes a harmless ffmpeg warning for every Twitch segment.
 	mpv.request_log_messages(p.handle, "error")
 	if err := mpv.initialize(p.handle); err < 0 {
@@ -66,6 +80,9 @@ player_init :: proc(p: ^Player) -> Player_Error {
 		return .Render_Init_Failed
 	}
 
+	mpv.observe_property(p.handle, 0, "time-pos", .Double)
+	mpv.observe_property(p.handle, 0, "duration", .Double)
+	mpv.observe_property(p.handle, 0, "pause", .Flag)
 	mpv.set_wakeup_callback(p.handle, push_event, rawptr(uintptr(p.events_event)))
 	mpv.render_context_set_update_callback(p.render, push_event, rawptr(uintptr(p.redraw_event)))
 	return .None
@@ -119,16 +136,35 @@ player_load_at :: proc(p: ^Player, url: string, start: f64, online_segments := f
 	player_command(p, {"loadfile", curl, "replace", "-1", coptions})
 }
 
-// A number mpv knows about what's playing ("time-pos", "duration"), if it has one.
-player_number :: proc(p: ^Player, name: cstring) -> (value: f64, ok: bool) {
-	ok = mpv.get_property(p.handle, name, .Double, &value) >= 0
-	return
+// Where playback is, in seconds, if anything's playing.
+player_position :: proc(p: ^Player) -> (seconds: f64, ok: bool) {
+	return p.position.?
+}
+
+// How long what's playing is, in seconds, if mpv knows.
+player_duration :: proc(p: ^Player) -> (seconds: f64, ok: bool) {
+	return p.duration.?
 }
 
 // Whether mpv is paused.
 player_paused :: proc(p: ^Player) -> bool {
-	flag: i32
-	return mpv.get_property(p.handle, "pause", .Flag, &flag) >= 0 && flag != 0
+	return p.paused
+}
+
+@(private = "file")
+property_changed :: proc(p: ^Player, prop: ^mpv.Event_Property) {
+	number: Maybe(f64)
+	if prop.format == .Double {
+		number = (^f64)(prop.data)^
+	}
+	switch string(prop.name) {
+	case "time-pos":
+		p.position = number
+	case "duration":
+		p.duration = number
+	case "pause":
+		p.paused = prop.format == .Flag && (^i32)(prop.data)^ != 0
+	}
 }
 
 player_command :: proc(p: ^Player, args: []cstring) {
@@ -161,6 +197,8 @@ player_handle_events :: proc(p: ^Player) -> (events: Player_Events) {
 			return
 		case .Playback_Restart:
 			events += {.Playing}
+		case .Property_Change:
+			property_changed(p, (^mpv.Event_Property)(e.data))
 		case .Log_Message:
 			m := (^mpv.Event_Log_Message)(e.data)
 			log.warnf("mpv %s: %s", m.prefix, strings.trim_right_space(string(m.text)))
