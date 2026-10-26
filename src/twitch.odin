@@ -77,6 +77,29 @@ parse_token_response :: proc(body: []byte) -> (token: string, err: Twitch_Error)
 	return strings.clone(r.access_token), .None
 }
 
+// A POST of JSON to the Helix API, which answers 2xx when it's done.
+helix_post :: proc(client_id, token, path, body: string) -> Twitch_Error {
+	headers := []string {
+		strings.concatenate({"Client-Id: ", client_id}, context.temp_allocator),
+		strings.concatenate({"Authorization: Bearer ", token}, context.temp_allocator),
+		"Content-Type: application/json",
+	}
+	url := strings.concatenate({HELIX_URL, path}, context.temp_allocator)
+	res, ok := http_request(url, headers, post_body = body, allocator = context.temp_allocator)
+	if !ok {
+		return .Request_Failed
+	}
+	switch res.status {
+	case 200 ..= 299:
+		return .None
+	case 401:
+		return .Unauthorized
+	case:
+		log.warnf("POST %s returned %d: %s", path, res.status, strings.trim_space(string(res.body)))
+		return .Bad_Status
+	}
+}
+
 // A GET from the Helix API. The body is allocated with the temp allocator.
 helix_get :: proc(client_id, token, path: string) -> (body: []byte, err: Twitch_Error) {
 	headers := []string {
