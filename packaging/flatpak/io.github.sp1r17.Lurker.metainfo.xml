@@ -48,6 +48,11 @@
     <category>Video</category>
   </categories>
   <releases>
+    <release version="0.6.1" date="2026-10-27">
+      <description>
+        <p>A live stream that goes offline and comes back reloads by itself. Fixes the window freezing when the audio output hung, on Linux.</p>
+      </description>
+    </release>
     <release version="0.6.0" date="2026-10-26">
       <description>
         <p>Block channels and categories to hide them everywhere: right-click a card, or open Blocked at the top. Pick a primary language, and streams in other languages are grayed out or hidden. When the channel you're watching raids another, Lurker follows the raid.</p>
