@@ -4,7 +4,7 @@ import "core:slice"
 import "core:strings"
 
 // The button beside the chat box opens every emote the user can send here, to
-// click one into the box.
+// click one into the box, with a box at the top to search them.
 
 // How many emote rows the panel shows at once.
 EMOTE_PANEL_ROWS :: 7
@@ -12,6 +12,8 @@ EMOTE_PANEL_ROWS :: 7
 Panel_Item :: struct {
 	// Point into the emotes they're from, valid until those change.
 	name:  string,
+	// The name in lower case, for searching.
+	lower: string,
 	emote: Emote,
 }
 
@@ -46,7 +48,7 @@ emote_panel_sections :: proc(user: ^User_Emotes, channel_login: string, channel,
 		for name, e in user {
 			if user_emote_usable(e, channel_login) {
 				seen[name] = true
-				append(&section_for(&sections, e.label).items, Panel_Item{name, e.emote})
+				append(&section_for(&sections, e.label).items, Panel_Item{name = name, emote = e.emote})
 			}
 		}
 		// This channel's own first, then Twitch's, then the rest by name.
@@ -87,36 +89,55 @@ emote_panel_sections :: proc(user: ^User_Emotes, channel_login: string, channel,
 				if section == nil {
 					section = section_for(&sections, PICKER_SOURCE_LABELS[source])
 				}
-				append(&section.items, Panel_Item{name, emote})
+				append(&section.items, Panel_Item{name = name, emote = emote})
 			}
 		}
 	}
 	// By name ignoring case, lowered once rather than in every comparison.
-	Keyed :: struct {
-		key:  string,
-		item: Panel_Item,
-	}
 	for &s in sections {
-		keyed := make([]Keyed, len(s.items), context.temp_allocator)
-		for item, i in s.items {
-			keyed[i] = {strings.to_lower(item.name, context.temp_allocator), item}
+		for &item in s.items {
+			item.lower = strings.to_lower(item.name, context.temp_allocator)
 		}
-		slice.sort_by(keyed, proc(a, b: Keyed) -> bool {
-			return a.key < b.key
+		slice.sort_by(s.items[:], proc(a, b: Panel_Item) -> bool {
+			return a.lower < b.lower
 		})
-		for k, i in keyed {
-			s.items[i] = k.item
-		}
 	}
 	return sections[:]
 }
 
+// The sections whose emotes' names contain `query`, ignoring case, leaving out
+// those with none. The items are shallow copies, in sections allocated with
+// `allocator`.
+emote_panel_filter :: proc(sections: []Panel_Section, query: string, allocator := context.allocator) -> [dynamic]Panel_Section {
+	lower_query := strings.to_lower(query, context.temp_allocator)
+	found := make([dynamic]Panel_Section, allocator)
+	for s in sections {
+		matched := Panel_Section{label = s.label}
+		for item in s.items {
+			if strings.contains(item.lower, lower_query) {
+				if matched.items == nil {
+					matched.items = make([dynamic]Panel_Item, allocator)
+				}
+				append(&matched.items, item)
+			}
+		}
+		if len(matched.items) > 0 {
+			append(&found, matched)
+		}
+	}
+	return found
+}
+
 // The panel's sections, owned and kept between frames: listing thousands of
-// emotes every frame drops frames. Remade when an emote set loads.
+// emotes every frame drops frames. Remade when an emote set loads, and the search's
+// results when the search changes.
 Emote_Panel_Cache :: struct {
 	// The generations of the channel's, global and user's emotes it was made from.
 	key:      [3]int,
 	sections: [dynamic]Panel_Section,
+	// What was searched for (owned), and what it found (pointing into `sections`).
+	query:    string,
+	found:    [dynamic]Panel_Section,
 }
 
 emote_panel_cache_destroy :: proc(c: ^Emote_Panel_Cache) {
@@ -124,18 +145,48 @@ emote_panel_cache_destroy :: proc(c: ^Emote_Panel_Cache) {
 		delete(s.label)
 		for item in s.items {
 			delete(item.name)
+			delete(item.lower)
 			delete(item.emote.url_1x)
 			delete(item.emote.url_2x)
 		}
 		delete(s.items)
 	}
 	delete(c.sections)
+	clear_found(c)
 	c^ = {}
 }
 
-// `p`'s panel sections, remade if its emotes changed since.
+@(private = "file")
+clear_found :: proc(c: ^Emote_Panel_Cache) {
+	for s in c.found {
+		delete(s.items)
+	}
+	delete(c.found)
+	delete(c.query)
+	c.found, c.query = {}, ""
+}
+
+// `p`'s panel sections matching its search, remade if its emotes or the search
+// changed since.
 @(private = "file")
 emote_panel_list :: proc(app: ^App, p: ^Chat_Pane) -> []Panel_Section {
+	c := &p.emote_cache
+	sections := emote_panel_all(app, p)
+	query := strings.trim_space(input_text(&p.boxes[.Emote_Search]))
+	if query == "" {
+		return sections
+	}
+	if c.query != query || c.found == nil {
+		clear_found(c)
+		c.query = strings.clone(query)
+		c.found = emote_panel_filter(sections, query)
+	}
+	return c.found[:]
+}
+
+// Every emote in `p`'s panel.
+@(private = "file")
+emote_panel_all :: proc(app: ^App, p: ^Chat_Pane) -> []Panel_Section {
 	a := &app.assets
 	c := &p.emote_cache
 	key := [3]int{p.emotes.generation, a.emotes.generation, a.user_emotes_generation}
@@ -150,6 +201,7 @@ emote_panel_list :: proc(app: ^App, p: ^Chat_Pane) -> []Panel_Section {
 		for item in s.items {
 			append(&owned.items, Panel_Item{
 				name = strings.clone(item.name),
+				lower = strings.clone(item.lower),
 				emote = {url_1x = strings.clone(item.emote.url_1x), url_2x = strings.clone(item.emote.url_2x), zero_width = item.emote.zero_width},
 			})
 		}
@@ -163,15 +215,43 @@ pane_has_emote_button :: proc(app: ^App, p: ^Chat_Pane) -> bool {
 	return p.channel != "" && app.signed_in && !pane_replaying(app, p)
 }
 
+// Opens the panel, ready to search.
+@(private = "file")
+emote_panel_open :: proc(app: ^App, p: ^Chat_Pane) {
+	p.emote_panel = true
+	p.emote_scroll = 0
+	box_focus(app, p, .Emote_Search)
+}
+
+// Closes the panel, clearing its search.
+emote_panel_close :: proc(app: ^App, p: ^Chat_Pane) {
+	if !p.emote_panel {
+		return
+	}
+	if p.boxes[.Emote_Search].focused {
+		box_unfocus(app)
+	}
+	input_clear(&p.boxes[.Emote_Search])
+	p.emote_panel = false
+}
+
 // A click on the button or the panel. Returns true if it was one.
 emote_panel_click :: proc(app: ^App, p: ^Chat_Pane, x, y: f32) -> bool {
 	if p.emote_button.w > 0 && in_rect(p.emote_button, x, y) {
-		p.emote_panel = !p.emote_panel
-		p.emote_scroll = 0
+		if p.emote_panel {
+			emote_panel_close(app, p)
+			box_focus(app, p, .Chat)
+		} else {
+			emote_panel_open(app, p)
+		}
 		return true
 	}
 	if !p.emote_panel || !in_rect(p.emote_rect, x, y) {
 		return false
+	}
+	if in_rect(p.emote_search_rect, x, y) {
+		box_focus(app, p, .Emote_Search)
+		return true
 	}
 	for cell in p.emote_cells {
 		if !in_rect(cell.rect, x, y) {
@@ -190,10 +270,23 @@ emote_panel_click :: proc(app: ^App, p: ^Chat_Pane, x, y: f32) -> bool {
 	return true
 }
 
-// Puts `name` and a space at the cursor, with one before if the text ends in a word.
+// Enter in the search box puts the first emote found in the chat box.
+emote_panel_accept_first :: proc(app: ^App, p: ^Chat_Pane) {
+	for s in emote_panel_list(app, p) {
+		if len(s.items) > 0 {
+			emote_panel_insert(app, p, s.items[0].name)
+			return
+		}
+	}
+}
+
+// Puts `name` and a space at the chat box's cursor, with one before if the text
+// ends in a word. Searching keeps the search box focused, to go on picking.
 @(private = "file")
 emote_panel_insert :: proc(app: ^App, p: ^Chat_Pane, name: string) {
-	box_focus(app, p, .Chat)
+	if !p.boxes[.Emote_Search].focused {
+		box_focus(app, p, .Chat)
+	}
 	ti := &p.boxes[.Chat]
 	before := input_text(ti)[:ti.cursor]
 	if before != "" && !strings.has_suffix(before, " ") {
@@ -215,7 +308,7 @@ emote_panel_scroll :: proc(app: ^App, p: ^Chat_Pane, x, y, wheel_y: f32) -> bool
 draw_emote_panel :: proc(app: ^App, p: ^Chat_Pane) {
 	clear(&p.emote_cells)
 	if p.emote_button.w == 0 {
-		p.emote_panel = false
+		emote_panel_close(app, p)
 		p.emote_rect = {}
 		return
 	}
@@ -236,19 +329,25 @@ draw_emote_panel :: proc(app: ^App, p: ^Chat_Pane) {
 
 	cell := EMOTE_HEIGHT * scale * r.text_scale + pad
 	lh_small := line_height(r, .Regular, small)
+	search_h := line_height(r, .Regular, size) + 2 * pad
 	box := p.reply_rect if p.reply_rect.w > 0 else p.input_rect
 	panel_w := p.emote_button.x + p.emote_button.w - box.x
 	cols := max(1, int((panel_w - pad) / cell))
-	list_h := min(EMOTE_PANEL_ROWS * cell, p.messages_rect.h - lh_small - 3 * pad)
-	list_h = max(list_h, cell)
+	head_h := search_h + pad
 	foot_h := lh_small + pad
-	panel_h := list_h + foot_h
+	list_h := min(EMOTE_PANEL_ROWS * cell, p.messages_rect.h - head_h - foot_h - pad)
+	list_h = max(list_h, cell)
+	panel_h := head_h + list_h + foot_h
 	panel := Rect{box.x, box.y - 4 * scale - panel_h, panel_w, panel_h}
 	p.emote_rect = panel
 	draw_rect(r, panel, PICKER_BACKGROUND)
 
+	// The search box at the top, then the emotes.
+	p.emote_search_rect = {panel.x + pad / 2, panel.y + pad / 2, panel.w - pad, search_h}
+	searching := strings.trim_space(input_text(&p.boxes[.Emote_Search])) != ""
+	draw_text_box(app, &p.boxes[.Emote_Search], &p.box_scroll[.Emote_Search], p.emote_search_rect, "Search emotes")
 	sections := emote_panel_list(app, p)
-	list := Rect{panel.x, panel.y, panel.w, list_h}
+	list := Rect{panel.x, panel.y + head_h, panel.w, list_h}
 	total: f32
 	for s in sections {
 		if len(s.items) > 0 {
@@ -258,7 +357,7 @@ draw_emote_panel :: proc(app: ^App, p: ^Chat_Pane) {
 	p.emote_max_scroll = max(0, total - list_h)
 	p.emote_scroll = clamp(p.emote_scroll, 0, p.emote_max_scroll)
 	if total == 0 {
-		draw_text(r, .Regular, small, panel.x + pad, panel.y + pad / 2, "No emotes yet.", CHAT_SYSTEM_TEXT)
+		draw_text(r, .Regular, small, panel.x + pad, list.y + pad / 2, "No emotes found." if searching else "No emotes yet.", CHAT_SYSTEM_TEXT)
 	}
 
 	pixel_scale: f32 = 2 if scale * r.text_scale > 1 else 1
@@ -311,6 +410,6 @@ draw_emote_panel :: proc(app: ^App, p: ^Chat_Pane) {
 
 	if hover_name != "" {
 		text := strings.concatenate({hover_name, "  ·  ", hover_label}, context.temp_allocator)
-		draw_text(r, .Regular, small, panel.x + pad, panel.y + list_h + pad / 2, fit_text(r, .Regular, small, text, panel.w - 2 * pad), CHAT_TEXT)
+		draw_text(r, .Regular, small, panel.x + pad, list.y + list_h + pad / 2, fit_text(r, .Regular, small, text, panel.w - 2 * pad), CHAT_TEXT)
 	}
 }

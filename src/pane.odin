@@ -50,6 +50,7 @@ Chat_Pane :: struct {
 	emote_max_scroll: f32,
 	emote_button:     Rect,
 	emote_rect:       Rect,
+	emote_search_rect: Rect,
 	emote_cells:      [dynamic]Emote_Cell,
 	emote_cache:      Emote_Panel_Cache,
 	reply_rect:       Rect,
@@ -70,6 +71,8 @@ Box :: enum {
 	Chat,
 	// Filtering the chat (Ctrl+F), below the header.
 	Search,
+	// Searching the emote panel (emote_panel.odin), at its top.
+	Emote_Search,
 }
 
 pane_new :: proc(app: ^App) -> ^Chat_Pane {
@@ -403,7 +406,7 @@ pane_click :: proc(app: ^App, p: ^Chat_Pane, x, y: f32) {
 	// A click anywhere else closes the panel, though the chat box keeps it open to
 	// go on typing.
 	if !in_rect(p.input_rect, x, y) {
-		p.emote_panel = false
+		emote_panel_close(app, p)
 	}
 	// Back to the newest messages, which marks the mentions read.
 	if p.mention_badge.w > 0 && in_rect(p.mention_badge, x, y) {
@@ -450,8 +453,12 @@ pane_text_input :: proc(app: ^App, text: string) {
 	if p, box, typing := focused_box(app); typing {
 		input_insert(&p.boxes[box], text)
 		p.picker_selected = 0
-		if box == .Search {
+		switch box {
+		case .Search:
 			p.view.scroll = 0
+		case .Emote_Search:
+			p.emote_scroll = 0
+		case .Chat:
 		}
 	}
 }
@@ -473,7 +480,11 @@ pane_input_key :: proc(app: ^App, key: sdl.KeyboardEvent) {
 	case sdl.K_ESCAPE:
 		switch {
 		case box == .Chat && p.emote_panel:
-			p.emote_panel = false
+			emote_panel_close(app, p)
+		case box == .Emote_Search:
+			// Back to the message being written.
+			emote_panel_close(app, p)
+			box_focus(app, p, .Chat)
 		case box == .Chat && p.reply.id != "":
 			// Stops replying, still typing.
 			pane_reply_cancel(p)
@@ -490,6 +501,8 @@ pane_input_key :: proc(app: ^App, key: sdl.KeyboardEvent) {
 		case box == .Search:
 			// Keep the filter, and the keys for the player.
 			box_unfocus(app)
+		case box == .Emote_Search:
+			emote_panel_accept_first(app, p)
 		case p.channel == "":
 			pane_submit_channel(app, p)
 		case:
@@ -500,6 +513,9 @@ pane_input_key :: proc(app: ^App, key: sdl.KeyboardEvent) {
 			search_open(app, p)
 		}
 	case sdl.K_TAB:
+		if box == .Emote_Search {
+			return
+		}
 		emote_names, user_names := completion_names(app, p)
 		input_complete(ti, emote_names, user_names, backwards = shift)
 	case sdl.K_W:
@@ -512,8 +528,12 @@ pane_input_key :: proc(app: ^App, key: sdl.KeyboardEvent) {
 	}
 	if len(ti.text) != before {
 		p.picker_selected = 0
-		if box == .Search {
+		switch box {
+		case .Search:
 			p.view.scroll = 0
+		case .Emote_Search:
+			p.emote_scroll = 0
+		case .Chat:
 		}
 	}
 }

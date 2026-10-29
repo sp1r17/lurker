@@ -832,7 +832,7 @@ watch_click :: proc(app: ^App, x, y: f32) {
 	p, i := pane_at(app, x, y)
 	for other in w.panes {
 		if other != p {
-			other.emote_panel = false
+			emote_panel_close(app, other)
 		}
 	}
 	if p == nil {
