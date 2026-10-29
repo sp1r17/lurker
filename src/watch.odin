@@ -830,9 +830,14 @@ watch_click :: proc(app: ^App, x, y: f32) {
 		return
 	}
 	p, i := pane_at(app, x, y)
+	for other in w.panes {
+		if other != p {
+			emote_panel_close(app, other)
+		}
+	}
 	if p == nil {
 		box_unfocus(app)
-		user_card_close(app)
+		user_card_dismiss(app)
 		return
 	}
 	w.focus = i
@@ -869,6 +874,9 @@ watch_scroll :: proc(app: ^App, x, y, wheel_y: f32) {
 		return
 	}
 	if p, _ := pane_at(app, x, y); p != nil {
+		if emote_panel_scroll(app, p, x, y, wheel_y) {
+			return
+		}
 		if in_rect(p.messages_rect, x, y) {
 			chat_view_scroll(&p.view, wheel_y, app.scale)
 		}
@@ -995,7 +1003,9 @@ draw_watch :: proc(app: ^App) {
 		for p in w.panes {
 			screen.w = max(screen.w, p.rect.x + p.rect.w)
 			screen.h = max(screen.h, p.rect.y + p.rect.h)
-			draw_chat_tooltip(&app.assets, &p.view, p.messages_rect, screen, app.mouse.x, app.mouse.y, scale)
+			if !pane_covered(p, app.mouse.x, app.mouse.y) {
+				draw_chat_tooltip(&app.assets, &p.view, p.messages_rect, screen, app.mouse.x, app.mouse.y, scale)
+			}
 		}
 	}
 }

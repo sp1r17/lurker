@@ -24,6 +24,24 @@ check_cancelled :: proc "c" (_: rawptr, _, _, _, _: curl.off_t) -> c.int {
 	return 1 if sync.atomic_load(&requests_cancelled) else 0
 }
 
+// A job worker's handle, kept between its requests so they reuse its connections:
+// a new TLS connection per emote makes a big emote set slow to show.
+@(private = "file", thread_local)
+kept_handle: ^curl.CURL
+
+// Keeps connections open between this thread's requests, until http_keep_end.
+// For long-lived threads only (the job workers).
+http_keep_begin :: proc() {
+	kept_handle = curl.easy_init()
+}
+
+http_keep_end :: proc() {
+	if kept_handle != nil {
+		curl.easy_cleanup(kept_handle)
+		kept_handle = nil
+	}
+}
+
 Http_Response :: struct {
 	status: int,
 	// Allocated with the allocator passed to http_request.
@@ -42,11 +60,19 @@ http_request :: proc(
 	res: Http_Response,
 	ok: bool,
 ) {
-	h := curl.easy_init()
-	if h == nil {
-		return {}, false
+	h := kept_handle
+	if h != nil {
+		// Back to the defaults, keeping its connections.
+		curl.easy_reset(h)
+	} else {
+		h = curl.easy_init()
+		if h == nil {
+			return {}, false
+		}
 	}
-	defer curl.easy_cleanup(h)
+	defer if h != kept_handle {
+		curl.easy_cleanup(h)
+	}
 
 	Sink :: struct {
 		ctx:  runtime.Context,

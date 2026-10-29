@@ -156,3 +156,48 @@ user_emotes_parse :: proc(t: ^testing.T) {
 	testing.expect_value(t, emotes[1].token, "Kappa")
 	testing.expect_value(t, emotes[1].owner, "")
 }
+
+@(test)
+panel_groups_emotes_by_source :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	channel, global: Emotes
+	channel.sets[.Channel_7TV] = make(map[string]Emote, context.temp_allocator)
+	global.sets[.Global_BTTV] = make(map[string]Emote, context.temp_allocator)
+	channel.sets[.Channel_7TV]["catJAM"] = {}
+	global.sets[.Global_BTTV]["catJAM"] = {}
+	global.sets[.Global_BTTV]["KEKW"] = {}
+	user := make(User_Emotes, context.temp_allocator)
+	user["Kappa"] = {label = "Twitch"}
+	user["moon2L"] = {label = "moonmoon", owner = "moonmoon"}
+	user["zzz"] = {label = "other follower", owner = "other", follower_only = true}
+	sections := emote_panel_sections(&user, "moonmoon", &channel, &global)
+	// The channel's own first, then Twitch's, then third-party; no follower emotes
+	// from elsewhere, and a shared name only once.
+	testing.expect_value(t, len(sections), 4)
+	testing.expect_value(t, sections[0].label, "moonmoon")
+	testing.expect_value(t, sections[1].label, "Twitch")
+	testing.expect_value(t, sections[2].label, "7TV")
+	testing.expect_value(t, sections[3].label, "BTTV global")
+	testing.expect_value(t, len(sections[3].items), 1)
+	testing.expect_value(t, sections[3].items[0].name, "KEKW")
+}
+
+@(test)
+panel_search_matches_any_part_of_a_name :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	channel: Emotes
+	channel.sets[.Channel_7TV] = make(map[string]Emote, context.temp_allocator)
+	channel.sets[.Channel_7TV]["catJAM"] = {}
+	channel.sets[.Channel_7TV]["xddCat"] = {}
+	channel.sets[.Channel_7TV]["KEKW"] = {}
+	user := make(User_Emotes, context.temp_allocator)
+	user["Kappa"] = {label = "Twitch"}
+	sections := emote_panel_sections(&user, "moonmoon", &channel, nil)
+	found := emote_panel_filter(sections, "CAT", context.temp_allocator)
+	// Sections with nothing found are left out.
+	testing.expect_value(t, len(found), 1)
+	testing.expect_value(t, found[0].label, "7TV")
+	testing.expect_value(t, len(found[0].items), 2)
+	testing.expect_value(t, found[0].items[0].name, "catJAM")
+	testing.expect_value(t, found[0].items[1].name, "xddCat")
+}

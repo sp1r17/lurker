@@ -41,8 +41,10 @@ Badge_Scope :: enum {
 // "subscriber/12"). Strings are owned. The app has one for the global sets
 // (Global_* and Badge_Scope.Global), and each chat pane one for its channel's.
 Emotes :: struct {
-	sets:   [Emote_Source]map[string]Emote,
-	badges: [Badge_Scope]map[string]Badge,
+	sets:       [Emote_Source]map[string]Emote,
+	badges:     [Badge_Scope]map[string]Badge,
+	// Bumped when a set loads, for what's worked out from them (the emote panel).
+	generation: int,
 }
 
 emotes_destroy :: proc(e: ^Emotes) {
@@ -318,6 +320,7 @@ finish_emote_set_job :: proc(e: ^Emotes, p: ^Emote_Set_Job) {
 		}
 		set[named.name] = named.emote
 	}
+	e.generation += 1
 	if len(p.emotes) > 0 {
 		log.infof("loaded %d %v emotes", len(p.emotes), p.source)
 	}
