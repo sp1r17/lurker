@@ -382,6 +382,19 @@ search_close :: proc(app: ^App, p: ^Chat_Pane) {
 	p.view.scroll = 0
 }
 
+// Whether (x, y) is on the emote panel or picker, over the messages.
+pane_covered :: proc(p: ^Chat_Pane, x, y: f32) -> bool {
+	if p.emote_rect.w > 0 && in_rect(p.emote_rect, x, y) {
+		return true
+	}
+	for row in p.picker_rows {
+		if in_rect(row, x, y) {
+			return true
+		}
+	}
+	return false
+}
+
 // Handles a click inside the pane.
 pane_click :: proc(app: ^App, p: ^Chat_Pane, x, y: f32) {
 	if emote_picker_click(app, p, x, y) || emote_panel_click(app, p, x, y) {

@@ -1003,7 +1003,9 @@ draw_watch :: proc(app: ^App) {
 		for p in w.panes {
 			screen.w = max(screen.w, p.rect.x + p.rect.w)
 			screen.h = max(screen.h, p.rect.y + p.rect.h)
-			draw_chat_tooltip(&app.assets, &p.view, p.messages_rect, screen, app.mouse.x, app.mouse.y, scale)
+			if !pane_covered(p, app.mouse.x, app.mouse.y) {
+				draw_chat_tooltip(&app.assets, &p.view, p.messages_rect, screen, app.mouse.x, app.mouse.y, scale)
+			}
 		}
 	}
 }
