@@ -48,6 +48,11 @@
     <category>Video</category>
   </categories>
   <releases>
+    <release version="0.7.0" date="2026-10-28">
+      <description>
+        <p>Pin a user card to keep it open while you click around the chat. A new emote button beside the chat box lists every emote you can send, with a search box; click one to put it in your message. Large 7TV emote sets load several times faster.</p>
+      </description>
+    </release>
     <release version="0.6.1" date="2026-10-27">
       <description>
         <p>A live stream that goes offline and comes back reloads by itself. Fixes the window freezing when the audio output hung, on Linux.</p>
