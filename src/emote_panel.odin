@@ -91,12 +91,71 @@ emote_panel_sections :: proc(user: ^User_Emotes, channel_login: string, channel,
 			}
 		}
 	}
+	// By name ignoring case, lowered once rather than in every comparison.
+	Keyed :: struct {
+		key:  string,
+		item: Panel_Item,
+	}
 	for &s in sections {
-		slice.sort_by(s.items[:], proc(a, b: Panel_Item) -> bool {
-			return strings.to_lower(a.name, context.temp_allocator) < strings.to_lower(b.name, context.temp_allocator)
+		keyed := make([]Keyed, len(s.items), context.temp_allocator)
+		for item, i in s.items {
+			keyed[i] = {strings.to_lower(item.name, context.temp_allocator), item}
+		}
+		slice.sort_by(keyed, proc(a, b: Keyed) -> bool {
+			return a.key < b.key
 		})
+		for k, i in keyed {
+			s.items[i] = k.item
+		}
 	}
 	return sections[:]
+}
+
+// The panel's sections, owned and kept between frames: listing thousands of
+// emotes every frame drops frames. Remade when an emote set loads.
+Emote_Panel_Cache :: struct {
+	// The generations of the channel's, global and user's emotes it was made from.
+	key:      [3]int,
+	sections: [dynamic]Panel_Section,
+}
+
+emote_panel_cache_destroy :: proc(c: ^Emote_Panel_Cache) {
+	for s in c.sections {
+		delete(s.label)
+		for item in s.items {
+			delete(item.name)
+			delete(item.emote.url_1x)
+			delete(item.emote.url_2x)
+		}
+		delete(s.items)
+	}
+	delete(c.sections)
+	c^ = {}
+}
+
+// `p`'s panel sections, remade if its emotes changed since.
+@(private = "file")
+emote_panel_list :: proc(app: ^App, p: ^Chat_Pane) -> []Panel_Section {
+	a := &app.assets
+	c := &p.emote_cache
+	key := [3]int{p.emotes.generation, a.emotes.generation, a.user_emotes_generation}
+	if c.sections != nil && c.key == key {
+		return c.sections[:]
+	}
+	emote_panel_cache_destroy(c)
+	c.key = key
+	c.sections = make([dynamic]Panel_Section)
+	for s in emote_panel_sections(&a.user_emotes, p.channel, &p.emotes, &a.emotes) {
+		owned := Panel_Section{label = strings.clone(s.label), items = make([dynamic]Panel_Item, 0, len(s.items))}
+		for item in s.items {
+			append(&owned.items, Panel_Item{
+				name = strings.clone(item.name),
+				emote = {url_1x = strings.clone(item.emote.url_1x), url_2x = strings.clone(item.emote.url_2x), zero_width = item.emote.zero_width},
+			})
+		}
+		append(&c.sections, owned)
+	}
+	return c.sections[:]
 }
 
 // Whether the pane has the button: there's a chat to send to.
@@ -119,7 +178,7 @@ emote_panel_click :: proc(app: ^App, p: ^Chat_Pane, x, y: f32) -> bool {
 			continue
 		}
 		index := cell.index
-		for s in emote_panel_sections(&app.assets.user_emotes, p.channel, &p.emotes, &app.assets.emotes) {
+		for s in emote_panel_list(app, p) {
 			if index < len(s.items) {
 				emote_panel_insert(app, p, s.items[index].name)
 				break
@@ -188,7 +247,7 @@ draw_emote_panel :: proc(app: ^App, p: ^Chat_Pane) {
 	p.emote_rect = panel
 	draw_rect(r, panel, PICKER_BACKGROUND)
 
-	sections := emote_panel_sections(&a.user_emotes, p.channel, &p.emotes, &a.emotes)
+	sections := emote_panel_list(app, p)
 	list := Rect{panel.x, panel.y, panel.w, list_h}
 	total: f32
 	for s in sections {
@@ -216,12 +275,14 @@ draw_emote_panel :: proc(app: ^App, p: ^Chat_Pane) {
 			draw_text(r, .Bold, small, panel.x + pad, y, s.label, BROWSE_DIM_TEXT)
 		}
 		y += lh_small + pad / 2
-		for item, i in s.items {
+		rows := (len(s.items) + cols - 1) / cols
+		// Only the rows in view.
+		first := clamp(int((list.y - y) / cell), 0, rows)
+		last := clamp(int((list.y + list_h - y) / cell) + 1, 0, rows)
+		for i in first * cols ..< min(len(s.items), last * cols) {
+			item := s.items[i]
 			row, col := i / cols, i % cols
 			rect := Rect{panel.x + pad / 2 + f32(col) * cell, y + f32(row) * cell, cell, cell}
-			if rect.y + cell < list.y || rect.y > list.y + list_h {
-				continue
-			}
 			append(&p.emote_cells, Emote_Cell{rect, index + i})
 			if in_rect(rect, app.mouse.x, app.mouse.y) && in_rect(list, app.mouse.x, app.mouse.y) {
 				draw_rect(r, rect, MENU_HOVER)
@@ -243,7 +304,7 @@ draw_emote_panel :: proc(app: ^App, p: ^Chat_Pane) {
 				}
 			}
 		}
-		y += f32((len(s.items) + cols - 1) / cols) * cell
+		y += f32(rows) * cell
 		index += len(s.items)
 	}
 	clip_end(r)

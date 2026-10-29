@@ -116,4 +116,5 @@ finish_user_emotes_job :: proc(app: ^App, p: ^User_Emotes_Job) {
 	}
 	user_emotes_destroy(&app.assets.user_emotes)
 	app.assets.user_emotes, p.emotes = p.emotes, {}
+	app.assets.user_emotes_generation += 1
 }

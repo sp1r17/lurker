@@ -51,6 +51,7 @@ Chat_Pane :: struct {
 	emote_button:     Rect,
 	emote_rect:       Rect,
 	emote_cells:      [dynamic]Emote_Cell,
+	emote_cache:      Emote_Panel_Cache,
 	reply_rect:       Rect,
 	reply_close:      Rect,
 	// The chat's modes (slow, subscribers only...) from the last draw, shown above
@@ -109,6 +110,7 @@ pane_destroy :: proc(app: ^App, p: ^Chat_Pane) {
 	delete(p.channel)
 	delete(p.picker_rows)
 	delete(p.emote_cells)
+	emote_panel_cache_destroy(&p.emote_cache)
 	pane_reply_cancel(p)
 	free(p)
 }

@@ -52,6 +52,8 @@ Assets :: struct {
 	emotes:        Emotes,
 	// The signed-in user's Twitch emotes.
 	user_emotes:   User_Emotes,
+	// Bumped when they load.
+	user_emotes_generation: int,
 	emoji:         Emoji_Table,
 	// Milliseconds since startup, for animations.
 	now_ms:        int,
