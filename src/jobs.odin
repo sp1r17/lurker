@@ -4,7 +4,8 @@ import "core:sync"
 import "core:thread"
 import sdl "vendor:sdl3"
 
-JOB_WORKERS :: 4
+// Mostly waiting on the network: a channel's emotes download several at a time.
+JOB_WORKERS :: 8
 
 // Background work: downloads and decoding. A job's `run` happens on a worker thread
 // and must only touch the job; the main thread then takes it back with jobs_take and
@@ -102,6 +103,8 @@ jobs_take :: proc(jobs: ^Jobs, into: ^[dynamic]^Job) {
 
 @(private = "file")
 worker :: proc(jobs: ^Jobs) {
+	http_keep_begin()
+	defer http_keep_end()
 	for {
 		job: ^Job
 		{
