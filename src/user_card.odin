@@ -42,6 +42,8 @@ User_Card_State :: enum {
 // `thread`, its reply thread popup.
 User_Card :: struct {
 	open:     bool,
+	// Pinned cards stay open while the user clicks elsewhere; Esc or unpinning ends it.
+	pinned:   bool,
 	// The pane whose chat it was opened from, by ID.
 	pane:     int,
 	login:    string,
@@ -57,6 +59,7 @@ User_Card :: struct {
 	// From the last draw: the links to their videos, to ignore them and to reply to
 	// the thread, the moderation buttons, the list of messages and how far it's
 	// scrolled up (and can be), where names, emotes and links are in it, and its rows.
+	pin_link:    Rect,
 	videos_link: Rect,
 	ignore_link: Rect,
 	reply_link:  Rect,
@@ -87,8 +90,10 @@ USER_CARD_MOD_ACTIONS := [?]struct {
 
 user_card_open :: proc(app: ^App, p: ^Chat_Pane, login: string, anchor_y: f32) {
 	c := &app.watch.card
+	pinned := c.pinned
 	user_card_close(app)
 	c.open = true
+	c.pinned = pinned
 	c.pane = p.id
 	c.login = strings.clone(login)
 	c.anchor_y = anchor_y
@@ -109,11 +114,20 @@ user_card_open :: proc(app: ^App, p: ^Chat_Pane, login: string, anchor_y: f32) {
 // Opens the thread that message `root` started.
 thread_card_open :: proc(app: ^App, p: ^Chat_Pane, root: string, anchor_y: f32) {
 	c := &app.watch.card
+	pinned := c.pinned
 	user_card_close(app)
 	c.open = true
+	c.pinned = pinned
 	c.pane = p.id
 	c.thread = strings.clone(root)
 	c.anchor_y = anchor_y
+}
+
+// Closes the card, unless it's pinned: for clicks that land elsewhere.
+user_card_dismiss :: proc(app: ^App) {
+	if !app.watch.card.pinned {
+		user_card_close(app)
+	}
 }
 
 user_card_close :: proc(app: ^App) {
@@ -281,6 +295,9 @@ draw_user_card :: proc(app: ^App) {
 	draw_rect(r, {x + scale, y + scale, card_w - 2 * scale, card_h - 2 * scale}, USER_CARD_BACKGROUND)
 
 	c.mod_links = {}
+	pin := "Unpin" if c.pinned else "Pin"
+	pin_w := text_width(r, .Bold, small, pin)
+	c.pin_link = {x + card_w - pad - pin_w, y + pad, pin_w, lh_small}
 	if in_thread {
 		ty := y + pad
 		title := "Thread"
@@ -294,6 +311,7 @@ draw_user_card :: proc(app: ^App) {
 	} else {
 		draw_user_header(app, c, x, y, color, mod_row)
 	}
+	draw_text(r, .Bold, small, c.pin_link.x, c.pin_link.y, pin, BROWSE_TEXT if in_rect(c.pin_link, app.mouse.x, app.mouse.y) else BROWSE_ACCENT)
 
 	// The messages, newest at the bottom, scrolled up by c.scroll.
 	c.list_rect = {x + scale, y + header_h, card_w - 2 * scale, list_h}
@@ -394,7 +412,8 @@ draw_user_header :: proc(app: ^App, c: ^User_Card, x, y: f32, color: Color, mod_
 		draw_rect(r, avatar_rect, BROWSE_PLACEHOLDER)
 	}
 	tx := avatar_rect.x + avatar + pad
-	tw := x + card_w - pad - tx
+	// Clear of the pin link at the top right.
+	tw := c.pin_link.x - pad / 2 - tx
 	name := c.info.display_name if c.state == .Loaded && c.info.display_name != "" else c.login
 	name_size := 20 * scale
 	draw_text(r, .Bold, name_size, tx, y + pad, fit_text(r, .Bold, name_size, name, tw), color)
@@ -484,6 +503,9 @@ user_card_click :: proc(app: ^App, x, y: f32) {
 		return
 	}
 	switch {
+	case in_rect(c.pin_link, x, y):
+		c.pinned = !c.pinned
+		return
 	case in_rect(c.videos_link, x, y):
 		watch_open_videos(app, c.login, c.info.display_name if c.state == .Loaded else "")
 		return

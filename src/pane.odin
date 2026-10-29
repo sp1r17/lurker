@@ -42,6 +42,15 @@ Chat_Pane :: struct {
 	// is "" when not replying. Owned. And from the last draw, the bar and its
 	// close button.
 	reply:            Chat_Reply,
+	// The emote button beside the chat box and its panel (emote_panel.odin): whether
+	// it's open, how far it's scrolled (and can be), and from the last draw, where
+	// the button, panel and its emotes are.
+	emote_panel:      bool,
+	emote_scroll:     f32,
+	emote_max_scroll: f32,
+	emote_button:     Rect,
+	emote_rect:       Rect,
+	emote_cells:      [dynamic]Emote_Cell,
 	reply_rect:       Rect,
 	reply_close:      Rect,
 	// The chat's modes (slow, subscribers only...) from the last draw, shown above
@@ -99,6 +108,7 @@ pane_destroy :: proc(app: ^App, p: ^Chat_Pane) {
 	delete(p.room_id)
 	delete(p.channel)
 	delete(p.picker_rows)
+	delete(p.emote_cells)
 	pane_reply_cancel(p)
 	free(p)
 }
@@ -173,11 +183,17 @@ pane_layout :: proc(app: ^App, p: ^Chat_Pane, rect: Rect) {
 		p.search_rect = {}
 	}
 	p.input_rect = {rect.x + pad, rect.y + rect.h - pad - box_h, rect.w - 2 * pad, box_h}
+	// The emote button takes a square at the box's right.
+	p.emote_button = {}
+	if pane_has_emote_button(app, p) {
+		p.input_rect.w -= box_h + pad / 2
+		p.emote_button = {p.input_rect.x + p.input_rect.w + pad / 2, p.input_rect.y, box_h, box_h}
+	}
 	bottom := p.input_rect.y - pad
 	p.reply_rect = {}
 	if p.reply.id != "" {
 		reply_h := line_height(&app.assets.renderer, .Regular, CHAT_FONT_SIZE * scale) + pad
-		p.reply_rect = {p.input_rect.x, p.input_rect.y - reply_h, p.input_rect.w, reply_h}
+		p.reply_rect = {p.input_rect.x, p.input_rect.y - reply_h, rect.w - 2 * pad, reply_h}
 		bottom = p.reply_rect.y - pad / 2
 	}
 	p.modes_rect = {}
@@ -245,6 +261,7 @@ draw_pane :: proc(app: ^App, p: ^Chat_Pane, focused: bool) {
 	draw_reply_bar(app, p)
 	draw_box(app, p, .Chat, p.input_rect, hint)
 	draw_emote_picker(app, p)
+	draw_emote_panel(app, p)
 	if p.searching {
 		draw_box(app, p, .Search, p.search_rect, "" if filter != "" else "Search, or from:name")
 		if filter != "" {
@@ -365,8 +382,13 @@ search_close :: proc(app: ^App, p: ^Chat_Pane) {
 
 // Handles a click inside the pane.
 pane_click :: proc(app: ^App, p: ^Chat_Pane, x, y: f32) {
-	if emote_picker_click(app, p, x, y) {
+	if emote_picker_click(app, p, x, y) || emote_panel_click(app, p, x, y) {
 		return
+	}
+	// A click anywhere else closes the panel, though the chat box keeps it open to
+	// go on typing.
+	if !in_rect(p.input_rect, x, y) {
+		p.emote_panel = false
 	}
 	// Back to the newest messages, which marks the mentions read.
 	if p.mention_badge.w > 0 && in_rect(p.mention_badge, x, y) {
@@ -405,7 +427,7 @@ pane_click :: proc(app: ^App, p: ^Chat_Pane, x, y: f32) {
 			return
 		}
 	}
-	user_card_close(app)
+	user_card_dismiss(app)
 	chat_view_click(&p.view, x, y)
 }
 
@@ -435,6 +457,8 @@ pane_input_key :: proc(app: ^App, key: sdl.KeyboardEvent) {
 	switch key.key {
 	case sdl.K_ESCAPE:
 		switch {
+		case box == .Chat && p.emote_panel:
+			p.emote_panel = false
 		case box == .Chat && p.reply.id != "":
 			// Stops replying, still typing.
 			pane_reply_cancel(p)

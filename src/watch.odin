@@ -830,9 +830,14 @@ watch_click :: proc(app: ^App, x, y: f32) {
 		return
 	}
 	p, i := pane_at(app, x, y)
+	for other in w.panes {
+		if other != p {
+			other.emote_panel = false
+		}
+	}
 	if p == nil {
 		box_unfocus(app)
-		user_card_close(app)
+		user_card_dismiss(app)
 		return
 	}
 	w.focus = i
@@ -869,6 +874,9 @@ watch_scroll :: proc(app: ^App, x, y, wheel_y: f32) {
 		return
 	}
 	if p, _ := pane_at(app, x, y); p != nil {
+		if emote_panel_scroll(app, p, x, y, wheel_y) {
+			return
+		}
 		if in_rect(p.messages_rect, x, y) {
 			chat_view_scroll(&p.view, wheel_y, app.scale)
 		}
