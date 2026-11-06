@@ -64,8 +64,8 @@ Browse_View :: enum {
 	Search,
 	// A channel's past broadcasts, highlights, uploads and clips (videos.odin).
 	Videos,
-	// What's blocked (blocked.odin).
-	Blocked,
+	// Settings, and what's blocked (settings.odin).
+	Settings,
 }
 
 Search_Kind :: enum {
@@ -82,7 +82,7 @@ BROWSE_TAB_LABELS := [Browse_View]string {
 	.Category            = "",
 	.Search              = "",
 	.Videos              = "",
-	.Blocked             = "",
+	.Settings            = "",
 }
 
 // Live streams as a grid of cards: the followed channels, Twitch's top streams, or
@@ -162,17 +162,15 @@ Browse :: struct {
 	section_buttons:      [2]Rect,
 	search_rect:          Rect,
 	back_button:          Rect,
-	// The header's switch for live notifications.
-	notify_button:        Rect,
-	updates_button:       Rect,
-	blocked_button:       Rect,
-	// The header's language picker, and its menu (language.odin).
+	// The header's link to Settings.
+	settings_button:      Rect,
+	// The Settings page's language picker, and its menu (language.odin).
 	language_button:      Rect,
 	language_menu:        Language_Menu,
 	header_h:             f32,
-	// The right-click menu, and the Blocked page (blocked.odin).
+	// The right-click menu for blocking (blocked.odin).
 	block_menu:           Block_Menu,
-	blocked:              Blocked_Page,
+	settings:             Settings_Page,
 }
 
 browse_destroy :: proc(b: ^Browse) {
@@ -213,7 +211,7 @@ browse_destroy :: proc(b: ^Browse) {
 	delete(b.follow_buttons)
 	block_menu_destroy(&b.block_menu)
 	language_menu_destroy(&b.language_menu)
-	blocked_page_destroy(&b.blocked)
+	settings_page_destroy(&b.settings)
 }
 
 // The stream list `view` shows, or nil if it doesn't show one.
@@ -241,7 +239,7 @@ browse_tick :: proc(app: ^App) -> (wait_ms: int) {
 	state: Browse_State
 	refreshed: int
 	switch b.view {
-	case .Blocked:
+	case .Settings:
 		return -1
 	case .Videos:
 		return videos_tick(app)
@@ -290,7 +288,7 @@ browse_tick :: proc(app: ^App) -> (wait_ms: int) {
 browse_clear :: proc(app: ^App) {
 	b := &app.browse
 	browse_search_close(app)
-	blocked_unfocus(app)
+	settings_unfocus(app)
 	block_menu_close(&b.block_menu)
 	for l in ([]^Stream_List{&b.following, &b.top, &b.category}) {
 		stream_list_clear(app, l)
@@ -356,7 +354,7 @@ browse_refresh :: proc(app: ^App) {
 		search_start(app)
 	case .Videos:
 		videos_refresh(app)
-	case .Blocked:
+	case .Settings:
 	}
 }
 
@@ -828,7 +826,7 @@ browse_search_focus :: proc(app: ^App) {
 	if b.search.focused || !app.signed_in {
 		return
 	}
-	blocked_unfocus(app)
+	settings_unfocus(app)
 	b.search.focused = true
 	_ = sdl.StartTextInput(app.window)
 }
@@ -939,7 +937,7 @@ browse_set_view :: proc(app: ^App, view: Browse_View) {
 	if b.view == .Search {
 		browse_search_close(app)
 	}
-	blocked_unfocus(app)
+	settings_unfocus(app)
 	b.view = view
 	if view == .Categories {
 		b.view = b.categories_section if b.categories_section == .Followed_Categories else .Categories
@@ -980,8 +978,8 @@ browse_back :: proc(app: ^App) -> bool {
 		return true
 	}
 	#partial switch b.view {
-	case .Blocked:
-		blocked_back(app)
+	case .Settings:
+		settings_back(app)
 	case .Category:
 		category_back(app)
 	case .Videos:
@@ -997,6 +995,8 @@ browse_back :: proc(app: ^App) -> bool {
 
 browse_scroll :: proc(b: ^Browse, wheel_y, scale: f32) {
 	block_menu_close(&b.block_menu)
+	// It hangs below the Settings page's language row, which would scroll away.
+	b.language_menu.open = false
 	b.scroll[b.view] = clamp(b.scroll[b.view] - wheel_y * BROWSE_SCROLL_STEP * scale, 0, b.max_scroll[b.view])
 }
 
@@ -1025,16 +1025,8 @@ browse_click :: proc(app: ^App, x, y: f32) -> bool {
 	if sign_in_click(app, x, y) {
 		return true
 	}
-	if b.notify_button.w > 0 && in_rect(b.notify_button, x, y) {
-		live_notifications_toggle(app)
-		return true
-	}
-	if b.updates_button.w > 0 && in_rect(b.updates_button, x, y) {
-		update_checks_toggle(app)
-		return true
-	}
-	if b.blocked_button.w > 0 && in_rect(b.blocked_button, x, y) {
-		browse_open_blocked(app)
+	if b.settings_button.w > 0 && in_rect(b.settings_button, x, y) {
+		browse_open_settings(app)
 		return true
 	}
 	if b.language_button.w > 0 && in_rect(b.language_button, x, y) {
@@ -1060,8 +1052,8 @@ browse_click :: proc(app: ^App, x, y: f32) -> bool {
 		#partial switch b.view {
 		case .Videos:
 			videos_back(app)
-		case .Blocked:
-			blocked_back(app)
+		case .Settings:
+			settings_back(app)
 		case:
 			category_back(app)
 		}
@@ -1070,8 +1062,8 @@ browse_click :: proc(app: ^App, x, y: f32) -> bool {
 	if b.view == .Videos {
 		return videos_click(app, x, y, browse_card_at(b, x, y))
 	}
-	if b.view == .Blocked {
-		return blocked_click(app, x, y)
+	if b.view == .Settings {
+		return settings_click(app, x, y)
 	}
 	for button, i in b.section_buttons {
 		if button.w > 0 && in_rect(button, x, y) {
@@ -1111,7 +1103,7 @@ browse_click :: proc(app: ^App, x, y: f32) -> bool {
 		}
 	case .Search:
 		search_open_row(app, i)
-	case .Videos, .Blocked:
+	case .Videos, .Settings:
 	// Handled above.
 	}
 	return true
@@ -1134,16 +1126,7 @@ on_browse_header_controls :: proc(app: ^App, x, y: f32) -> bool {
 			return true
 		}
 	}
-	if b.notify_button.w > 0 && in_rect(b.notify_button, x, y) {
-		return true
-	}
-	if b.updates_button.w > 0 && in_rect(b.updates_button, x, y) {
-		return true
-	}
-	if b.blocked_button.w > 0 && in_rect(b.blocked_button, x, y) {
-		return true
-	}
-	if b.language_button.w > 0 && in_rect(b.language_button, x, y) {
+	if b.settings_button.w > 0 && in_rect(b.settings_button, x, y) {
 		return true
 	}
 	if app.update.bar.w > 0 && in_rect(app.update.bar, x, y) {
@@ -1188,8 +1171,8 @@ draw_browse :: proc(app: ^App, screen: Rect) {
 		draw_search(app, content)
 	case .Videos:
 		draw_videos(app, content)
-	case .Blocked:
-		draw_blocked(app, content)
+	case .Settings:
+		draw_settings(app, content)
 	}
 	draw_block_menu(app, screen)
 	draw_language_menu(app, b.language_button, screen)
@@ -1213,52 +1196,20 @@ draw_browse_header :: proc(app: ^App, screen: Rect) {
 	// Window buttons at the far right, like a title bar's.
 	controls_left := draw_window_controls(app, screen.w, 0)
 	right := controls_left - pad
+	b.settings_button = {}
+	// Set by the Settings page while it shows.
 	app.sign_in.sign_out = {}
-	b.notify_button = {}
-	b.updates_button = {}
-	b.blocked_button = {}
 	b.language_button = {}
 	if app.signed_in {
-		// "R to refresh  ·  English  ·  Blocked  ·  Updates on  ·  Notifications on  ·
-		// login  ·  Sign out", with all but the hint and login clickable.
-		label := "Sign out"
+		// "R to refresh  ·  login  ·  Settings", with Settings clickable.
+		label := "Settings"
 		lw := text_width(r, .Regular, text_size, label)
-		app.sign_in.sign_out = {right - lw, text_y, lw, line_height(r, .Regular, text_size)}
-		hovered := in_rect(app.sign_in.sign_out, app.mouse.x, app.mouse.y)
-		draw_text(r, .Regular, text_size, app.sign_in.sign_out.x, text_y, label, BROWSE_TEXT if hovered else BROWSE_ACCENT)
-		login := fmt.tprintf("  ·  %s  ·  ", app.auth.login)
-		right = app.sign_in.sign_out.x - text_width(r, .Regular, text_size, login)
+		b.settings_button = {right - lw, text_y, lw, line_height(r, .Regular, text_size)}
+		hovered := in_rect(b.settings_button, app.mouse.x, app.mouse.y) || b.view == .Settings
+		draw_text(r, .Regular, text_size, b.settings_button.x, text_y, label, BROWSE_TEXT if hovered else BROWSE_ACCENT)
+		login := fmt.tprintf("R to refresh  ·  %s  ·  ", app.auth.login)
+		right = b.settings_button.x - text_width(r, .Regular, text_size, login)
 		draw_text(r, .Regular, text_size, right, text_y, login, BROWSE_DIM_TEXT)
-		label = "Notifications off" if app.layout.notifications_off else "Notifications on"
-		lw = text_width(r, .Regular, text_size, label)
-		b.notify_button = {right - lw, text_y, lw, line_height(r, .Regular, text_size)}
-		hovered = in_rect(b.notify_button, app.mouse.x, app.mouse.y)
-		draw_text(r, .Regular, text_size, b.notify_button.x, text_y, label, BROWSE_TEXT if hovered else BROWSE_ACCENT)
-		separator := "  ·  "
-		right = b.notify_button.x - text_width(r, .Regular, text_size, separator)
-		draw_text(r, .Regular, text_size, right, text_y, separator, BROWSE_DIM_TEXT)
-		label = "Updates off" if app.layout.update_checks_off else "Updates on"
-		lw = text_width(r, .Regular, text_size, label)
-		b.updates_button = {right - lw, text_y, lw, line_height(r, .Regular, text_size)}
-		hovered = in_rect(b.updates_button, app.mouse.x, app.mouse.y)
-		draw_text(r, .Regular, text_size, b.updates_button.x, text_y, label, BROWSE_TEXT if hovered else BROWSE_ACCENT)
-		right = b.updates_button.x - text_width(r, .Regular, text_size, separator)
-		draw_text(r, .Regular, text_size, right, text_y, separator, BROWSE_DIM_TEXT)
-		label = "Blocked"
-		lw = text_width(r, .Regular, text_size, label)
-		b.blocked_button = {right - lw, text_y, lw, line_height(r, .Regular, text_size)}
-		hovered = in_rect(b.blocked_button, app.mouse.x, app.mouse.y) || b.view == .Blocked
-		draw_text(r, .Regular, text_size, b.blocked_button.x, text_y, label, BROWSE_TEXT if hovered else BROWSE_ACCENT)
-		right = b.blocked_button.x - text_width(r, .Regular, text_size, separator)
-		draw_text(r, .Regular, text_size, right, text_y, separator, BROWSE_DIM_TEXT)
-		label = language_label(app)
-		lw = text_width(r, .Regular, text_size, label)
-		b.language_button = {right - lw, text_y, lw, line_height(r, .Regular, text_size)}
-		hovered = in_rect(b.language_button, app.mouse.x, app.mouse.y) || b.language_menu.open
-		draw_text(r, .Regular, text_size, b.language_button.x, text_y, label, BROWSE_TEXT if hovered else BROWSE_ACCENT)
-		hint := "R to refresh  ·  "
-		right = b.language_button.x - text_width(r, .Regular, text_size, hint)
-		draw_text(r, .Regular, text_size, right, text_y, hint, BROWSE_DIM_TEXT)
 	}
 
 	b.tabs = {}

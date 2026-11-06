@@ -28,7 +28,8 @@ pre-roll or mid-roll ads.
   "Replying to" line), and the chat's modes (slow, subscribers only...) above the
   chat box
 - Mentions are highlighted, with a count of unread ones on each chat; add your own
-  highlight phrases (`/highlight`) and hide people's messages (`/ignore`)
+  highlight phrases and hide people's messages, in Settings or with
+  `/highlight` and `/ignore`
 - User cards with everything someone said in the chat; moderators can time out,
   ban and delete from them, or with `/timeout`, `/ban` and `/clear`
 - Hover a stream card for its full title, or an emote or badge for its name
@@ -37,16 +38,16 @@ pre-roll or mid-roll ads.
 - Watch a live stream from its start, then jump back to live
 - Quality selection, low-latency mode, volume boost up to 130%
 - Follow and unfollow channels
-- Block channels and categories (right-click a card, or "Blocked" at the top) to
-  hide them everywhere
-- Pick a primary language at the top: streams in other languages on Top and in
+- Block channels and categories (right-click a card, or in Settings) to hide them
+  everywhere
+- Pick a primary language in Settings: streams in other languages on Top and in
   categories are grayed out or hidden
 - Follows the channel you're watching when it raids another (switch it off in
-  the quality menu)
+  Settings or the quality menu)
 - A desktop notification when a channel you follow goes live, while Lurker is
-  open, with its picture; click it to watch, or turn them off at the top
+  open, with its picture; click it to watch, or turn them off in Settings
 - Remembers volume, quality, splits, chat visibility, text size and language
-- Tells you when a new version is out (turn it off at the top); on Windows, it
+- Tells you when a new version is out (turn it off in Settings); on Windows, it
   updates itself
 
 ## Flatpak
@@ -149,6 +150,7 @@ settings are stored in `~/.config/lurker` (`%APPDATA%\lurker` on Windows).
 | C | Show or hide chat |
 | Enter | Chat in the focused split, or play an offline channel's last broadcast |
 | Ctrl+T / Ctrl+W | Open / close a chat split |
+| Ctrl+, | Settings |
 | Ctrl+F | Search the chat, or channels when browsing |
 | / | Search channels |
 | R | Refresh |
