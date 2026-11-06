@@ -45,6 +45,9 @@ clone_auth :: proc(a: Auth) -> Auth {
 	}
 }
 
+// The format auth.json is saved in (see saved.odin). 1 added the version.
+AUTH_VERSION :: 1
+
 // ~/.config/lurker/auth.json, allocated with the temp allocator.
 auth_path :: proc() -> (path: string, ok: bool) {
 	dir, err := os.user_config_dir(context.temp_allocator)
@@ -61,6 +64,7 @@ load_auth :: proc() -> (a: Auth, ok: bool) {
 	if err != nil {
 		return {}, false
 	}
+	// Every version so far has the same fields; "version" is left out of Auth.
 	stored: Auth
 	if json.unmarshal(data, &stored, allocator = context.temp_allocator) != nil || stored.access_token == "" {
 		log.warnf("%s is unreadable; sign in again with --login", path)
@@ -75,19 +79,19 @@ save_auth :: proc(a: Auth) -> bool {
 	if !path_ok {
 		return false
 	}
-	if err := os.make_directory_all(filepath.dir(path), {.Read_User, .Write_User, .Execute_User}); err != nil && err != .Exist {
-		log.errorf("can't create the config folder: %v", err)
-		return false
-	}
-	data, marshal_err := json.marshal(a, {pretty = true}, context.temp_allocator)
+	saved := struct {
+		version:       int,
+		access_token:  string,
+		refresh_token: string,
+		expires_at:    i64,
+		login:         string,
+		user_id:       string,
+	}{AUTH_VERSION, a.access_token, a.refresh_token, a.expires_at, a.login, a.user_id}
+	data, marshal_err := json.marshal(saved, {pretty = true}, context.temp_allocator)
 	if marshal_err != nil {
 		return false
 	}
-	if err := os.write_entire_file(path, data, {.Read_User, .Write_User}); err != nil {
-		log.errorf("can't save %s: %v", path, err)
-		return false
-	}
-	return true
+	return save_file(path, data, private = true)
 }
 
 @(private = "file")
