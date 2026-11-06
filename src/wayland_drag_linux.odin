@@ -6,7 +6,7 @@ import "core:strings"
 import sdl "vendor:sdl3"
 
 // Dragging the borderless window from the video, as mpv does on Wayland: the app
-// sees the press (so a double-click can toggle fullscreen), and only once the mouse
+// sees the press (so a double-click can maximize), and only once the mouse
 // moves does it ask the compositor to move the window.
 //
 // SDL's hit test can't do that: it hands every press in a draggable area to the
