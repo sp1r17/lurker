@@ -144,7 +144,8 @@ settings are stored in `~/.config/lurker` (`%APPDATA%\lurker` on Windows).
 | [ / ] | Slower / faster (videos) |
 | Page Up / Page Down | Previous / next chapter |
 | Home | Start a resumed video over |
-| F, or double-click the video | Fullscreen |
+| F | Fullscreen |
+| Double-click the video or the top bar | Maximize / restore |
 | C | Show or hide chat |
 | Enter | Chat in the focused split, or play an offline channel's last broadcast |
 | Ctrl+T / Ctrl+W | Open / close a chat split |

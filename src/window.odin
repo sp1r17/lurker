@@ -88,22 +88,16 @@ toggle_fullscreen :: proc(app: ^App) {
 	_ = sdl.SetWindowFullscreen(app.window, app.fullscreen)
 }
 
-// A left press at (x, y), in pixels: a double-click on the video toggles
-// fullscreen, and a press on a drag area may become a drag once the mouse moves.
+// A left press at (x, y), in pixels: a double-click on a drag area maximizes or
+// restores, and a press on one may become a drag once the mouse moves.
 window_press :: proc(app: ^App, x, y: f32, clicks: u8) {
 	app.drag_armed = false
 	if !draggable(app, x, y) {
 		return
 	}
-	// Double-click: the video goes fullscreen; the browse header maximizes, like
-	// a title bar.
+	// Double-click: the same as the maximize button, like a title bar's.
 	if clicks == 2 {
-		switch app.screen {
-		case .Watch:
-			toggle_fullscreen(app)
-		case .Browse:
-			toggle_maximized(app)
-		}
+		toggle_maximized(app)
 		return
 	}
 	if app.wayland_drag_ok && !app.fullscreen {
