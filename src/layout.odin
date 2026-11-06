@@ -1,9 +1,6 @@
 package app
 
 import "core:encoding/json"
-import "core:log"
-import "core:os"
-import "core:path/filepath"
 import "core:strings"
 
 DEFAULT_VOLUME :: 100
@@ -63,11 +60,11 @@ layout_destroy :: proc(l: ^Layout) {
 	delete(l.language)
 }
 
-// layout.json; other saved state goes beside it (watched.json).
+// The format layout.json is saved in (see saved.odin). 1 added the version.
+LAYOUT_VERSION :: 1
+
 layout_path :: proc() -> (path: string, ok: bool) {
-	auth := auth_path() or_return
-	joined, err := filepath.join({filepath.dir(auth), "layout.json"}, context.temp_allocator)
-	return joined, err == nil
+	return state_path("layout.json")
 }
 
 // A missing or unreadable file is an empty layout at full volume.
@@ -78,11 +75,10 @@ layout_load :: proc() -> (l: Layout) {
 	if !ok {
 		return
 	}
-	data, err := os.read_entire_file(path, context.temp_allocator)
-	if err != nil {
-		return
+	data, _, read := saved_read(path, LAYOUT_VERSION)
+	if read == .Read && !parse_layout(data, &l) {
+		saved_unreadable(path)
 	}
-	parse_layout(data, &l)
 	return
 }
 
@@ -106,7 +102,6 @@ parse_layout :: proc(data: []byte, l: ^Layout) -> bool {
 		language_hide:     bool,
 	}
 	if json.unmarshal(data, &saved, allocator = context.temp_allocator) != nil {
-		log.warn("layout.json is unreadable; starting without saved splits")
 		return false
 	}
 	// A file from before the volume was saved has none: keep the default, not 0.
@@ -163,12 +158,9 @@ layout_save :: proc(l: ^Layout) {
 	if !ok {
 		return
 	}
-	if err := os.make_directory_all(filepath.dir(path), {.Read_User, .Write_User, .Execute_User}); err != nil && err != .Exist {
-		log.warnf("can't save splits: %v", err)
-		return
-	}
 	// The quality is saved by name, so reordering the enum can't change it.
 	saved := struct {
+		version:     int,
 		splits:      map[string][dynamic]string,
 		volume:      int,
 		muted:       bool,
@@ -184,14 +176,12 @@ layout_save :: proc(l: ^Layout) {
 		skipped_version:   string,
 		language:          string,
 		language_hide:     bool,
-	}{l.splits, l.volume, l.muted, QUALITY_LABELS[l.quality], l.low_latency, l.raids_off, l.hide_chat, l.text_size, l.notifications_off, l.chat.highlights[:], l.chat.ignored[:], l.update_checks_off, l.skipped_version, l.language, l.language_hide}
+	}{LAYOUT_VERSION, l.splits, l.volume, l.muted, QUALITY_LABELS[l.quality], l.low_latency, l.raids_off, l.hide_chat, l.text_size, l.notifications_off, l.chat.highlights[:], l.chat.ignored[:], l.update_checks_off, l.skipped_version, l.language, l.language_hide}
 	data, err := json.marshal(saved, {pretty = true}, context.temp_allocator)
 	if err != nil {
 		return
 	}
-	if write_err := os.write_entire_file(path, data); write_err != nil {
-		log.warnf("can't save splits: %v", write_err)
-	}
+	save_file(path, data)
 }
 
 // Records the splits open now for the watched channel, and saves.

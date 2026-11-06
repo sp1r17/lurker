@@ -1,9 +1,6 @@
 package app
 
 import "core:encoding/json"
-import "core:log"
-import "core:os"
-import "core:path/filepath"
 import "core:slice"
 import "core:strings"
 import "core:time"
@@ -45,11 +42,19 @@ watched_destroy :: proc(w: ^Watched) {
 	delete(w.entries)
 }
 
+// The format watched.json is saved in (see saved.odin). 1 moved the positions
+// from the top level into "videos", beside the version.
+WATCHED_VERSION :: 1
+
 @(private = "file")
 watched_path :: proc() -> (path: string, ok: bool) {
-	layout := layout_path() or_return
-	joined, err := filepath.join({filepath.dir(layout), "watched.json"}, context.temp_allocator)
-	return joined, err == nil
+	return state_path("watched.json")
+}
+
+@(private = "file")
+Watched_File :: struct {
+	version: int,
+	videos:  map[string]Watched_Entry,
 }
 
 watched_load :: proc() -> (w: Watched) {
@@ -57,19 +62,32 @@ watched_load :: proc() -> (w: Watched) {
 	if !ok {
 		return
 	}
-	data, err := os.read_entire_file(path, context.temp_allocator)
-	if err != nil {
-		return
-	}
-	saved: map[string]Watched_Entry
-	if json.unmarshal(data, &saved, allocator = context.temp_allocator) != nil {
-		log.warn("watched.json is unreadable; starting without resume positions")
-		return
-	}
-	for id, entry in saved {
-		w.entries[strings.clone(id)] = entry
+	data, version, read := saved_read(path, WATCHED_VERSION)
+	if read == .Read && !parse_watched(data, version, &w) {
+		saved_unreadable(path)
 	}
 	return
+}
+
+// Reads saved positions in format `version` into `w`.
+parse_watched :: proc(data: []byte, version: int, w: ^Watched) -> bool {
+	saved: Watched_File
+	if version == 0 {
+		// Only the positions, at the top level.
+		if json.unmarshal(data, &saved.videos, allocator = context.temp_allocator) != nil {
+			return false
+		}
+	} else if json.unmarshal(data, &saved, allocator = context.temp_allocator) != nil {
+		return false
+	}
+	for id, entry in saved.videos {
+		if id in w.entries {
+			w.entries[id] = entry
+		} else {
+			w.entries[strings.clone(id)] = entry
+		}
+	}
+	return true
 }
 
 watched_save :: proc(w: ^Watched) {
@@ -80,15 +98,11 @@ watched_save :: proc(w: ^Watched) {
 	if !ok {
 		return
 	}
-	if err := os.make_directory_all(filepath.dir(path)); err != nil && err != .Exist {
-		return
-	}
-	data, err := json.marshal(w.entries, allocator = context.temp_allocator)
+	data, err := json.marshal(Watched_File{WATCHED_VERSION, w.entries}, allocator = context.temp_allocator)
 	if err != nil {
 		return
 	}
-	if write_err := os.write_entire_file(path, data); write_err != nil {
-		log.warnf("can't save %s: %v", path, write_err)
+	if !save_file(path, data) {
 		return
 	}
 	w.dirty = false
