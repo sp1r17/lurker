@@ -177,9 +177,21 @@ chat replay, and your own Twitch emotes in the picker.
 
 ## License
 
-Lurker is released under the [MIT License](LICENSE). The Flatpak and the Windows
-installer also contain mpv, streamlink and other libraries under their own
-licenses, some of them GPL.
+Copyright © 2026 spirit. Lurker is free software, released under the
+[GNU General Public License, version 3](LICENSE) or (at your option) any later
+version. You may share, change and even sell it, as long as everyone who gets a
+copy also gets its source code under the same license. Versions up to 0.7.0 were
+released under the MIT License.
+
+The Flatpak and the Windows installer also contain mpv, streamlink and other
+libraries under their own licenses, some of them GPL.
+
+### The name and icon
+
+The name "Lurker" and its icon aren't covered by the license. If you share a
+changed version of Lurker, give it a different name and icon, and don't present
+it as the official Lurker or as made by its author. Copies of official releases,
+unchanged, can keep both.
 
 Text is set in [Noto Sans](https://fonts.google.com/noto/specimen/Noto+Sans),
 licensed under the SIL Open Font License (`assets/fonts/noto_sans/OFL.txt`).
