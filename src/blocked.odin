@@ -2,9 +2,6 @@ package app
 
 import "core:encoding/json"
 import "core:fmt"
-import "core:log"
-import "core:os"
-import "core:path/filepath"
 import "core:strings"
 import sdl "vendor:sdl3"
 
@@ -32,15 +29,17 @@ blocked_destroy :: proc(bl: ^Blocked) {
 	}
 }
 
+// The format blocked.json is saved in (see saved.odin). 1 added the version.
+BLOCKED_VERSION :: 1
+
 @(private = "file")
 blocked_path :: proc() -> (path: string, ok: bool) {
-	layout := layout_path() or_return
-	joined, err := filepath.join({filepath.dir(layout), "blocked.json"}, context.temp_allocator)
-	return joined, err == nil
+	return state_path("blocked.json")
 }
 
 @(private = "file")
 Blocked_File :: struct {
+	version:    int,
 	channels:   []string,
 	categories: []string,
 }
@@ -50,13 +49,13 @@ blocked_load :: proc() -> (bl: Blocked) {
 	if !ok {
 		return
 	}
-	data, err := os.read_entire_file(path, context.temp_allocator)
-	if err != nil {
+	data, _, read := saved_read(path, BLOCKED_VERSION)
+	if read != .Read {
 		return
 	}
 	saved: Blocked_File
 	if json.unmarshal(data, &saved, allocator = context.temp_allocator) != nil {
-		log.warn("blocked.json is unreadable; starting with nothing blocked")
+		saved_unreadable(path)
 		return
 	}
 	for name in saved.channels {
@@ -73,17 +72,12 @@ blocked_save :: proc(bl: ^Blocked) {
 	if !ok {
 		return
 	}
-	if err := os.make_directory_all(filepath.dir(path)); err != nil && err != .Exist {
-		return
-	}
-	saved := Blocked_File{bl.channels[:], bl.categories[:]}
+	saved := Blocked_File{BLOCKED_VERSION, bl.channels[:], bl.categories[:]}
 	data, err := json.marshal(saved, {pretty = true}, context.temp_allocator)
 	if err != nil {
 		return
 	}
-	if write_err := os.write_entire_file(path, data); write_err != nil {
-		log.warnf("can't save %s: %v", path, write_err)
-	}
+	save_file(path, data)
 }
 
 @(private = "file")
