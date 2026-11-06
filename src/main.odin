@@ -383,7 +383,7 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 			browse_search_text(app, string(e.text.text))
 			redraw^ = true
 		} else {
-			blocked_text(app, string(e.text.text))
+			settings_text(app, string(e.text.text))
 			redraw^ = true
 		}
 	case e.type == .KEY_DOWN && text_size_key(app, e.key):
@@ -395,8 +395,8 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 	case e.type == .KEY_DOWN && app.screen == .Browse && app.browse.search.focused:
 		browse_search_key(app, e.key)
 		redraw^ = true
-	case e.type == .KEY_DOWN && app.screen == .Browse && blocked_typing(&app.browse):
-		blocked_key(app, e.key)
+	case e.type == .KEY_DOWN && app.screen == .Browse && settings_typing(&app.browse):
+		settings_key(app, e.key)
 		redraw^ = true
 	case e.type == .KEY_DOWN:
 		switch e.key.key {
@@ -429,6 +429,10 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 					case browse_back(app):
 					case:
 						return false
+					}
+				case sdl.K_COMMA:
+					if e.key.mod & sdl.KMOD_CTRL != {} && app.signed_in {
+						browse_open_settings(app)
 					}
 				case sdl.K_SLASH, sdl.K_KP_DIVIDE:
 					// The "/" itself may also arrive as text; it isn't typed.
