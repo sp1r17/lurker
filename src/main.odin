@@ -163,7 +163,7 @@ App :: struct {
 	// The channels and categories hidden everywhere (blocked.odin).
 	blocked:             Blocked,
 	// Desktop notifications, and clicks on them (notify_linux.odin,
-	// notify_windows.odin).
+	// notify_windows.odin, notify_darwin.odin).
 	notifications:       Notifications,
 	update:              Updater,
 }

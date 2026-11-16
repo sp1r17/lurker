@@ -7,6 +7,12 @@ MODE="${1:-debug}"
 
 mkdir -p "$OUT_DIR"
 
+# On macOS, SDL3, SDL3_image and mpv come from Homebrew.
+EXTRA=()
+if [ "$(uname)" == "Darwin" ]; then
+  EXTRA+=("-extra-linker-flags:-L$(brew --prefix)/lib")
+fi
+
 case "$MODE" in
   release)
     echo "Building release..."
@@ -14,7 +20,8 @@ case "$MODE" in
       -out:"$OUT_DIR/$OUT_NAME" \
       -o:speed \
       -no-bounds-check \
-      -disable-assert
+      -disable-assert \
+      "${EXTRA[@]}"
     ;;
   debug | run)
     echo "Building debug..."
@@ -22,10 +29,11 @@ case "$MODE" in
       -out:"$OUT_DIR/$OUT_NAME" \
       -debug \
       -vet \
-      -strict-style
+      -strict-style \
+      "${EXTRA[@]}"
     ;;
   test)
-    odin test src -debug -vet -strict-style -out:"$OUT_DIR/tests"
+    odin test src -debug -vet -strict-style -out:"$OUT_DIR/tests" "${EXTRA[@]}"
     exit 0
     ;;
   *)

@@ -1,11 +1,13 @@
+#+build windows, darwin
 package app
 
 import "core:log"
 import "core:os"
 import "core:path/filepath"
 
-// A windowed program has no console to log to, so on Windows the log also goes
-// to %LOCALAPPDATA%\lurker\lurker.log, replaced on each run.
+// A windowed program has no console to log to, so on Windows and macOS the log
+// also goes to lurker.log in the cache folder (%LOCALAPPDATA%\lurker,
+// ~/Library/Caches/lurker), replaced on each run.
 open_log_file :: proc() -> (logger: log.Logger, ok: bool) {
 	dir := cache_dir() or_return
 	if err := os.make_directory_all(dir); err != nil && err != .Exist {
