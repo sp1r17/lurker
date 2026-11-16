@@ -7,10 +7,11 @@ MODE="${1:-debug}"
 
 mkdir -p "$OUT_DIR"
 
-# On macOS, SDL3, SDL3_image and mpv come from Homebrew.
+# On macOS, SDL3, SDL3_image, mpv and curl come from Homebrew. Its curl comes
+# first: macOS's own lacks WebSockets, which chat needs.
 EXTRA=()
 if [ "$(uname)" == "Darwin" ]; then
-  EXTRA+=("-extra-linker-flags:-L$(brew --prefix)/lib")
+  EXTRA+=("-extra-linker-flags:-L$(brew --prefix curl)/lib -L$(brew --prefix)/lib")
 fi
 
 case "$MODE" in

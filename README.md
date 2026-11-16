@@ -98,7 +98,7 @@ yet.
 To build it, install Odin and Homebrew, then:
 
 ```sh
-brew install sdl3 sdl3_image mpv dylibbundler
+brew install sdl3 sdl3_image mpv curl dylibbundler
 packaging/macos/build.sh
 ```
 

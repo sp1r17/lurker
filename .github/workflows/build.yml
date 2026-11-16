@@ -65,7 +65,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install Odin and the libraries
         run: |
-          brew install sdl3 sdl3_image mpv dylibbundler
+          brew install sdl3 sdl3_image mpv curl dylibbundler
           curl -sSfL https://github.com/odin-lang/Odin/releases/download/dev-2026-10/odin-macos-arm64-dev-2026-10.tar.gz | tar xz -C "$RUNNER_TEMP"
           echo "$RUNNER_TEMP"/odin-macos-arm64-* >> "$GITHUB_PATH"
       - name: Test

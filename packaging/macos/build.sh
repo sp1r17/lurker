@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Builds Lurker.app for Apple silicon Macs, with mpv and SDL (from Homebrew) and
-# streamlink (with its own Python) inside, and a disk image holding it. The app is
-# signed ad hoc, not with a Developer ID, and works on the macOS version it's
-# built on and later, as Homebrew's libraries do.
+# Builds Lurker.app for Apple silicon Macs, with mpv, SDL and curl (from
+# Homebrew) and streamlink (with its own Python) inside, and a disk image holding
+# it. The app is signed ad hoc, not with a Developer ID, and works on the macOS
+# version it's built on and later, as Homebrew's libraries do.
 #
-#   brew install sdl3 sdl3_image mpv dylibbundler
+#   brew install sdl3 sdl3_image mpv curl dylibbundler
 #   packaging/macos/build.sh [version]
 set -euo pipefail
 
@@ -14,6 +14,7 @@ OUT="$ROOT/build/macos"
 DEPS="$OUT/deps"
 APP="$OUT/Lurker.app"
 BREW="$(brew --prefix)"
+BREW_CURL="$(brew --prefix curl)"
 MINIMUM_OS="$(sw_vers -productVersion | cut -d. -f1).0"
 
 # A relocatable Python from python-build-standalone, and the streamlink the other
@@ -41,15 +42,16 @@ sed -e "s/@VERSION@/$VERSION/g" -e "s/@MINIMUM_OS@/$MINIMUM_OS/g" \
 cp "$ROOT/assets/install/lurker.icns" "$APP/Contents/Resources/lurker.icns"
 cp "$ROOT/LICENSE" "$APP/Contents/Resources/LICENSE"
 
-# Lurker itself.
+# Lurker itself, with Homebrew's curl: macOS's own lacks WebSockets, which chat
+# needs.
 odin build "$ROOT/src" -out:"$APP/Contents/MacOS/lurker" -o:speed -no-bounds-check -disable-assert \
-  -minimum-os-version:"$MINIMUM_OS" "-extra-linker-flags:-L$BREW/lib"
+  -minimum-os-version:"$MINIMUM_OS" "-extra-linker-flags:-L$BREW_CURL/lib -L$BREW/lib"
 
-# The libraries it loads (SDL3, SDL3_image, libmpv and theirs), copied from
+# The libraries it loads (SDL3, SDL3_image, libmpv, libcurl and theirs), copied from
 # Homebrew into Frameworks and pointed at there. It would ask where a library it
 # can't find is; no answer makes it fail instead.
 dylibbundler -cd -of -b -x "$APP/Contents/MacOS/lurker" -d "$APP/Contents/Frameworks" \
-  -p @executable_path/../Frameworks/ -s "$BREW/lib" < /dev/null > /dev/null
+  -p @executable_path/../Frameworks/ -s "$BREW/lib" -s "$BREW_CURL/lib" < /dev/null > /dev/null
 
 # dylibbundler can give a library the same search path twice (libmpv, reached
 # from Lurker and from its dependencies), and macOS won't load a library like
@@ -83,6 +85,14 @@ codesign --verify --strict "$APP"
 # Nothing may still load from Homebrew, which the user's Mac needn't have.
 if otool -L "$APP/Contents/MacOS/lurker" "$APP/Contents/Frameworks/"*.dylib | grep -F "$BREW/"; then
   echo "Lurker.app still loads the libraries above from Homebrew"
+  exit 1
+fi
+if otool -L "$APP/Contents/MacOS/lurker" | grep -F /usr/lib/libcurl; then
+  echo "Lurker.app loads macOS's curl, which can't connect to chat"
+  exit 1
+fi
+if ! "$BREW_CURL/bin/curl" --version | grep -qw wss; then
+  echo "Homebrew's curl lacks WebSockets, which chat needs"
   exit 1
 fi
 "$STREAMLINK/streamlink" --version
