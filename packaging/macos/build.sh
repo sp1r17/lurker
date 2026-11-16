@@ -51,6 +51,21 @@ odin build "$ROOT/src" -out:"$APP/Contents/MacOS/lurker" -o:speed -no-bounds-che
 dylibbundler -cd -of -b -x "$APP/Contents/MacOS/lurker" -d "$APP/Contents/Frameworks" \
   -p @executable_path/../Frameworks/ -s "$BREW/lib" < /dev/null > /dev/null
 
+# dylibbundler can give a library the same search path twice (libmpv, reached
+# from Lurker and from its dependencies), and macOS won't load a library like
+# that. Each repeated one is removed and added back once.
+rpaths() {
+  otool -l "$1" | awk '$1 == "cmd" && $2 == "LC_RPATH" { getline; getline; print $2 }'
+}
+for file in "$APP/Contents/MacOS/lurker" "$APP/Contents/Frameworks/"*.dylib; do
+  rpaths "$file" | sort | uniq -d | while read -r rpath; do
+    while [ "$(rpaths "$file" | grep -cxF "$rpath" || true)" -gt 0 ]; do
+      install_name_tool -delete_rpath "$rpath" "$file"
+    done
+    install_name_tool -add_rpath "$rpath" "$file"
+  done
+done
+
 # streamlink, installed into its own Python in Resources/streamlink.
 STREAMLINK="$APP/Contents/Resources/streamlink"
 mkdir -p "$STREAMLINK"
@@ -71,6 +86,17 @@ if otool -L "$APP/Contents/MacOS/lurker" "$APP/Contents/Frameworks/"*.dylib | gr
   exit 1
 fi
 "$STREAMLINK/streamlink" --version
+# macOS loads every library as Lurker starts, so starting it shows they all load:
+# it prints its usage and exits 2 for an argument that isn't a channel.
+set +e
+"$APP/Contents/MacOS/lurker" --check-libraries 2> /dev/null
+status=$?
+set -e
+if [ "$status" -ne 2 ]; then
+  echo "Lurker.app doesn't start (exit $status): a library didn't load"
+  DYLD_PRINT_LIBRARIES=1 "$APP/Contents/MacOS/lurker" --check-libraries 2>&1 | tail -20 || true
+  exit 1
+fi
 
 # The disk image: the app beside a link to Applications, to drag it onto.
 DMG="$OUT/lurker-$VERSION-arm64.dmg"
