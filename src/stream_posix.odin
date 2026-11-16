@@ -15,8 +15,14 @@ Stream_Output :: struct {
 	mpv_fd: posix.FD,
 }
 
-// streamlink from the PATH: the system's, or the Flatpak's.
+// streamlink from the PATH: the system's, or the Flatpak's. The macOS app has its
+// own (bundle_darwin.odin).
 streamlink_program :: proc() -> string {
+	when ODIN_OS == .Darwin {
+		if bundled, ok := bundled_streamlink(); ok {
+			return bundled
+		}
+	}
 	return "streamlink"
 }
 

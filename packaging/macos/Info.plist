@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleName</key>
+	<string>Lurker</string>
+	<key>CFBundleDisplayName</key>
+	<string>Lurker</string>
+	<key>CFBundleIdentifier</key>
+	<string>io.github.sp1r17.Lurker</string>
+	<key>CFBundleExecutable</key>
+	<string>lurker</string>
+	<key>CFBundleIconFile</key>
+	<string>lurker</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>@VERSION@</string>
+	<key>CFBundleVersion</key>
+	<string>@VERSION@</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>@MINIMUM_OS@</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.entertainment</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>Copyright © 2026 spirit. Licensed under the GPL, version 3 or later.</string>
+</dict>
+</plist>
