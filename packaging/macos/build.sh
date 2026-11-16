@@ -91,7 +91,8 @@ if otool -L "$APP/Contents/MacOS/lurker" | grep -F /usr/lib/libcurl; then
   echo "Lurker.app loads macOS's curl, which can't connect to chat"
   exit 1
 fi
-if ! "$BREW_CURL/bin/curl" --version | grep -qw wss; then
+curl_version="$("$BREW_CURL/bin/curl" --version)"
+if ! grep -qw wss <<< "$curl_version"; then
   echo "Homebrew's curl lacks WebSockets, which chat needs"
   exit 1
 fi
