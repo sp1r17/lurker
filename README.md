@@ -89,6 +89,22 @@ To build it, run `packaging\windows\build.ps1` from an "x64 Native Tools" prompt
 with Odin on the PATH. It downloads libmpv and streamlink, and makes the installer
 if Inno Setup is installed.
 
+## macOS
+
+Lurker runs on Macs with Apple silicon (M1 and later) only; there's no Intel
+version. The macOS version is still being worked on and isn't in the releases
+yet.
+
+To build it, install Odin and Homebrew, then:
+
+```sh
+brew install sdl3 sdl3_image mpv dylibbundler
+packaging/macos/build.sh
+```
+
+This makes `build/macos/Lurker.app`, with mpv and streamlink inside, and a disk
+image holding it. The app needs the macOS version it was built on, or later.
+
 ## Building on Linux
 
 To build and install without Flatpak, you need:
@@ -183,8 +199,8 @@ version. You may share, change and even sell it, as long as everyone who gets a
 copy also gets its source code under the same license. Versions up to 0.7.0 were
 released under the MIT License.
 
-The Flatpak and the Windows installer also contain mpv, streamlink and other
-libraries under their own licenses, some of them GPL.
+The Flatpak, the Windows installer and the macOS app also contain mpv,
+streamlink and other libraries under their own licenses, some of them GPL.
 
 ### The name and icon
 
