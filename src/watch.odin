@@ -673,7 +673,7 @@ watch_chat_arrived :: proc(app: ^App) {
 watch_key :: proc(app: ^App, key: sdl.KeyboardEvent) -> bool {
 	w := &app.watch
 	focused := w.panes[w.focus]
-	if key.mod & sdl.KMOD_CTRL != {} {
+	if key.mod & SHORTCUT_MOD != {} {
 		switch key.key {
 		case sdl.K_T:
 			watch_add_pane(app)

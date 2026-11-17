@@ -163,7 +163,7 @@ App :: struct {
 	// The channels and categories hidden everywhere (blocked.odin).
 	blocked:             Blocked,
 	// Desktop notifications, and clicks on them (notify_linux.odin,
-	// notify_windows.odin).
+	// notify_windows.odin, notify_darwin.odin).
 	notifications:       Notifications,
 	update:              Updater,
 }
@@ -334,7 +334,7 @@ run :: proc(channels: []string, config: Config, video: Maybe(Twitch_Link) = nil)
 // Ctrl+= (or Ctrl++) and Ctrl+- make the text bigger and smaller, Ctrl+0 back
 // to normal, on any screen and while typing. Returns true if the key was used.
 text_size_key :: proc(app: ^App, key: sdl.KeyboardEvent) -> bool {
-	if key.mod & sdl.KMOD_CTRL == {} {
+	if key.mod & SHORTCUT_MOD == {} {
 		return false
 	}
 	size := app.layout.text_size
@@ -403,7 +403,7 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 		case sdl.K_Q:
 			return false
 		case sdl.K_F:
-			if e.key.mod & sdl.KMOD_CTRL != {} {
+			if e.key.mod & SHORTCUT_MOD != {} {
 				// Ctrl+F searches the focused chat, or channels when browsing.
 				if app.screen == .Watch {
 					search_open(app, app.watch.panes[app.watch.focus])
@@ -431,7 +431,7 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 						return false
 					}
 				case sdl.K_COMMA:
-					if e.key.mod & sdl.KMOD_CTRL != {} && app.signed_in {
+					if e.key.mod & SHORTCUT_MOD != {} && app.signed_in {
 						browse_open_settings(app)
 					}
 				case sdl.K_SLASH, sdl.K_KP_DIVIDE:
@@ -488,7 +488,7 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 		}
 	case e.type == .MOUSE_WHEEL:
 		x, y := e.wheel.mouse_x * density, e.wheel.mouse_y * density
-		if sdl.GetModState() & sdl.KMOD_CTRL != {} {
+		if sdl.GetModState() & SHORTCUT_MOD != {} {
 			// Ctrl+wheel sizes the text, a step per notch (touchpads scroll in
 			// fractions, which add up).
 			app.text_size_wheel += e.wheel.y

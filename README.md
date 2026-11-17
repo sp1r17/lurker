@@ -4,7 +4,7 @@
 
 <h1 align="center">Lurker</h1>
 
-A native desktop client for watching Twitch, on Linux and Windows. Streams play
+A native desktop client for watching Twitch, on Linux, Windows and macOS. Streams play
 through mpv, alongside a Chatterino-style chat, with no browser involved.
 
 Video goes through streamlink, which drops ad segments, so streams play without
@@ -89,6 +89,30 @@ To build it, run `packaging\windows\build.ps1` from an "x64 Native Tools" prompt
 with Odin on the PATH. It downloads libmpv and streamlink, and makes the installer
 if Inno Setup is installed.
 
+## macOS
+
+Download `lurker-<version>-arm64.dmg` from the
+[latest release](https://github.com/sp1r17/lurker/releases/latest), open it and
+drag Lurker to Applications. It includes mpv and streamlink.
+
+It needs a Mac with Apple silicon (M1 and later) and macOS 26 or later; there's
+no Intel version. The app isn't signed by Apple, so macOS won't open it the first
+time: after trying, click Open Anyway in System Settings → Privacy & Security.
+Live notifications don't work on macOS yet.
+
+The macOS version is new and hasn't had much testing yet. If something doesn't
+work, please [open an issue](https://github.com/sp1r17/lurker/issues).
+
+To build it, install Odin and Homebrew, then:
+
+```sh
+brew install sdl3 sdl3_image mpv curl dylibbundler
+packaging/macos/build.sh
+```
+
+This makes `build/macos/Lurker.app`, with mpv and streamlink inside, and a disk
+image holding it. The app needs the macOS version it was built on, or later.
+
 ## Building on Linux
 
 To build and install without Flatpak, you need:
@@ -158,6 +182,8 @@ settings are stored in `~/.config/lurker` (`%APPDATA%\lurker` on Windows).
 | Esc, or the mouse's back button | Back |
 | Q | Quit |
 
+On macOS, use Cmd instead of Ctrl, and Option+Left / Right to move by word.
+
 In chat, Tab completes emote and user names, `:` followed by part of a name opens
 the emote picker, and right-clicking a message replies to it.
 
@@ -183,8 +209,8 @@ version. You may share, change and even sell it, as long as everyone who gets a
 copy also gets its source code under the same license. Versions up to 0.7.0 were
 released under the MIT License.
 
-The Flatpak and the Windows installer also contain mpv, streamlink and other
-libraries under their own licenses, some of them GPL.
+The Flatpak, the Windows installer and the macOS app also contain mpv,
+streamlink and other libraries under their own licenses, some of them GPL.
 
 ### The name and icon
 

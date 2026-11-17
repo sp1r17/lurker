@@ -23,7 +23,7 @@ Stream_Error :: enum {
 }
 
 // A streamlink process passing the channel's stream on to mpv, through a pipe or
-// a local HTTP server (stream_linux.odin, stream_windows.odin). Going through
+// a local HTTP server (stream_posix.odin, stream_windows.odin). Going through
 // streamlink rather than playing Twitch's URL directly is what skips the ads:
 // streamlink drops ad segments from the stream it passes on.
 Streamlink :: struct {

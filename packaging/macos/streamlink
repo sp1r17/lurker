@@ -1,0 +1,4 @@
+#!/bin/sh
+# streamlink, run by the Python beside it. -I keeps out the user's Python settings
+# and packages; -B stops it writing bytecode into the signed app.
+exec "$(dirname "$0")/python/bin/python3" -I -B -m streamlink "$@"

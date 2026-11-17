@@ -473,7 +473,7 @@ pane_input_key :: proc(app: ^App, key: sdl.KeyboardEvent) {
 	if box == .Chat && emote_picker_key(app, p, key) {
 		return
 	}
-	ctrl := key.mod & sdl.KMOD_CTRL != {}
+	ctrl := key.mod & SHORTCUT_MOD != {}
 	shift := key.mod & sdl.KMOD_SHIFT != {}
 	before := len(ti.text)
 	switch key.key {
@@ -539,11 +539,17 @@ pane_input_key :: proc(app: ^App, key: sdl.KeyboardEvent) {
 }
 
 // The editing keys every text box shares: deleting, moving (by word with Ctrl,
-// selecting with Shift), and Ctrl+A, C, X and V. Returns true if the key was one.
+// or Option on macOS, where Cmd goes to the start or end; selecting with Shift),
+// and Ctrl+A, C, X and V. Returns true if the key was one.
 text_box_key :: proc(ti: ^Text_Input, key: sdl.KeyboardEvent) -> bool {
-	ctrl := key.mod & sdl.KMOD_CTRL != {}
+	ctrl := key.mod & SHORTCUT_MOD != {}
 	shift := key.mod & sdl.KMOD_SHIFT != {}
-	by: Input_Move = .Word if ctrl else .Char
+	by: Input_Move = .Word if key.mod & WORD_MOD != {} else .Char
+	when ODIN_OS == .Darwin {
+		if ctrl {
+			by = .Line
+		}
+	}
 	switch key.key {
 	case sdl.K_BACKSPACE:
 		input_delete(ti, by)
@@ -788,6 +794,11 @@ draw_reply_bar :: proc(app: ^App, p: ^Chat_Pane) {
 }
 
 // Opens a link from chat in the browser.
+// The key held for shortcuts (Ctrl+T, Ctrl+C and so on): Cmd on macOS.
+SHORTCUT_MOD :: sdl.KMOD_GUI when ODIN_OS == .Darwin else sdl.KMOD_CTRL
+// The key held to move and delete a word at a time: Option on macOS.
+WORD_MOD :: sdl.KMOD_ALT when ODIN_OS == .Darwin else sdl.KMOD_CTRL
+
 open_url :: proc(url: string) {
 	if !sdl.OpenURL(strings.clone_to_cstring(url, context.temp_allocator)) {
 		log.warnf("can't open %s: %s", url, sdl.GetError())
