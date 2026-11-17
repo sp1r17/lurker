@@ -4,7 +4,7 @@
 
 <h1 align="center">Lurker</h1>
 
-A native desktop client for watching Twitch, on Linux and Windows. Streams play
+A native desktop client for watching Twitch, on Linux, Windows and macOS. Streams play
 through mpv, alongside a Chatterino-style chat, with no browser involved.
 
 Video goes through streamlink, which drops ad segments, so streams play without
@@ -91,9 +91,17 @@ if Inno Setup is installed.
 
 ## macOS
 
-Lurker runs on Macs with Apple silicon (M1 and later) only; there's no Intel
-version. The macOS version is still being worked on and isn't in the releases
-yet.
+Download `lurker-<version>-arm64.dmg` from the
+[latest release](https://github.com/sp1r17/lurker/releases/latest), open it and
+drag Lurker to Applications. It includes mpv and streamlink.
+
+It needs a Mac with Apple silicon (M1 and later) and macOS 26 or later; there's
+no Intel version. The app isn't signed by Apple, so macOS won't open it the first
+time: after trying, click Open Anyway in System Settings → Privacy & Security.
+Live notifications don't work on macOS yet.
+
+The macOS version is new and hasn't had much testing yet. If something doesn't
+work, please [open an issue](https://github.com/sp1r17/lurker/issues).
 
 To build it, install Odin and Homebrew, then:
 
@@ -173,6 +181,8 @@ settings are stored in `~/.config/lurker` (`%APPDATA%\lurker` on Windows).
 | Ctrl+= / Ctrl+- / Ctrl+0, or Ctrl+scroll | Text size |
 | Esc, or the mouse's back button | Back |
 | Q | Quit |
+
+On macOS, use Cmd instead of Ctrl, and Option+Left / Right to move by word.
 
 In chat, Tab completes emote and user names, `:` followed by part of a name opens
 the emote picker, and right-clicking a message replies to it.

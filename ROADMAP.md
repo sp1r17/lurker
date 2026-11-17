@@ -34,9 +34,9 @@ Left over from 0.8:
 
 New:
 
-- macOS on Apple silicon: build and test it in CI (done), add the disk image
-  to the release job, and get notifications working, which needs a signed app
-  bundle
+- macOS on Apple silicon: build and test it in CI, and publish the disk image
+  with each release (both done); get notifications working, which needs a
+  signed app bundle
 
 ## 0.10: Distribution
 
