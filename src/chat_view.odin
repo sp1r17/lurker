@@ -353,8 +353,17 @@ apply_clear :: proc(v: ^Chat_View, m: Chat_Message) {
 	}
 }
 
+// Whether the "More messages below" bar covers (x, y), hiding the messages
+// under it.
+chat_view_under_bar :: proc(v: ^Chat_View, x, y: f32) -> bool {
+	return v.more_bar.w > 0 && in_rect(v.more_bar, x, y)
+}
+
 // The login of the name at (x, y), if a name is drawn there.
 chat_view_name_at :: proc(v: ^Chat_View, x, y: f32) -> (login: string, found: bool) {
+	if chat_view_under_bar(v, x, y) {
+		return "", false
+	}
 	for hit in v.name_hits {
 		if in_rect(hit.rect, x, y) {
 			return hit.login, true
@@ -365,6 +374,9 @@ chat_view_name_at :: proc(v: ^Chat_View, x, y: f32) -> (login: string, found: bo
 
 // The message at (x, y), if one is drawn there.
 chat_view_message_at :: proc(v: ^Chat_View, x, y: f32) -> (m: ^Chat_Message, found: bool) {
+	if chat_view_under_bar(v, x, y) {
+		return nil, false
+	}
 	for hit in v.message_hits {
 		if in_rect(hit.rect, x, y) && hit.index < len(v.messages) {
 			return &v.messages[hit.index], true
@@ -380,6 +392,9 @@ chat_view_scroll :: proc(v: ^Chat_View, wheel_y, scale: f32) {
 // The address of the link at (x, y), if one is drawn there. Allocated with the
 // temp allocator.
 chat_view_link_at :: proc(v: ^Chat_View, x, y: f32) -> (url: string, found: bool) {
+	if chat_view_under_bar(v, x, y) {
+		return "", false
+	}
 	for hit in v.link_hits {
 		if in_rect(hit.rect, x, y) {
 			_, url, found = chat_link(hit.link)
@@ -391,6 +406,9 @@ chat_view_link_at :: proc(v: ^Chat_View, x, y: f32) -> (url: string, found: bool
 
 // Whether (x, y) is on a reply's "Replying to" line.
 chat_view_reply_at :: proc(v: ^Chat_View, x, y: f32) -> bool {
+	if chat_view_under_bar(v, x, y) {
+		return false
+	}
 	for rect in v.reply_hits {
 		if in_rect(rect, x, y) {
 			return true
@@ -401,7 +419,7 @@ chat_view_reply_at :: proc(v: ^Chat_View, x, y: f32) -> bool {
 
 // Handles a click at (x, y) in pixels. Returns true if it changed the view.
 chat_view_click :: proc(v: ^Chat_View, x, y: f32) -> bool {
-	if v.more_bar.w > 0 && in_rect(v.more_bar, x, y) {
+	if chat_view_under_bar(v, x, y) {
 		v.scroll = 0
 		return true
 	}
@@ -844,7 +862,7 @@ TOOLTIP_BADGE_HEIGHT :: 36
 // name and where it's from, above it (or below, without room), kept inside
 // `bounds`.
 draw_chat_tooltip :: proc(a: ^Assets, v: ^Chat_View, view_rect, bounds: Rect, x, y, scale: f32) {
-	if !in_rect(view_rect, x, y) {
+	if !in_rect(view_rect, x, y) || chat_view_under_bar(v, x, y) {
 		return
 	}
 	hit: Image_Hit
