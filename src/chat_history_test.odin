@@ -77,3 +77,31 @@ emotes_apply_again :: proc(t: ^testing.T) {
 	testing.expect_value(t, f[1].kind, Fragment_Kind.Emote)
 	testing.expect_value(t, f[2].text, "there")
 }
+
+// The "More messages below" bar takes clicks and hovering over the messages it
+// covers.
+@(test)
+more_bar_covers_messages :: proc(t: ^testing.T) {
+	v: Chat_View
+	defer chat_view_destroy(&v)
+	under := Rect{0, 90, 100, 20}
+	append(&v.name_hits, Name_Hit{under, "someone"})
+	append(&v.link_hits, Link_Hit{under, "https://example.com"})
+	append(&v.reply_hits, under)
+	append(&v.message_hits, Message_Hit{under, 0})
+	v.scroll = 50
+	v.more_bar = {0, 80, 100, 30}
+
+	_, name := chat_view_name_at(&v, 50, 95)
+	testing.expect(t, !name)
+	_, link := chat_view_link_at(&v, 50, 95)
+	testing.expect(t, !link)
+	testing.expect(t, !chat_view_reply_at(&v, 50, 95))
+	testing.expect(t, chat_view_click(&v, 50, 95))
+	testing.expect_value(t, v.scroll, 0)
+
+	v.more_bar = {}
+	login, found := chat_view_name_at(&v, 50, 95)
+	testing.expect(t, found)
+	testing.expect_value(t, login, "someone")
+}
