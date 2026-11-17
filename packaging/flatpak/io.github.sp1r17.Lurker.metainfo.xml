@@ -48,6 +48,11 @@
     <category>Video</category>
   </categories>
   <releases>
+    <release version="0.8.1" date="2026-11-16">
+      <description>
+        <p>Clicking the "More messages below" bar over a name now jumps to the newest messages instead of opening that person's card, and emotes under the bar no longer show their tooltip. Lurker now also runs on Macs with Apple silicon.</p>
+      </description>
+    </release>
     <release version="0.8.0" date="2026-11-06">
       <description>
         <p>A Settings page, from the link at the top or Ctrl+comma, gathers notifications, update checks, text size, low latency, following raids, the primary language, chat highlights and ignored users, what's blocked, and signing out. Double-clicking the video now maximizes the window like the maximize button; F goes fullscreen. Saved settings record their format and are written safely, so a crash can't corrupt them. Lurker is now licensed under the GPL, version 3 or later.</p>
