@@ -2,16 +2,20 @@ package app
 
 import "core:fmt"
 import "core:strings"
+import sdl "vendor:sdl3"
 
 Card_Action :: enum {
 	Follow_Channel,
 	Follow_Category,
+	Notify_Channel,
+	Copy_Link,
 	Block_Channel,
 	Block_Category,
 }
 
 // The browse screen's right-click menu, for the card clicked: following or
-// unfollowing its channel and category, and blocking them.
+// unfollowing its channel and category, its channel's live notifications and
+// link, and blocking them.
 Card_Menu :: struct {
 	open:           bool,
 	// Where it was opened, in pixels.
@@ -267,6 +271,11 @@ card_menu_click :: proc(app: ^App, x, y: f32) -> bool {
 					follow = state == .Not_Following,
 				},
 			)
+		case .Notify_Channel:
+			notify_toggle(app, m.login)
+		case .Copy_Link:
+			link := strings.clone_to_cstring(fmt.tprintf("https://www.twitch.tv/%s", m.login), context.temp_allocator)
+			_ = sdl.SetClipboardText(link)
 		case .Block_Channel:
 			block(app, .Channel, strings.clone(m.login, context.temp_allocator))
 		case .Block_Category:
@@ -312,6 +321,22 @@ draw_card_menu :: proc(app: ^App, screen: Rect) {
 	if m.category != "" {
 		verb := "Unfollow" if m.follows.category == .Following else "Follow"
 		add(m, &labels, .Follow_Category, fmt.tprintf("%s %s", verb, m.category))
+	}
+	if m.login != "" {
+		l := &app.layout
+		label: string
+		switch {
+		case l.notify_only && notify_wanted(l, m.login):
+			label = fmt.tprintf("Stop notifying when %s goes live", m.channel_name)
+		case l.notify_only:
+			label = fmt.tprintf("Notify when %s goes live", m.channel_name)
+		case notify_wanted(l, m.login):
+			label = fmt.tprintf("Mute %s's live notifications", m.channel_name)
+		case:
+			label = fmt.tprintf("Unmute %s's live notifications", m.channel_name)
+		}
+		add(m, &labels, .Notify_Channel, label)
+		add(m, &labels, .Copy_Link, "Copy link")
 	}
 	follow_items := m.count
 	if m.login != "" {

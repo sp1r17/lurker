@@ -34,8 +34,13 @@ Layout :: struct {
 	hide_chat:   bool,
 	// MIN_TEXT_SIZE to MAX_TEXT_SIZE percent.
 	text_size:   int,
-	// Live notifications are turned off (notify.odin).
+	// Live notifications are turned off (notify.odin); and which channels they're
+	// for: all followed ones but those muted, or (`notify_only`) only those chosen.
+	// Logins, owned.
 	notifications_off: bool,
+	notify_only:       bool,
+	notify_muted:      [dynamic]string,
+	notify_chosen:     [dynamic]string,
 	// Highlight phrases and ignored people, for every chat.
 	chat:              Chat_Rules,
 	// Not checking for new versions (update.odin), and the version the user chose
@@ -60,6 +65,12 @@ layout_destroy :: proc(l: ^Layout) {
 	chat_rules_destroy(&l.chat)
 	delete(l.skipped_version)
 	delete(l.language)
+	for list in ([]^[dynamic]string{&l.notify_muted, &l.notify_chosen}) {
+		for login in list {
+			delete(login)
+		}
+		delete(list^)
+	}
 }
 
 // The format layout.json is saved in (see saved.odin). 1 added the version.
@@ -97,6 +108,9 @@ parse_layout :: proc(data: []byte, l: ^Layout) -> bool {
 		hide_chat:   bool,
 		text_size:   int,
 		notifications_off: bool,
+		notify_only:       bool,
+		notify_muted:      []string,
+		notify_chosen:     []string,
 		highlights:  []string,
 		ignored:     []string,
 		update_checks_off: bool,
@@ -120,6 +134,17 @@ parse_layout :: proc(data: []byte, l: ^Layout) -> bool {
 	l.stats = saved.stats
 	l.hide_chat = saved.hide_chat
 	l.notifications_off = saved.notifications_off
+	l.notify_only = saved.notify_only
+	for login in saved.notify_muted {
+		if valid_login(login) {
+			rule_add(&l.notify_muted, login)
+		}
+	}
+	for login in saved.notify_chosen {
+		if valid_login(login) {
+			rule_add(&l.notify_chosen, login)
+		}
+	}
 	l.update_checks_off = saved.update_checks_off
 	if language_name(saved.language) != "" {
 		delete(l.language)
@@ -175,13 +200,16 @@ layout_save :: proc(l: ^Layout) {
 		hide_chat:   bool,
 		text_size:   int,
 		notifications_off: bool,
+		notify_only:       bool,
+		notify_muted:      []string,
+		notify_chosen:     []string,
 		highlights:  []string,
 		ignored:     []string,
 		update_checks_off: bool,
 		skipped_version:   string,
 		language:          string,
 		language_hide:     bool,
-	}{LAYOUT_VERSION, l.splits, l.volume, l.muted, quality_name(l.quality), l.low_latency, l.raids_off, l.stats, l.hide_chat, l.text_size, l.notifications_off, l.chat.highlights[:], l.chat.ignored[:], l.update_checks_off, l.skipped_version, l.language, l.language_hide}
+	}{LAYOUT_VERSION, l.splits, l.volume, l.muted, quality_name(l.quality), l.low_latency, l.raids_off, l.stats, l.hide_chat, l.text_size, l.notifications_off, l.notify_only, l.notify_muted[:], l.notify_chosen[:], l.chat.highlights[:], l.chat.ignored[:], l.update_checks_off, l.skipped_version, l.language, l.language_hide}
 	data, err := json.marshal(saved, {pretty = true}, context.temp_allocator)
 	if err != nil {
 		return

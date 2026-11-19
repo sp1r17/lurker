@@ -1,6 +1,7 @@
 package app
 
 import "core:fmt"
+import "core:slice"
 import "core:strings"
 import sdl "vendor:sdl3"
 
@@ -12,6 +13,11 @@ Setting_Switch :: enum {
 	Follow_Raids,
 }
 
+// Settings with a few values, shown as the value; a click moves to the next.
+Setting_Choice :: enum {
+	Notify_For,
+}
+
 // The Settings page's lists, each with a box to add to it and a button on each
 // entry to take it out.
 Setting_List :: enum {
@@ -19,6 +25,8 @@ Setting_List :: enum {
 	Ignored,
 	Blocked_Channels,
 	Blocked_Categories,
+	// The channels muted, or chosen, for live notifications (Layout.notify_only).
+	Notify_Channels,
 }
 
 // Everything that's set once and kept: switches, the text size, the language,
@@ -32,6 +40,7 @@ Settings_Page :: struct {
 	boxes:      [Setting_List]Rect,
 	remove:     [Setting_List][dynamic]Rect,
 	switches:   [Setting_Switch]Rect,
+	choices:    [Setting_Choice]Rect,
 	smaller:    Rect,
 	larger:     Rect,
 }
@@ -134,6 +143,9 @@ settings_entries :: proc(app: ^App, list: Setting_List) -> []string {
 		return blocked_list(&app.blocked, .Channel)[:]
 	case .Blocked_Categories:
 		return blocked_list(&app.blocked, .Category)[:]
+	case .Notify_Channels:
+		l := &app.layout
+		return l.notify_chosen[:] if l.notify_only else l.notify_muted[:]
 	}
 	return nil
 }
@@ -162,6 +174,16 @@ settings_add :: proc(app: ^App, list: Setting_List, typed: string) -> bool {
 		return block(app, .Channel, text)
 	case .Blocked_Categories:
 		return block(app, .Category, text)
+	case .Notify_Channels:
+		login := strings.to_lower(strings.trim_left(text, "@"), context.temp_allocator)
+		if !valid_login(login) {
+			return false
+		}
+		if slice.contains(settings_entries(app, list), login) {
+			return true
+		}
+		notify_toggle(app, login)
+		return true
 	}
 	return false
 }
@@ -182,6 +204,8 @@ settings_remove :: proc(app: ^App, list: Setting_List, i: int) {
 		unblock(app, .Channel, i)
 	case .Blocked_Categories:
 		unblock(app, .Category, i)
+	case .Notify_Channels:
+		notify_toggle(app, strings.clone(entries[i], context.temp_allocator))
 	}
 }
 
@@ -199,6 +223,27 @@ setting_on :: proc(app: ^App, s: Setting_Switch) -> bool {
 		return !l.raids_off
 	}
 	return false
+}
+
+// The choice's value, as shown.
+@(private = "file")
+setting_value :: proc(app: ^App, c: Setting_Choice) -> string {
+	switch c {
+	case .Notify_For:
+		return "Only channels you choose" if app.layout.notify_only else "All followed channels"
+	}
+	return ""
+}
+
+// Moves the choice on to its next value, after the last back to the first.
+@(private = "file")
+setting_next :: proc(app: ^App, c: Setting_Choice) {
+	l := &app.layout
+	switch c {
+	case .Notify_For:
+		l.notify_only = !l.notify_only
+	}
+	layout_save(l)
 }
 
 @(private = "file")
@@ -233,6 +278,12 @@ settings_click :: proc(app: ^App, x, y: f32) -> bool {
 	for s in Setting_Switch {
 		if in_rect(p.switches[s], x, y) {
 			setting_toggle(app, s)
+			return true
+		}
+	}
+	for c in Setting_Choice {
+		if in_rect(p.choices[c], x, y) {
+			setting_next(app, c)
 			return true
 		}
 	}
@@ -311,10 +362,18 @@ draw_settings :: proc(app: ^App, content: Rect) {
 		.Ignored            = {"Ignored users", "Add a login", "No one is ignored."},
 		.Blocked_Channels   = {"Channels", "Block a channel by its login", "No channels blocked."},
 		.Blocked_Categories = {"Categories", "Block a category by its name", "No categories blocked."},
+		.Notify_Channels    = {"Muted channels", "Mute a channel by its login", "No channels muted."},
+	}
+	if app.layout.notify_only {
+		lists[.Notify_Channels] = {"Chosen channels", "Choose a channel by its login", "No channels chosen: none will notify."}
+	}
+	choice_labels := [Setting_Choice]string {
+		.Notify_For = "Notify for",
 	}
 	Section :: struct {
 		title:    string,
 		switches: []Setting_Switch,
+		choices:  []Setting_Choice,
 		lists:    []Setting_List,
 		// The text size, the language and the account rows.
 		text_size, language, account: bool,
@@ -322,6 +381,7 @@ draw_settings :: proc(app: ^App, content: Rect) {
 	sections := [?]Section {
 		{title = "General", switches = {.Notifications, .Update_Checks}, text_size = true},
 		{title = "Streams", switches = {.Low_Latency, .Follow_Raids}, language = true},
+		{title = "Live notifications", choices = {.Notify_For}, lists = {.Notify_Channels}},
 		{title = "Chat", lists = {.Highlights, .Ignored}},
 		{title = "Blocked", lists = {.Blocked_Channels, .Blocked_Categories}},
 		{title = "Account", account = true},
@@ -331,7 +391,7 @@ draw_settings :: proc(app: ^App, content: Rect) {
 	total_h := pad
 	for s in sections {
 		total_h += lh + row_gap
-		total_h += f32(len(s.switches) + int(s.text_size) + int(s.language) + int(s.account)) * (row_h + row_gap)
+		total_h += f32(len(s.switches) + len(s.choices) + int(s.text_size) + int(s.language) + int(s.account)) * (row_h + row_gap)
 		for list in s.lists {
 			n := len(settings_entries(app, list))
 			total_h += row_h + row_gap + (f32(n) * (entry_h + row_gap) if n > 0 else lh_text + row_gap)
@@ -344,6 +404,7 @@ draw_settings :: proc(app: ^App, content: Rect) {
 	scroll^ = clamp(scroll^, 0, b.max_scroll[.Settings])
 
 	p.switches = {}
+	p.choices = {}
 	p.smaller, p.larger = {}, {}
 	// The language menu opens below it (browse_click, draw_language_menu).
 	b.language_button = {}
@@ -367,6 +428,21 @@ draw_settings :: proc(app: ^App, content: Rect) {
 			rect := draw_switch(app, row.x + row.w - row_pad, row.y + row.h / 2, setting_on(app, sw))
 			if visible(row, rest) {
 				p.switches[sw] = rect
+			}
+		}
+
+		for c in s.choices {
+			row := Rect{x, y, list_w, row_h}
+			y += row_h + row_gap
+			draw_rect(r, row, BROWSE_PLACEHOLDER)
+			draw_text(r, .Regular, name_size, row.x + row_pad, row.y + (row.h - lh_name) / 2, choice_labels[c], BROWSE_TEXT)
+			value := setting_value(app, c)
+			vw := text_width(r, .Regular, text_size, value)
+			button := Rect{row.x + row.w - row_pad - vw, row.y + (row.h - lh_text) / 2, vw, lh_text}
+			hovered := in_rect(button, app.mouse.x, app.mouse.y)
+			draw_text(r, .Regular, text_size, button.x, button.y, value, BROWSE_TEXT if hovered else BROWSE_ACCENT)
+			if visible(row, rest) {
+				p.choices[c] = button
 			}
 		}
 
