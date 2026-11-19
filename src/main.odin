@@ -300,7 +300,7 @@ run :: proc(channels: []string, config: Config, video: Maybe(Twitch_Link) = nil)
 		// Wake up for the next animation frame, browse refresh or sign-in poll,
 		// whichever is due first.
 		wait := a.next_frame_ms if a.next_frame_ms >= 0 else -1
-		dues := []int{-1, -1, volume_osd_wait(&app), controls_wait(&app), stream_info_tick(&app), stream_end_tick(&app), stream_retry_tick(&app), text_size_osd_wait(&app), replay_tick(&app), watched_tick(&app), resume_notice_wait(&app), live_poll_tick(&app), update_tick(&app), ping_tick(&app)}
+		dues := []int{-1, -1, volume_osd_wait(&app), controls_wait(&app), stream_info_tick(&app), stream_end_tick(&app), stream_retry_tick(&app), text_size_osd_wait(&app), replay_tick(&app), watched_tick(&app), resume_notice_wait(&app), live_poll_tick(&app), update_tick(&app), ping_tick(&app), latency_tick(&app)}
 		if app.screen == .Browse {
 			dues[0], dues[1] = browse_tick(&app), sign_in_tick(&app)
 		}
@@ -666,6 +666,8 @@ finish_jobs :: proc(app: ^App) {
 			finish_category_follow_job(app, &p)
 		case Ping_Job:
 			finish_ping_job(app, &p)
+		case Latency_Job:
+			finish_latency_job(app, &p)
 		}
 		destroy_job(job)
 	}

@@ -104,8 +104,10 @@ Watch :: struct {
 	stats_item:       Rect,
 	// When this channel's watch began (Assets.now_ms), for the stats.
 	watching_since:   int,
-	// Ping to Twitch, measured while the stats show (ping_tick).
+	// Ping to Twitch, measured while the stats show (ping_tick), and the latency
+	// to broadcaster (latency_tick).
 	ping:             Ping_Stats,
+	latency:          Latency_Stats,
 	// Listens for the channel raiding another, to follow it (raid.odin); nil when
 	// not listening.
 	raids:            ^Raid_Listener,
@@ -228,6 +230,7 @@ watch_stop :: proc(app: ^App) {
 	delete(w.channel)
 	delete(w.channel_id)
 	delete(w.qualities_page)
+	latency_reset(&w.latency)
 	destroy_vod(w.vod)
 	replay_destroy(&w.replay)
 	vod_extras_clear(w)
@@ -290,6 +293,8 @@ start_stream :: proc(app: ^App, signed: bool) {
 	w.signed_stream = signed
 	w.ended_at = 0
 	w.started_at = app.assets.now_ms
+	// Another rendition, or the stream started over: its anchor is taken again.
+	latency_reset(&w.latency)
 	w.retry_at = 0
 	s: Streamlink
 	ok: bool
