@@ -1,6 +1,7 @@
 package app
 
 import "core:fmt"
+import "core:slice"
 import "core:strings"
 import sdl "vendor:sdl3"
 
@@ -22,6 +23,7 @@ Setting_Switch :: enum {
 Setting_Choice :: enum {
 	Latency_Buffer,
 	Max_Quality,
+	Notify_For,
 	Start_View,
 }
 
@@ -32,6 +34,8 @@ Setting_List :: enum {
 	Ignored,
 	Blocked_Channels,
 	Blocked_Categories,
+	// The channels muted, or chosen, for live notifications (Layout.notify_only).
+	Notify_Channels,
 }
 
 // Everything that's set once and kept: switches, the text size, the language,
@@ -148,6 +152,9 @@ settings_entries :: proc(app: ^App, list: Setting_List) -> []string {
 		return blocked_list(&app.blocked, .Channel)[:]
 	case .Blocked_Categories:
 		return blocked_list(&app.blocked, .Category)[:]
+	case .Notify_Channels:
+		l := &app.layout
+		return l.notify_chosen[:] if l.notify_only else l.notify_muted[:]
 	}
 	return nil
 }
@@ -176,6 +183,16 @@ settings_add :: proc(app: ^App, list: Setting_List, typed: string) -> bool {
 		return block(app, .Channel, text)
 	case .Blocked_Categories:
 		return block(app, .Category, text)
+	case .Notify_Channels:
+		login := strings.to_lower(strings.trim_left(text, "@"), context.temp_allocator)
+		if !valid_login(login) {
+			return false
+		}
+		if slice.contains(settings_entries(app, list), login) {
+			return true
+		}
+		notify_toggle(app, login)
+		return true
 	}
 	return false
 }
@@ -196,6 +213,8 @@ settings_remove :: proc(app: ^App, list: Setting_List, i: int) {
 		unblock(app, .Channel, i)
 	case .Blocked_Categories:
 		unblock(app, .Category, i)
+	case .Notify_Channels:
+		notify_toggle(app, strings.clone(entries[i], context.temp_allocator))
 	}
 }
 
@@ -242,6 +261,8 @@ setting_value :: proc(app: ^App, c: Setting_Choice) -> string {
 			return "No limit"
 		}
 		return fmt.tprintf("%dp", l.max_height)
+	case .Notify_For:
+		return "Only channels you choose" if app.layout.notify_only else "All followed channels"
 	case .Start_View:
 		return BROWSE_TAB_LABELS[app.layout.start_view]
 	}
@@ -267,6 +288,8 @@ setting_next :: proc(app: ^App, c: Setting_Choice) {
 	case .Max_Quality:
 		heights := MAX_HEIGHTS
 		l.max_height = next(heights[:], l.max_height)
+	case .Notify_For:
+		l.notify_only = !l.notify_only
 	case .Start_View:
 		views := START_VIEWS
 		at := 0
@@ -417,6 +440,7 @@ draw_settings :: proc(app: ^App, content: Rect) {
 	choice_labels := [Setting_Choice]string {
 		.Latency_Buffer = "Low latency buffer",
 		.Max_Quality    = "Highest quality",
+		.Notify_For     = "Notify for",
 		.Start_View     = "Start page",
 	}
 	lists := [Setting_List]struct {
@@ -426,6 +450,10 @@ draw_settings :: proc(app: ^App, content: Rect) {
 		.Ignored            = {"Ignored users", "Add a login", "No one is ignored."},
 		.Blocked_Channels   = {"Channels", "Block a channel by its login", "No channels blocked."},
 		.Blocked_Categories = {"Categories", "Block a category by its name", "No categories blocked."},
+		.Notify_Channels    = {"Muted channels", "Mute a channel by its login", "No channels muted."},
+	}
+	if app.layout.notify_only {
+		lists[.Notify_Channels] = {"Chosen channels", "Choose a channel by its login", "No channels chosen: none will notify."}
 	}
 	Section :: struct {
 		title:    string,
@@ -438,6 +466,7 @@ draw_settings :: proc(app: ^App, content: Rect) {
 	sections := [?]Section {
 		{title = "General", switches = {.Notifications, .Update_Checks}, choices = {.Start_View}, text_size = true},
 		{title = "Streams", switches = {.Low_Latency, .Follow_Raids, .Next_Clip}, choices = {.Latency_Buffer, .Max_Quality}, language = true},
+		{title = "Live notifications", choices = {.Notify_For}, lists = {.Notify_Channels}},
 		{title = "Chat", switches = {.Chat_Sync, .Chat_Timestamps, .Chat_Highlight_Staff, .Chat_Hide_Bots, .Chat_Alternate_Lines}, lists = {.Highlights, .Ignored}},
 		{title = "Blocked", lists = {.Blocked_Channels, .Blocked_Categories}},
 		{title = "Account", account = true},

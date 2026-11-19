@@ -1,6 +1,7 @@
 package app
 
 import "core:fmt"
+import "core:slice"
 import "core:strings"
 import sdl "vendor:sdl3"
 
@@ -112,6 +113,9 @@ live_notify :: proc(app: ^App, streams: []Stream) {
 	for i in went_live {
 		s := streams[i]
 		if app.screen == .Watch && s.user_login == app.watch.channel {
+			continue
+		}
+		if !notify_wanted(&app.layout, s.user_login) {
 			continue
 		}
 		append(&announce, s)
@@ -312,4 +316,24 @@ window_activate :: proc(app: ^App, token: string) {
 		return
 	}
 	sdl.RaiseWindow(app.window)
+}
+
+// Whether `login` going live is announced: in all followed channels but those
+// muted, or only those chosen (Layout.notify_only).
+notify_wanted :: proc(l: ^Layout, login: string) -> bool {
+	if l.notify_only {
+		return slice.contains(l.notify_chosen[:], login)
+	}
+	return !slice.contains(l.notify_muted[:], login)
+}
+
+// Mutes or unmutes `login`'s live notifications, or (only chosen channels
+// notifying) chooses it or not, and saves.
+notify_toggle :: proc(app: ^App, login: string) {
+	l := &app.layout
+	list := &l.notify_chosen if l.notify_only else &l.notify_muted
+	if !rule_remove(list, login) {
+		rule_add(list, login)
+	}
+	layout_save(l)
 }
