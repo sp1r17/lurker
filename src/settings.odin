@@ -11,6 +11,10 @@ Setting_Switch :: enum {
 	Update_Checks,
 	Low_Latency,
 	Follow_Raids,
+	Chat_Timestamps,
+	Chat_Highlight_Staff,
+	Chat_Hide_Bots,
+	Chat_Alternate_Lines,
 	Chat_Sync,
 	Next_Clip,
 }
@@ -226,6 +230,14 @@ setting_on :: proc(app: ^App, s: Setting_Switch) -> bool {
 		return l.low_latency
 	case .Follow_Raids:
 		return !l.raids_off
+	case .Chat_Timestamps:
+		return l.chat.timestamps
+	case .Chat_Highlight_Staff:
+		return l.chat.highlight_staff
+	case .Chat_Hide_Bots:
+		return l.chat.hide_bots
+	case .Chat_Alternate_Lines:
+		return l.chat.alternate_lines
 	case .Chat_Sync:
 		return l.chat_sync
 	case .Next_Clip:
@@ -307,6 +319,18 @@ setting_toggle :: proc(app: ^App, s: Setting_Switch) {
 		app.layout.raids_off = !app.layout.raids_off
 		layout_save(&app.layout)
 		watch_listen_for_raids(app)
+	case .Chat_Timestamps:
+		app.layout.chat.timestamps = !app.layout.chat.timestamps
+		layout_save(&app.layout)
+	case .Chat_Highlight_Staff:
+		app.layout.chat.highlight_staff = !app.layout.chat.highlight_staff
+		layout_save(&app.layout)
+	case .Chat_Hide_Bots:
+		app.layout.chat.hide_bots = !app.layout.chat.hide_bots
+		layout_save(&app.layout)
+	case .Chat_Alternate_Lines:
+		app.layout.chat.alternate_lines = !app.layout.chat.alternate_lines
+		layout_save(&app.layout)
 	case .Chat_Sync:
 		app.layout.chat_sync = !app.layout.chat_sync
 		layout_save(&app.layout)
@@ -406,6 +430,10 @@ draw_settings :: proc(app: ^App, content: Rect) {
 		.Update_Checks = "Check for new versions",
 		.Low_Latency   = "Low latency",
 		.Follow_Raids  = "Follow raids to the raided channel",
+		.Chat_Timestamps      = "Show when each message was sent",
+		.Chat_Highlight_Staff = "Highlight the streamer's and moderators' messages",
+		.Chat_Hide_Bots       = "Hide bots and !commands",
+		.Chat_Alternate_Lines = "Alternate message backgrounds",
 		.Chat_Sync     = "Delay chat to match the stream",
 		.Next_Clip     = "Play the next clip when one ends",
 	}
@@ -439,7 +467,7 @@ draw_settings :: proc(app: ^App, content: Rect) {
 		{title = "General", switches = {.Notifications, .Update_Checks}, choices = {.Start_View}, text_size = true},
 		{title = "Streams", switches = {.Low_Latency, .Follow_Raids, .Next_Clip}, choices = {.Latency_Buffer, .Max_Quality}, language = true},
 		{title = "Live notifications", choices = {.Notify_For}, lists = {.Notify_Channels}},
-		{title = "Chat", switches = {.Chat_Sync}, lists = {.Highlights, .Ignored}},
+		{title = "Chat", switches = {.Chat_Sync, .Chat_Timestamps, .Chat_Highlight_Staff, .Chat_Hide_Bots, .Chat_Alternate_Lines}, lists = {.Highlights, .Ignored}},
 		{title = "Blocked", lists = {.Blocked_Channels, .Blocked_Categories}},
 		{title = "Account", account = true},
 	}
