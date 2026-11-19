@@ -33,11 +33,20 @@ pre-roll or mid-roll ads.
 - User cards with everything someone said in the chat; moderators can time out,
   ban and delete from them, or with `/timeout`, `/ban` and `/clear`
 - Hover a stream card for its full title, or an emote or badge for its name
+- Sort streams by viewers, start time, name or category; live cards show how
+  long the stream has been live
+- A History tab with the streams, videos and clips you've watched
 - Each channel's past broadcasts, highlights, uploads and clips, with chat replay,
   chapters, seek-bar previews, playback speed, and resuming where you left off
 - Watch a live stream from its start, then jump back to live
-- Quality selection, low-latency mode, volume boost up to 130%
-- Follow and unfollow channels
+- The stream's exact qualities (936p, say), an optional highest quality, low
+  latency with an optional buffer, and volume boost up to 130%
+- Stream stats (press I): resolution, bitrate, network speed, buffer, dropped
+  frames, ping to Twitch and latency to the broadcaster
+- Chat can be delayed to match the stream; timestamps, highlighted streamer and
+  moderator messages, hidden bots and alternating backgrounds are in Settings
+- Follow and unfollow channels and categories, from the stream or by
+  right-clicking a card
 - Block channels and categories (right-click a card, or in Settings) to hide them
   everywhere
 - Pick a primary language in Settings: streams in other languages on Top and in
@@ -45,7 +54,8 @@ pre-roll or mid-roll ads.
 - Follows the channel you're watching when it raids another (switch it off in
   Settings or the quality menu)
 - A desktop notification when a channel you follow goes live, while Lurker is
-  open, with its picture; click it to watch, or turn them off in Settings
+  open, with its picture; click it to watch. Mute channels, or only notify for
+  the ones you choose, in Settings or by right-clicking
 - Remembers volume, quality, splits, chat visibility, text size and language
 - Tells you when a new version is out (turn it off in Settings); on Windows, it
   updates itself
@@ -57,7 +67,7 @@ Download `lurker-<version>-x86_64.flatpak` from the
 [latest release](https://github.com/sp1r17/lurker/releases/latest) and install it:
 
 ```sh
-flatpak install --user lurker-0.8.1-x86_64.flatpak
+flatpak install --user lurker-0.9.0-x86_64.flatpak
 flatpak run io.github.sp1r17.Lurker
 ```
 
