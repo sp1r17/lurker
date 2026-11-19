@@ -164,16 +164,30 @@ player_destroy :: proc(p: ^Player) {
 
 // mpv's built-in low-latency profile, minus single-threaded decoding (which can
 // drop frames at 1080p60) and skipping stream probing (which could miss the audio
-// in what streamlink sends), plus no cache.
-LOW_LATENCY_OPTIONS :: "cache=no,cache-pause=no,audio-buffer=0,stream-buffer-size=4k,demuxer-lavf-o-add=fflags=+nobuffer,demuxer-lavf-analyzeduration=0.1,video-sync=audio,interpolation=no,video-latency-hacks=yes"
+// in what streamlink sends). With no buffer, no cache either.
+LOW_LATENCY_OPTIONS :: "audio-buffer=0,stream-buffer-size=4k,demuxer-lavf-o-add=fflags=+nobuffer,demuxer-lavf-analyzeduration=0.1,video-sync=audio,interpolation=no,video-latency-hacks=yes"
 
-// Plays `url`. With `low_latency`, mpv buffers as little as it can; the options
-// apply to this file only, so they're gone with the next.
-player_load :: proc(p: ^Player, url: string, low_latency := false) {
+// The buffers low latency offers (Layout.latency_buffer_ms), in ms: none, or
+// that much video waited for before playing, which then stays in hand to ride
+// out the stream arriving unevenly. Streamlink's first segments come in a burst
+// of about a second, so a smaller one would change nothing; above that, each
+// second more is about a second further behind (measured: 1.5 s behind with
+// none, 2.5 s with 2 s, 3.5 s with 3 s).
+LOW_LATENCY_BUFFERS :: [?]int{0, 2000, 3000, 4000}
+
+// Plays `url`. With `low_latency`, mpv buffers as little as it can, or
+// `buffer_ms` of video; the options apply to this file only, so they're gone
+// with the next.
+player_load :: proc(p: ^Player, url: string, low_latency := false, buffer_ms := 0) {
 	stats_reset(&p.stats)
 	curl := strings.clone_to_cstring(url, context.temp_allocator)
 	if low_latency {
-		player_command(p, {"loadfile", curl, "replace", "-1", LOW_LATENCY_OPTIONS})
+		cache := "cache=no,cache-pause=no"
+		if buffer_ms > 0 {
+			cache = fmt.tprintf("cache=yes,cache-pause=yes,cache-pause-initial=yes,cache-pause-wait=%.1f", f64(buffer_ms) / 1000)
+		}
+		options := strings.clone_to_cstring(fmt.tprintf("%s,%s", cache, LOW_LATENCY_OPTIONS), context.temp_allocator)
+		player_command(p, {"loadfile", curl, "replace", "-1", options})
 	} else {
 		player_command(p, {"loadfile", curl})
 	}

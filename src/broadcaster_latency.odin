@@ -73,12 +73,13 @@ destroy_latency_job :: proc(p: ^Latency_Job) {
 	delete(p.playlist)
 }
 
-// Takes the anchor every LATENCY_REFRESH_MS while the stats show over a live
-// stream. Returns ms until the next, for the main loop's wait.
+// Takes the anchor every LATENCY_REFRESH_MS while a live stream plays with the
+// stats showing or the chat matched to it. Returns ms until the next, for the
+// main loop's wait.
 latency_tick :: proc(app: ^App) -> (wait_ms: int) {
 	w := &app.watch
 	l := &w.latency
-	if app.screen != .Watch || !app.layout.stats || w.playing_vod || w.status != .Playing || l.pending {
+	if app.screen != .Watch || !(app.layout.stats || app.layout.chat_sync) || w.playing_vod || w.status != .Playing || l.pending {
 		return -1
 	}
 	now := app.assets.now_ms
@@ -92,7 +93,7 @@ latency_tick :: proc(app: ^App) -> (wait_ms: int) {
 		session    = app.session,
 		started_at = w.started_at,
 		channel    = strings.clone(w.channel),
-		quality    = app.layout.quality,
+		quality    = watch_quality(app),
 		renditions = w.qualities,
 		playlist   = strings.clone(l.playlist),
 	}
