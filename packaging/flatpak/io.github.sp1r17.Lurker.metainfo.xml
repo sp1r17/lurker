@@ -19,17 +19,18 @@
       <li>Chat with history, reply threads, highlights and moderator tools</li>
       <li>Watch past broadcasts with seeking and chat replay</li>
       <li>Choose the quality, or switch to low latency</li>
+      <li>See stream stats, including latency to the broadcaster</li>
       <li>Get a notification when a channel you follow goes live</li>
     </ul>
     <p>Lurker is not affiliated with or endorsed by Twitch.</p>
   </description>
   <screenshots>
     <screenshot type="default">
-      <image>https://raw.githubusercontent.com/sp1r17/lurker/v0.1.0/packaging/screenshots/watch.png</image>
+      <image>https://raw.githubusercontent.com/sp1r17/lurker/v0.9.0/packaging/screenshots/watch.png</image>
       <caption>A live stream with its chat</caption>
     </screenshot>
     <screenshot>
-      <image>https://raw.githubusercontent.com/sp1r17/lurker/v0.1.0/packaging/screenshots/categories.png</image>
+      <image>https://raw.githubusercontent.com/sp1r17/lurker/v0.9.0/packaging/screenshots/categories.png</image>
       <caption>Browsing categories</caption>
     </screenshot>
   </screenshots>
@@ -48,6 +49,11 @@
     <category>Video</category>
   </categories>
   <releases>
+    <release version="0.9.0" date="2026-11-19">
+      <description>
+        <p>The quality menu lists each stream's own qualities, such as 936p, and a highest quality can be set. Press I for stream stats: resolution, bitrate, network speed, buffer, dropped frames, ping to Twitch and latency to the broadcaster. Chat can be delayed to match the stream, and low latency can keep a small buffer. Live cards show uptime; stream lists can be sorted; a History tab lists what you've watched; the start page can be chosen; and clips can be limited to the last day, week or month. Right-click a card to follow its channel or category, mute its notifications or copy its link, or choose to be notified only for some channels. Chat can show timestamps, highlight the streamer and moderators, hide bots and alternate backgrounds. R restarts a stuck stream, a Live now button appears on a live channel's older videos, and the next clip plays when one ends. Still-live broadcasts show the stream's current frame, and the screenshots are new.</p>
+      </description>
+    </release>
     <release version="0.8.1" date="2026-11-16">
       <description>
         <p>Clicking the "More messages below" bar over a name now jumps to the newest messages instead of opening that person's card, and emotes under the bar no longer show their tooltip. Lurker now also runs on Macs with Apple silicon.</p>
