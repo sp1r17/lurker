@@ -168,8 +168,8 @@ Browse :: struct {
 	language_button:      Rect,
 	language_menu:        Language_Menu,
 	header_h:             f32,
-	// The right-click menu for blocking (blocked.odin).
-	block_menu:           Block_Menu,
+	// The right-click menu for following and blocking (card_menu.odin).
+	card_menu:            Card_Menu,
 	settings:             Settings_Page,
 }
 
@@ -209,7 +209,7 @@ browse_destroy :: proc(b: ^Browse) {
 	delete(b.results)
 	delete(b.cards)
 	delete(b.follow_buttons)
-	block_menu_destroy(&b.block_menu)
+	card_menu_destroy(&b.card_menu)
 	language_menu_destroy(&b.language_menu)
 	settings_page_destroy(&b.settings)
 }
@@ -289,7 +289,7 @@ browse_clear :: proc(app: ^App) {
 	b := &app.browse
 	browse_search_close(app)
 	settings_unfocus(app)
-	block_menu_close(&b.block_menu)
+	card_menu_close(&b.card_menu)
 	for l in ([]^Stream_List{&b.following, &b.top, &b.category}) {
 		stream_list_clear(app, l)
 	}
@@ -969,8 +969,8 @@ browse_open_category :: proc(app: ^App, c: Category) {
 // so Esc can do what it does on the browse screen otherwise.
 browse_back :: proc(app: ^App) -> bool {
 	b := &app.browse
-	if b.block_menu.open {
-		block_menu_close(&b.block_menu)
+	if b.card_menu.open {
+		card_menu_close(&b.card_menu)
 		return true
 	}
 	if b.language_menu.open {
@@ -994,7 +994,7 @@ browse_back :: proc(app: ^App) -> bool {
 }
 
 browse_scroll :: proc(b: ^Browse, wheel_y, scale: f32) {
-	block_menu_close(&b.block_menu)
+	card_menu_close(&b.card_menu)
 	// It hangs below the Settings page's language row, which would scroll away.
 	b.language_menu.open = false
 	b.scroll[b.view] = clamp(b.scroll[b.view] - wheel_y * BROWSE_SCROLL_STEP * scale, 0, b.max_scroll[b.view])
@@ -1016,7 +1016,7 @@ browse_card_at :: proc(b: ^Browse, x, y: f32) -> int {
 // A left click on the browse screen. Returns true if it hit something.
 browse_click :: proc(app: ^App, x, y: f32) -> bool {
 	b := &app.browse
-	if block_menu_click(app, x, y) {
+	if card_menu_click(app, x, y) {
 		return true
 	}
 	if language_menu_click(app, x, y) {
@@ -1138,6 +1138,12 @@ on_browse_header_controls :: proc(app: ^App, x, y: f32) -> bool {
 draw_browse :: proc(app: ^App, screen: Rect) {
 	r := &app.assets.renderer
 	b := &app.browse
+	// No card lights up, or shows its title, under an open menu.
+	hovered := b.hovered
+	defer b.hovered = hovered
+	if app.mouse_under_menu {
+		b.hovered = -1
+	}
 	draw_rect(r, screen, BROWSE_BACKGROUND)
 	draw_browse_header(app, screen)
 
@@ -1174,7 +1180,7 @@ draw_browse :: proc(app: ^App, screen: Rect) {
 	case .Settings:
 		draw_settings(app, content)
 	}
-	draw_block_menu(app, screen)
+	draw_card_menu(app, screen)
 	draw_language_menu(app, b.language_button, screen)
 }
 

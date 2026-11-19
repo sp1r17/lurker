@@ -14,7 +14,8 @@ Follow_State :: enum {
 }
 
 // Looks up whether the user follows the watched channel, or (with `set`)
-// follows or unfollows it, or a channel in the search results (`from_search`).
+// follows or unfollows it, or a channel on the browse screen (`from_browse`: in
+// the search results or the right-click menu).
 Follow_Job :: struct {
 	client_id: string,
 	// A copy; the job may refresh it.
@@ -23,7 +24,7 @@ Follow_Job :: struct {
 	// Set by a lookup, given to a change. Owned.
 	user_id:   string,
 	set:       bool,
-	from_search: bool,
+	from_browse: bool,
 	// What to change it to, or what a lookup found.
 	following: bool,
 	// Whether the channel is live: following it then isn't announced as going live.
@@ -55,7 +56,7 @@ follow_start :: proc(app: ^App, p: Follow_Job) {
 	p.client_id = strings.clone(app.client_id)
 	p.auth = clone_auth(app.auth)
 	p.session = app.session
-	if !p.from_search {
+	if !p.from_browse {
 		app.watch.follow_pending = true
 	}
 	jobs_add(&app.assets.jobs, run_follow_job, p)
@@ -93,13 +94,15 @@ follow_request :: proc(p: ^Follow_Job) -> Twitch_Error {
 finish_follow_job :: proc(app: ^App, p: ^Follow_Job) {
 	apply_auth_check(app, p.check, p.auth)
 	if p.set && p.ok {
-		// The browse screen's Following list is out of date now.
+		// The browse screen's Following list is out of date now, offline
+		// channels too.
 		app.browse.following.last_refresh = -BROWSE_REFRESH_MS
+		app.browse.offline.refreshed = -OFFLINE_REFRESH_MS
 		if p.following && p.live {
 			live_notifier_seen(&app.live, p.user_id, app.assets.now_ms)
 		}
 	}
-	if p.from_search {
+	if p.from_browse {
 		// The results may have changed since; the channel may still be there.
 		for &c in app.browse.results {
 			if c.broadcaster_login == p.login {
@@ -162,10 +165,26 @@ follow_click_result :: proc(app: ^App, i: int) {
 				set = true,
 				following = c.follow == .Not_Following,
 				live = c.is_live,
-				from_search = true,
+				from_browse = true,
 			},
 		)
 	}
+}
+
+// Follows or unfollows channel `login` (user ID `user_id`) from the browse
+// screen's right-click menu. `live`: it's streaming now.
+follow_from_menu :: proc(app: ^App, login, user_id: string, follow, live: bool) {
+	follow_start(
+		app,
+		Follow_Job {
+			login = strings.clone(login),
+			user_id = strings.clone(user_id),
+			set = true,
+			following = follow,
+			live = live,
+			from_browse = true,
+		},
+	)
 }
 
 // Whether a click on a follow button should change the follow now: following is

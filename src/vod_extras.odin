@@ -287,6 +287,8 @@ draw_chapter_menu :: proc(app: ^App) {
 	shown := min(len(w.chapters), max(1, int((w.chapters_button.y - w.video_rect.y - 16 * scale) / item_h)))
 	menu_h := item_h * f32(shown)
 	menu := Rect{w.chapters_button.x + w.chapters_button.w - menu_w, w.chapters_button.y - 6 * scale - menu_h, menu_w, menu_h}
+	hidden := menu_hover_begin(app, menu)
+	defer menu_hover_end(app, hidden)
 	draw_rect(r, menu, USER_CARD_BACKGROUND)
 	for i in 0 ..< shown {
 		item := Rect{menu.x, menu.y + f32(i) * item_h, menu.w, item_h}
