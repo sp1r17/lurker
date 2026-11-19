@@ -139,6 +139,39 @@ streamlink_vod_url :: proc(
 	return strings.clone(found, allocator), renditions, true
 }
 
+// The address of `channel`'s live media playlist in `quality`, as streamlink would
+// play it, for the latency to broadcaster (broadcaster_latency.odin). Blocks:
+// for a job. Allocated with `allocator`.
+streamlink_live_playlist :: proc(
+	channel: string,
+	quality: Quality,
+	renditions: Renditions,
+	client_id := "",
+	token := "",
+	allocator := context.allocator,
+) -> (
+	url: string,
+	ok: bool,
+) {
+	command := make([dynamic]string, context.temp_allocator)
+	append(&command, streamlink_program(), "--stream-url", "--loglevel", "error")
+	append(&command, "--twitch-supported-codecs", quality_codecs(quality, renditions))
+	if token != "" {
+		config := write_streamlink_config(client_id, token) or_return
+		append(&command, "--config", config)
+	}
+	append(&command, fmt.tprintf("https://twitch.tv/%s", channel), quality_streams(quality, renditions))
+	state, stdout, _, err := os.process_exec({command = command[:]}, context.temp_allocator)
+	if err != nil || state.exit_code != 0 {
+		return "", false
+	}
+	out := strings.trim_space(string(stdout))
+	if !strings.has_prefix(out, "https://") {
+		return "", false
+	}
+	return strings.clone(out, allocator), true
+}
+
 // The Twitch page streamlink is given for a past broadcast or clip. Allocated with
 // the temp allocator.
 vod_page :: proc(vod_id: string, kind: Video_Kind) -> string {

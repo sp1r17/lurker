@@ -41,7 +41,7 @@ stats_rows_describe_playback :: proc(t: ^testing.T) {
 		dropped         = 3,
 		decoder_dropped = 1,
 	}
-	rows := stats_rows(s, {last = 21.4, total = 60, count = 3}, "2026-11-19T12:00:00Z", 125, now)
+	rows := stats_rows(s, {last = 21.4, total = 60, count = 3}, 2.43, "2026-11-19T12:00:00Z", 125, now)
 	get :: proc(rows: []Stats_Row, label: string) -> string {
 		for r in rows {
 			if r.label == label {
@@ -55,11 +55,15 @@ stats_rows_describe_playback :: proc(t: ^testing.T) {
 	testing.expect_value(t, get(rows, "Network"), "—")
 	testing.expect_value(t, get(rows, "Buffer"), "2.3 s")
 	testing.expect_value(t, get(rows, "Ping to Twitch"), "21 ms · 20 ms average")
-	testing.expect_value(t, get(stats_rows({}, {}, "", 0, now), "Ping to Twitch"), "—")
+	testing.expect_value(t, get(rows, "Latency to broadcaster"), "2.4 s")
+	testing.expect_value(t, get(stats_rows(s, {}, nil, "2026-11-19T12:00:00Z", 0, now), "Latency to broadcaster"), "—")
+	// A video: no latency.
+	testing.expect_value(t, get(stats_rows(s, {}, 2.43, "", 0, now), "Latency to broadcaster"), "(none)")
+	testing.expect_value(t, get(stats_rows({}, {}, nil, "", 0, now), "Ping to Twitch"), "—")
 	testing.expect_value(t, get(rows, "Dropped frames"), "4 (1 by the decoder)")
 	testing.expect_value(t, get(rows, "Live for"), "3:00:00")
 	testing.expect_value(t, get(rows, "Watching for"), format_clock(125))
 	// A video: no uptime.
-	testing.expect_value(t, get(stats_rows({}, {}, "", 0, now), "Live for"), "(none)")
-	testing.expect_value(t, get(stats_rows({hwdec = "no", height = 720}, {}, "", 0, now), "Video"), "720p · software decoding")
+	testing.expect_value(t, get(stats_rows({}, {}, nil, "", 0, now), "Live for"), "(none)")
+	testing.expect_value(t, get(stats_rows({hwdec = "no", height = 720}, {}, nil, "", 0, now), "Video"), "720p · software decoding")
 }

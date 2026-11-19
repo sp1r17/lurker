@@ -81,10 +81,18 @@ Stats_Row :: struct {
 }
 
 // The stats' rows, from what mpv reports: the video, bitrates, network, buffer,
-// dropped frames; the ping to Twitch; and how long the stream has been live
-// (`started_at`, "" for a video) and watched (`watched_s`). Allocated with the
-// temp allocator.
-stats_rows :: proc(s: Player_Stats, ping: Ping_Stats, started_at: string, watched_s: int, now: time.Time) -> []Stats_Row {
+// dropped frames; the ping to Twitch; for a live stream, the latency to the
+// broadcaster in seconds (nil until known); and how long the stream has been
+// live (`started_at`, "" for a video) and watched (`watched_s`). Allocated with
+// the temp allocator.
+stats_rows :: proc(
+	s: Player_Stats,
+	ping: Ping_Stats,
+	latency: Maybe(f64),
+	started_at: string,
+	watched_s: int,
+	now: time.Time,
+) -> []Stats_Row {
 	rows := make([dynamic]Stats_Row, context.temp_allocator)
 	unknown :: "—"
 
@@ -125,6 +133,13 @@ stats_rows :: proc(s: Player_Stats, ping: Ping_Stats, started_at: string, watche
 		buffer = fmt.tprintf("%.1f s", b)
 	}
 	append(&rows, Stats_Row{"Buffer", buffer})
+	if started_at != "" {
+		latency_text := unknown
+		if seconds, ok := latency.?; ok {
+			latency_text = fmt.tprintf("%.1f s", max(seconds, 0))
+		}
+		append(&rows, Stats_Row{"Latency to broadcaster", latency_text})
+	}
 	ping_text := unknown
 	if ping.count > 0 {
 		ping_text = fmt.tprintf("%.0f ms · %.0f ms average", ping.last, ping.total / f64(ping.count))
@@ -193,7 +208,14 @@ draw_stream_stats :: proc(app: ^App) {
 	gap := 16 * scale
 	started_at := w.info.started_at if w.has_info && !w.playing_vod else ""
 	watched := (app.assets.now_ms - w.watching_since) / 1000
-	rows := stats_rows(app.player.stats, w.ping, started_at, watched, time.now())
+	now := time.now()
+	latency: Maybe(f64)
+	if position, playing := player_position(&app.player); playing && started_at != "" {
+		if seconds, known := latency_seconds(w.latency, position, now); known {
+			latency = seconds
+		}
+	}
+	rows := stats_rows(app.player.stats, w.ping, latency, started_at, watched, now)
 
 	label_w, value_w: f32
 	for row in rows {
