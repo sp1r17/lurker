@@ -601,6 +601,121 @@ parse_set_follow_response :: proc(body: []byte) -> Twitch_Error {
 	return .None
 }
 
+// Whether the signed-in user follows a channel and a category, with their IDs,
+// which following or unfollowing them needs. Unknown for one not asked about.
+Card_Follows :: struct {
+	user_id:  string,
+	channel:  Follow_State,
+	game_id:  string,
+	category: Follow_State,
+}
+
+// Whether the signed-in user follows channel `login` and category `game` (either
+// may be ""), in one request, for the browse screen's right-click menu. Allocated
+// with the temp allocator.
+get_card_follows :: proc(client_id, token, login, game: string) -> (f: Card_Follows, err: Twitch_Error) {
+	variables := make(map[string]string, context.temp_allocator)
+	params := make([dynamic]string, context.temp_allocator)
+	fields := make([dynamic]string, context.temp_allocator)
+	if login != "" {
+		variables["login"] = login
+		append(&params, "$login: String!")
+		append(&fields, "user(login: $login) { id self { follower { followedAt } } }")
+	}
+	if game != "" {
+		variables["game"] = game
+		append(&params, "$game: String!")
+		append(&fields, "game(name: $game) { id self { follow { followedAt } } }")
+	}
+	if len(fields) == 0 {
+		return {}, .None
+	}
+	query := strings.concatenate(
+		{
+			"query(",
+			strings.join(params[:], ", ", context.temp_allocator),
+			") { ",
+			strings.join(fields[:], " ", context.temp_allocator),
+			" }",
+		},
+		context.temp_allocator,
+	)
+	body := gql_post(client_id, token, query, variables) or_return
+	return parse_card_follows_response(body)
+}
+
+parse_card_follows_response :: proc(body: []byte) -> (f: Card_Follows, err: Twitch_Error) {
+	Followed :: struct {
+		followedAt: string,
+	}
+	r: struct {
+		data:   struct {
+			user: Maybe(struct {
+				id:   string,
+				self: Maybe(struct {
+					follower: Maybe(Followed),
+				}),
+			}),
+			game: Maybe(struct {
+				id:   string,
+				self: Maybe(struct {
+					follow: Maybe(Followed),
+				}),
+			}),
+		},
+		errors: Graphql_Errors,
+	}
+	if json.unmarshal(body, &r, allocator = context.temp_allocator) != nil {
+		return {}, .Bad_Json
+	}
+	check_errors(r.errors) or_return
+	if user, ok := r.data.user.?; ok {
+		if self, has_self := user.self.?; has_self {
+			f.user_id = user.id
+			_, following := self.follower.?
+			f.channel = .Following if following else .Not_Following
+		}
+	}
+	if game, ok := r.data.game.?; ok {
+		if self, has_self := game.self.?; has_self {
+			f.game_id = game.id
+			_, following := self.follow.?
+			f.category = .Following if following else .Not_Following
+		}
+	}
+	return f, .None
+}
+
+// Follows or unfollows the category with ID `game_id`.
+set_category_follow :: proc(client_id, token, game_id: string, follow: bool) -> Twitch_Error {
+	variables := make(map[string]string, context.temp_allocator)
+	variables["id"] = game_id
+	query :=
+		"mutation($id: ID!) { followGame(input: {gameID: $id}) { game { id } error { code } } }" if follow else "mutation($id: ID!) { unfollowGame(input: {gameID: $id}) { __typename } }"
+	body := gql_post(client_id, token, query, variables) or_return
+	r: struct {
+		data:   struct {
+			followGame: Maybe(struct {
+				error: Maybe(struct {
+					code: string,
+				}),
+			}),
+		},
+		errors: Graphql_Errors,
+	}
+	if json.unmarshal(body, &r, allocator = context.temp_allocator) != nil {
+		return .Bad_Json
+	}
+	check_errors(r.errors) or_return
+	if payload, ok := r.data.followGame.?; ok {
+		if e, failed := payload.error.?; failed {
+			log.warnf("following the category failed: %s", e.code)
+			return .Bad_Status
+		}
+	}
+	return .None
+}
+
 // An emote the signed-in user can use in chat, as GraphQL describes it: its
 // name, ID, type ("SUBSCRIPTIONS", "FOLLOWER", "GLOBALS", ...) and channel.
 Twitch_User_Emote :: struct {

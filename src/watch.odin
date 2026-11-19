@@ -528,6 +528,8 @@ draw_controls :: proc(app: ^App) {
 	}
 	menu_h := item_h * f32(items + 2) + divider
 	menu := Rect{w.quality_button.x + w.quality_button.w - menu_w, w.quality_button.y - 6 * scale - menu_h, menu_w, menu_h}
+	hidden := menu_hover_begin(app, menu)
+	defer menu_hover_end(app, hidden)
 	draw_rect(r, menu, USER_CARD_BACKGROUND)
 	for c, i in choices[:items] {
 		item := Rect{menu.x, menu.y + f32(i) * item_h, menu.w, item_h}
@@ -542,7 +544,7 @@ draw_controls :: proc(app: ^App) {
 	draw_menu_item(app, w.raids_item, "Follow raids", !app.layout.raids_off)
 }
 
-draw_menu_item :: proc(app: ^App, item: Rect, label: string, checked: bool) {
+draw_menu_item :: proc(app: ^App, item: Rect, label: string, checked: bool, color := BROWSE_TEXT) {
 	r := &app.assets.renderer
 	scale := app.scale
 	size := BROWSE_CARD_TEXT_SIZE * scale
@@ -562,7 +564,7 @@ draw_menu_item :: proc(app: ^App, item: Rect, label: string, checked: bool) {
 		draw_line(r, mx, my + mark * 0.55, mx + mark * 0.38, my + mark * 0.9, stroke, BROWSE_ACCENT)
 		draw_line(r, mx + mark * 0.38, my + mark * 0.9, mx + mark, my + mark * 0.1, stroke, BROWSE_ACCENT)
 	}
-	draw_text(r, .Bold if checked else .Regular, size, item.x + pad + mark + 8 * scale, ty, label, BROWSE_TEXT)
+	draw_text(r, .Bold if checked else .Regular, size, item.x + pad + mark + 8 * scale, ty, label, color)
 }
 
 // Acts on what mpv reports: the stream showing, or ending.

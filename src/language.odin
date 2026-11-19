@@ -166,6 +166,8 @@ draw_language_menu :: proc(app: ^App, at: Rect, screen: Rect) {
 	menu_h := item_h * f32(2 + rows) + divider
 	menu := Rect{max(pad, at.x + at.w - menu_w), at.y + at.h + 8 * scale, menu_w, menu_h}
 	menu.x = min(menu.x, screen.w - menu_w)
+	hidden := menu_hover_begin(app, menu)
+	defer menu_hover_end(app, hidden)
 	draw_rect(r, {menu.x - scale, menu.y - scale, menu.w + 2 * scale, menu.h + 2 * scale}, USER_CARD_BORDER)
 	draw_rect(r, menu, USER_CARD_BACKGROUND)
 

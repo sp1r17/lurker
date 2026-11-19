@@ -392,3 +392,25 @@ chapters_are_found_by_time :: proc(t: ^testing.T) {
 	testing.expect_value(t, chapter_at(chapters, 99_999), 2)
 	testing.expect_value(t, chapter_at(chapters[1:], 500), -1)
 }
+
+@(test)
+card_follows_read :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	both := `{"data":{"user":{"id":"121059319","self":{"follower":{"followedAt":"2024-01-01T00:00:00Z"}}},"game":{"id":"509658","self":{"follow":null}}}}`
+	f, err := parse_card_follows_response(transmute([]byte)string(both))
+	testing.expect_value(t, err, Twitch_Error.None)
+	testing.expect_value(t, f.user_id, "121059319")
+	testing.expect_value(t, f.channel, Follow_State.Following)
+	testing.expect_value(t, f.game_id, "509658")
+	testing.expect_value(t, f.category, Follow_State.Not_Following)
+	// A category only, as from the Categories tab.
+	game := `{"data":{"game":{"id":"509658","self":{"follow":{"followedAt":"2024-01-01T00:00:00Z"}}}}}`
+	f, err = parse_card_follows_response(transmute([]byte)string(game))
+	testing.expect_value(t, err, Twitch_Error.None)
+	testing.expect_value(t, f.channel, Follow_State.Unknown)
+	testing.expect_value(t, f.category, Follow_State.Following)
+	// No such category: nothing to follow.
+	gone := `{"data":{"game":null}}`
+	f, err = parse_card_follows_response(transmute([]byte)string(gone))
+	testing.expect_value(t, f.category, Follow_State.Unknown)
+}

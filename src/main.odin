@@ -133,6 +133,13 @@ App :: struct {
 	// From the last draw: the display scale, and the mouse in pixels.
 	scale:           f32,
 	mouse:           [2]f32,
+	// Where an open menu was drawn last frame (zero size for none), and this
+	// frame. While the mouse is over one, what's behind it is drawn with the
+	// mouse hidden, so nothing there lights up (menu_hover_begin).
+	menu_rect:       Rect,
+	menu_rect_next:  Rect,
+	mouse_under_menu: bool,
+	real_mouse:      [2]f32,
 	// Dragging the borderless window (see window.odin).
 	wayland_drag:    Wayland_Drag,
 	wayland_drag_ok: bool,
@@ -524,7 +531,7 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 			redraw^ = true
 			return true
 		}
-		// On a card, a menu for blocking its channel or category.
+		// On a card, a menu for following or blocking its channel or category.
 		if e.button.button == sdl.BUTTON_RIGHT && app.screen == .Browse && app.signed_in {
 			browse_right_click(app, e.button.x * density, e.button.y * density)
 			redraw^ = true
@@ -653,6 +660,10 @@ finish_jobs :: proc(app: ^App) {
 			finish_update_download_job(app, &p)
 		case Raid_Subscribe_Job:
 			finish_raid_subscribe_job(app, &p)
+		case Card_Follows_Job:
+			finish_card_follows_job(app, &p)
+		case Category_Follow_Job:
+			finish_category_follow_job(app, &p)
 		}
 		destroy_job(job)
 	}
@@ -696,10 +707,18 @@ draw :: proc(app: ^App) {
 	if app.screen == .Watch {
 		watch_prepare(app, screen)
 	}
-	// The font atlas can grow mid-frame, which needs one more pass.
-	for _ in 0 ..< 2 {
+	// The font atlas can grow mid-frame, which needs one more pass; so does a menu
+	// opening or moving, so what's behind it is drawn knowing where it is.
+	mouse := app.mouse
+	for _ in 0 ..< 3 {
 		a.next_frame_ms = -1
 		app.window_buttons = {}
+		app.menu_rect_next = {}
+		app.real_mouse = mouse
+		app.mouse_under_menu = app.menu_rect.w > 0 && in_rect(app.menu_rect, mouse.x, mouse.y)
+		if app.mouse_under_menu {
+			app.mouse = {-1, -1}
+		}
 		renderer_begin(&a.renderer, w, h)
 		gl.ClearColor(0, 0, 0, 1)
 		gl.Clear(gl.COLOR_BUFFER_BIT)
@@ -710,7 +729,10 @@ draw :: proc(app: ^App) {
 			draw_watch(app)
 		}
 		draw_text_size_osd(app, screen)
-		if renderer_end(&a.renderer) {
+		app.mouse = mouse
+		settled := app.menu_rect_next == app.menu_rect
+		app.menu_rect = app.menu_rect_next
+		if renderer_end(&a.renderer) && settled {
 			break
 		}
 	}
@@ -767,4 +789,18 @@ update_cursor :: proc(app: ^App) {
 	} else {
 		_ = sdl.ShowCursor()
 	}
+}
+
+// Drawing an open menu at `menu`: it sees the mouse, though what's behind it
+// doesn't while the mouse is over it. Pass what it returns to menu_hover_end
+// once the menu is drawn.
+menu_hover_begin :: proc(app: ^App, menu: Rect) -> (hidden: [2]f32) {
+	app.menu_rect_next = menu
+	hidden = app.mouse
+	app.mouse = app.real_mouse
+	return
+}
+
+menu_hover_end :: proc(app: ^App, hidden: [2]f32) {
+	app.mouse = hidden
 }
