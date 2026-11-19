@@ -98,7 +98,7 @@ layout_from_before_versions_still_loads :: proc(t: ^testing.T) {
 	l := layout_load()
 	defer layout_destroy(&l)
 	testing.expect_value(t, l.volume, 80)
-	testing.expect_value(t, l.quality, Quality.P720)
+	testing.expect_value(t, quality_name(l.quality), "720p")
 	testing.expect_value(t, l.text_size, 120)
 	testing.expect_value(t, l.language, "en")
 	testing.expect_value(t, len(layout_splits_of(&l, "lirik")), 1)

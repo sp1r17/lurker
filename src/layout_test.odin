@@ -31,7 +31,7 @@ layout_volume_defaults_when_missing :: proc(t: ^testing.T) {
 	testing.expect(t, parse_layout(transmute([]byte)string(`{"splits":{},"volume":0,"muted":true,"quality":"720p","low_latency":true,"hide_chat":true,"text_size":120,"notifications_off":true}`), &saved))
 	testing.expect_value(t, saved.volume, 0)
 	testing.expect(t, saved.muted)
-	testing.expect_value(t, saved.quality, Quality.P720)
+	testing.expect_value(t, quality_name(saved.quality), "720p")
 	testing.expect(t, saved.low_latency)
 	testing.expect(t, saved.hide_chat)
 	testing.expect(t, !old.hide_chat)
@@ -39,7 +39,7 @@ layout_volume_defaults_when_missing :: proc(t: ^testing.T) {
 	testing.expect(t, !old.notifications_off)
 	testing.expect_value(t, saved.text_size, 120)
 	testing.expect_value(t, old.text_size, DEFAULT_TEXT_SIZE)
-	testing.expect_value(t, old.quality, Quality.Source)
+	testing.expect_value(t, old.quality, QUALITY_SOURCE)
 
 	loud: Layout
 	defer layout_destroy(&loud)
