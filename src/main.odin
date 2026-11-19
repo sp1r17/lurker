@@ -163,8 +163,10 @@ App :: struct {
 	// Whether the window is, or has been asked to go, fullscreen (see
 	// toggle_fullscreen).
 	fullscreen:          bool,
-	// Where the user got to in each video (watched.odin).
+	// Where the user got to in each video (watched.odin), and what was watched
+	// (history.odin).
 	watched:             Watched,
+	history:             History,
 	// Which followed channels have gone live (notify.odin).
 	live:                Live_Notifier,
 	// The channels and categories hidden everywhere (blocked.odin).
@@ -269,6 +271,9 @@ run :: proc(channels: []string, config: Config, video: Maybe(Twitch_Link) = nil)
 	}
 	app.blocked = blocked_load()
 	defer blocked_destroy(&app.blocked)
+	app.history = history_load()
+	defer history_destroy(&app.history)
+	app.browse.view = app.layout.start_view
 	app.chat_wake_event = sdl.RegisterEvents(1)
 	app.raid_event = sdl.RegisterEvents(1)
 	defer browse_destroy(&app.browse)

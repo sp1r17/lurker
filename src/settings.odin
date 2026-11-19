@@ -22,6 +22,7 @@ Setting_Switch :: enum {
 Setting_Choice :: enum {
 	Latency_Buffer,
 	Max_Quality,
+	Start_View,
 }
 
 // The Settings page's lists, each with a box to add to it and a button on each
@@ -241,6 +242,8 @@ setting_value :: proc(app: ^App, c: Setting_Choice) -> string {
 			return "No limit"
 		}
 		return fmt.tprintf("%dp", l.max_height)
+	case .Start_View:
+		return BROWSE_TAB_LABELS[app.layout.start_view]
 	}
 	return ""
 }
@@ -264,6 +267,15 @@ setting_next :: proc(app: ^App, c: Setting_Choice) {
 	case .Max_Quality:
 		heights := MAX_HEIGHTS
 		l.max_height = next(heights[:], l.max_height)
+	case .Start_View:
+		views := START_VIEWS
+		at := 0
+		for v, i in views {
+			if v == l.start_view {
+				at = i
+			}
+		}
+		l.start_view = views[(at + 1) % len(views)]
 	}
 	// Nothing is playing while browsing: the next stream picks it up.
 	layout_save(l)
@@ -405,6 +417,7 @@ draw_settings :: proc(app: ^App, content: Rect) {
 	choice_labels := [Setting_Choice]string {
 		.Latency_Buffer = "Low latency buffer",
 		.Max_Quality    = "Highest quality",
+		.Start_View     = "Start page",
 	}
 	lists := [Setting_List]struct {
 		label, hint, none: string,
@@ -423,7 +436,7 @@ draw_settings :: proc(app: ^App, content: Rect) {
 		text_size, language, account: bool,
 	}
 	sections := [?]Section {
-		{title = "General", switches = {.Notifications, .Update_Checks}, text_size = true},
+		{title = "General", switches = {.Notifications, .Update_Checks}, choices = {.Start_View}, text_size = true},
 		{title = "Streams", switches = {.Low_Latency, .Follow_Raids, .Next_Clip}, choices = {.Latency_Buffer, .Max_Quality}, language = true},
 		{title = "Chat", switches = {.Chat_Sync, .Chat_Timestamps, .Chat_Highlight_Staff, .Chat_Hide_Bots, .Chat_Alternate_Lines}, lists = {.Highlights, .Ignored}},
 		{title = "Blocked", lists = {.Blocked_Channels, .Blocked_Categories}},

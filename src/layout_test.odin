@@ -46,6 +46,16 @@ layout_volume_defaults_when_missing :: proc(t: ^testing.T) {
 	testing.expect(t, chat.chat.hide_bots)
 	testing.expect(t, !chat.chat.highlight_staff)
 	testing.expect(t, !chat.chat.alternate_lines)
+	sorted: Layout
+	defer layout_destroy(&sorted)
+	testing.expect(t, parse_layout(transmute([]byte)string(`{"splits":{},"stream_sort":"Started","start_view":"History"}`), &sorted))
+	testing.expect_value(t, sorted.stream_sort, Stream_Sort.Started)
+	testing.expect_value(t, sorted.start_view, Browse_View.History)
+	// Only a tab can be the start page.
+	not_a_tab: Layout
+	defer layout_destroy(&not_a_tab)
+	testing.expect(t, parse_layout(transmute([]byte)string(`{"splits":{},"start_view":"Settings"}`), &not_a_tab))
+	testing.expect_value(t, not_a_tab.start_view, Browse_View.Following)
 	testing.expect_value(t, saved.volume, 0)
 	testing.expect(t, saved.muted)
 	testing.expect_value(t, quality_name(saved.quality), "720p")
