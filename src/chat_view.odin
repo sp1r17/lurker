@@ -247,6 +247,7 @@ chat_view_add :: proc(v: ^Chat_View, a: ^Assets, scale, width: f32, new_messages
 		}
 		append(&v.messages, m)
 		added := &v.messages[len(v.messages) - 1]
+		number_line(v, len(v.messages) - 1)
 		// Our own messages are the only ones without an ID.
 		own := added.id == "" && added.kind != .System && self_login != "" && added.login == self_login
 		apply_third_party_emotes(added, v.emotes, &a.emotes, &a.user_emotes if own else nil)
@@ -291,7 +292,23 @@ chat_view_prepend :: proc(v: ^Chat_View, a: ^Assets, scale, width: f32, older: [
 	chat_view_add(v, a, scale, width, keep[:], self_login)
 	v.scroll = scroll
 	append(&v.messages, ..newer[:])
+	// Numbered again from the oldest, now there are older ones.
+	for i in 0 ..< len(v.messages) {
+		number_line(v, i)
+	}
 	trim_messages(v)
+}
+
+// Numbers message `i` on from the one before it (Chat_Message.line).
+@(private = "file")
+number_line :: proc(v: ^Chat_View, i: int) {
+	m := &v.messages[i]
+	m.line, m.line_unbotted = 0, 0
+	if i > 0 {
+		before := &v.messages[i - 1]
+		m.line = before.line + 1
+		m.line_unbotted = before.line_unbotted + (0 if hidden_as_bot(m) else 1)
+	}
 }
 
 // Looks for third-party emotes again in every message, after a set of them loaded:
@@ -537,8 +554,6 @@ draw_chat_view :: proc(a: ^Assets, v: ^Chat_View, rect: Rect, scale: f32, filter
 	all_measured := true
 	query := parse_filter(filter)
 	v.matches = 0
-	// Every other message shown, counted from the newest.
-	shown := 0
 	for i := len(v.messages) - 1; i >= 0; i -= 1 {
 		m := &v.messages[i]
 		if v.rules != nil && v.rules.hide_bots && hidden_as_bot(m) {
@@ -554,8 +569,12 @@ draw_chat_view :: proc(a: ^Assets, v: ^Chat_View, rect: Rect, scale: f32, filter
 		top := bottom - layout.height
 		if top < rect.y + rect.h {
 			line := Rect{rect.x, top - gap / 2, rect.w, layout.height + gap}
-			if v.rules != nil && v.rules.alternate_lines && shown % 2 == 1 {
-				draw_rect(r, line, CHAT_ALTERNATE_BACKGROUND)
+			if v.rules != nil && v.rules.alternate_lines {
+				// Every other message, by its own number, so it keeps its shade.
+				number := m.line_unbotted if v.rules.hide_bots else m.line
+				if number % 2 == 1 {
+					draw_rect(r, line, CHAT_ALTERNATE_BACKGROUND)
+				}
 			}
 			staff, is_staff := staff_background(m)
 			switch {
@@ -569,7 +588,6 @@ draw_chat_view :: proc(a: ^Assets, v: ^Chat_View, rect: Rect, scale: f32, filter
 			draw_message(a, v, m, layout, rect.x + pad, top)
 			append(&v.message_hits, Message_Hit{{rect.x, top - gap / 2, rect.w, layout.height + gap}, i})
 		}
-		shown += 1
 		total += layout.height + gap
 		bottom = top - gap
 		if bottom < rect.y {
@@ -686,6 +704,8 @@ Message_Layout :: struct {
 	images_version: int,
 	hide_reply:     bool,
 	timestamps:     bool,
+	// The time shown before the message, which its items point into (owned).
+	stamp:          string,
 	height:         f32,
 	items:          [dynamic]Layout_Item,
 }
@@ -746,10 +766,14 @@ message_layout_into :: proc(a: ^Assets, channel: ^Emotes, m: ^Chat_Message, l: ^
 		end_line(&b)
 	}
 
-	// The time it was sent, first on its line.
+	// The time it was sent, first on its line. Kept with the layout: its items
+	// outlive the frame.
+	delete(l.stamp)
+	l.stamp = ""
 	if timestamps {
 		if stamp := format_chat_time(m.sent_ms); stamp != "" {
-			put_text(&b, .Regular, CHAT_SYSTEM_TEXT, stamp)
+			l.stamp = strings.clone(stamp)
+			put_text(&b, .Regular, CHAT_SYSTEM_TEXT, l.stamp)
 			space(&b, .Regular)
 		}
 	}

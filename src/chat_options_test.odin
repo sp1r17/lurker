@@ -55,3 +55,33 @@ chat_times_read_as_a_clock :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(stamp, ":"), stamp)
 	testing.expect(t, len(stamp) == 5 || strings.has_suffix(stamp, " AM") || strings.has_suffix(stamp, " PM"), stamp)
 }
+
+@(test)
+alternating_lines_keep_their_shade :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	a: Assets
+	v: Chat_View
+	defer chat_view_destroy(&v)
+	add :: proc(v: ^Chat_View, a: ^Assets, login, text: string) {
+		m := Chat_Message {
+			kind  = .Chat,
+			login = strings.clone(login),
+		}
+		append(&m.fragments, Fragment{kind = .Text, text = strings.clone(text)})
+		chat_view_add(v, a, 1, 300, {m})
+	}
+	add(&v, &a, "one", "hi")
+	add(&v, &a, "nightbot", "Follow on Twitter!")
+	add(&v, &a, "two", "hello")
+	first, bot, second := v.messages[0].line, v.messages[1].line, v.messages[2].line
+	testing.expect_value(t, first, 0)
+	testing.expect_value(t, bot, 1)
+	testing.expect_value(t, second, 2)
+	// Bots left out: the two people's messages still alternate.
+	testing.expect_value(t, v.messages[2].line_unbotted, 1)
+	// More arriving changes no one's number.
+	add(&v, &a, "three", "hey")
+	testing.expect_value(t, v.messages[0].line, 0)
+	testing.expect_value(t, v.messages[2].line, 2)
+	testing.expect_value(t, v.messages[3].line, 3)
+}
