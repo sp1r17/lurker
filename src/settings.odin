@@ -10,6 +10,10 @@ Setting_Switch :: enum {
 	Update_Checks,
 	Low_Latency,
 	Follow_Raids,
+	Chat_Timestamps,
+	Chat_Highlight_Staff,
+	Chat_Hide_Bots,
+	Chat_Alternate_Lines,
 }
 
 // The Settings page's lists, each with a box to add to it and a button on each
@@ -197,6 +201,14 @@ setting_on :: proc(app: ^App, s: Setting_Switch) -> bool {
 		return l.low_latency
 	case .Follow_Raids:
 		return !l.raids_off
+	case .Chat_Timestamps:
+		return l.chat.timestamps
+	case .Chat_Highlight_Staff:
+		return l.chat.highlight_staff
+	case .Chat_Hide_Bots:
+		return l.chat.hide_bots
+	case .Chat_Alternate_Lines:
+		return l.chat.alternate_lines
 	}
 	return false
 }
@@ -216,6 +228,18 @@ setting_toggle :: proc(app: ^App, s: Setting_Switch) {
 		app.layout.raids_off = !app.layout.raids_off
 		layout_save(&app.layout)
 		watch_listen_for_raids(app)
+	case .Chat_Timestamps:
+		app.layout.chat.timestamps = !app.layout.chat.timestamps
+		layout_save(&app.layout)
+	case .Chat_Highlight_Staff:
+		app.layout.chat.highlight_staff = !app.layout.chat.highlight_staff
+		layout_save(&app.layout)
+	case .Chat_Hide_Bots:
+		app.layout.chat.hide_bots = !app.layout.chat.hide_bots
+		layout_save(&app.layout)
+	case .Chat_Alternate_Lines:
+		app.layout.chat.alternate_lines = !app.layout.chat.alternate_lines
+		layout_save(&app.layout)
 	}
 }
 
@@ -303,6 +327,10 @@ draw_settings :: proc(app: ^App, content: Rect) {
 		.Update_Checks = "Check for new versions",
 		.Low_Latency   = "Low latency",
 		.Follow_Raids  = "Follow raids to the raided channel",
+		.Chat_Timestamps      = "Show when each message was sent",
+		.Chat_Highlight_Staff = "Highlight the streamer's and moderators' messages",
+		.Chat_Hide_Bots       = "Hide bots and !commands",
+		.Chat_Alternate_Lines = "Alternate message backgrounds",
 	}
 	lists := [Setting_List]struct {
 		label, hint, none: string,
@@ -322,7 +350,7 @@ draw_settings :: proc(app: ^App, content: Rect) {
 	sections := [?]Section {
 		{title = "General", switches = {.Notifications, .Update_Checks}, text_size = true},
 		{title = "Streams", switches = {.Low_Latency, .Follow_Raids}, language = true},
-		{title = "Chat", lists = {.Highlights, .Ignored}},
+		{title = "Chat", switches = {.Chat_Timestamps, .Chat_Highlight_Staff, .Chat_Hide_Bots, .Chat_Alternate_Lines}, lists = {.Highlights, .Ignored}},
 		{title = "Blocked", lists = {.Blocked_Channels, .Blocked_Categories}},
 		{title = "Account", account = true},
 	}

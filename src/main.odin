@@ -258,6 +258,7 @@ run :: proc(channels: []string, config: Config, video: Maybe(Twitch_Link) = nil)
 	user_emotes_request(&app)
 
 	app.layout = layout_load()
+	app.assets.rules = &app.layout.chat
 	apply_volume(&app)
 	a.renderer.text_scale = f32(app.layout.text_size) / 100
 	defer layout_destroy(&app.layout)
