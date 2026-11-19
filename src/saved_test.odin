@@ -194,3 +194,32 @@ watched_moves_positions_under_videos :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(again.entries), 1)
 	testing.expect_value(t, again.entries["2001"].length, 3600)
 }
+
+@(test)
+history_keeps_one_entry_each_newest_first :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	dir := test_state_dir(t)
+	defer end_test_state_dir(dir)
+	h: History
+	defer history_destroy(&h)
+	history_add(&h, {kind = .Live, id = "lirik", login = "lirik"})
+	history_add(&h, {kind = .Video, id = "123", login = "lirik", title = "Old stream"})
+	history_add(&h, {kind = .Live, id = "lirik", login = "lirik"})
+	testing.expect_value(t, len(h.entries), 2)
+	testing.expect_value(t, h.entries[0].kind, History_Kind.Live)
+	history_update_live(&h, "lirik", "LIRIK", "Chill stream", "Minecraft")
+	testing.expect_value(t, h.entries[0].title, "Chill stream")
+	testing.expect_value(t, h.entries[0].channel_name, "LIRIK")
+
+	// Saved, and read back the same.
+	loaded := history_load()
+	defer history_destroy(&loaded)
+	testing.expect_value(t, len(loaded.entries), 2)
+	testing.expect_value(t, loaded.entries[0].game, "Minecraft")
+	testing.expect_value(t, loaded.entries[1].kind, History_Kind.Video)
+
+	history_remove(&h, 1)
+	testing.expect_value(t, len(h.entries), 1)
+	history_clear(&h)
+	testing.expect_value(t, len(h.entries), 0)
+}
