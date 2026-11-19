@@ -1,8 +1,8 @@
 # Roadmap to 1.0
 
-Lurker 0.8.0 covers almost everything people do on Twitch as viewers: browsing,
+Lurker 0.9.0 covers almost everything people do on Twitch as viewers: browsing,
 live streams, past broadcasts and clips, chat with third-party emotes, and basic
-moderation. 1.0 is less about new features than about being something people can
+moderation. Lurker is for Twitch only. 1.0 is less about new features than about being something people can
 install from the usual places, set up without reading the README, and rely on.
 
 ## What 1.0 means
@@ -23,9 +23,22 @@ install from the usual places, set up without reading the README, and rely on.
   quality menu
 - A version field in the saved files, with migration from older versions
 
-## 0.9: Robustness and macOS
+## 0.9: Viewer features (released)
 
-Left over from 0.8:
+- The stream's exact qualities, and an optional highest quality
+- Stream stats, with ping to Twitch and latency to the broadcaster
+- Chat delayed to match the stream, and a buffer for low latency
+- Sorting, uptime on live cards, a History tab, a chosen start page, and clips
+  by period
+- Following categories, and per-channel live notifications, from the
+  right-click menu
+- Chat timestamps, streamer and moderator highlights, hidden bots, and
+  alternating backgrounds
+- New screenshots
+
+## 0.10: Robustness and macOS
+
+Left over from 0.8 and 0.9:
 
 - Handle GraphQL failures per feature: hide or disable what didn't load, and
   say why, instead of showing empty lists
@@ -38,7 +51,7 @@ New:
   with each release (both done); get notifications working, which needs a
   signed app bundle
 
-## 0.10: Distribution
+## 0.11: Distribution
 
 - Host a Flatpak repository for Lurker (on GitHub Pages, say) with a
   `.flatpakrepo` file, so installing once is enough and `flatpak update` picks
@@ -51,7 +64,7 @@ New:
 - More testing on Windows, and taking the "new and hasn't had much testing"
   note out of the README once it's earned
 
-## 0.11: Missing viewer features
+## 0.12: Missing viewer features
 
 Pick what's worth doing before 1.0; everything else can come after.
 
@@ -73,7 +86,6 @@ Pick what's worth doing before 1.0; everything else can come after.
 
 - Try submitting to Flathub
 - Intel Macs and older macOS versions
-- Other platforms' chats (YouTube, Kick) beside Twitch
 - Themes
 - Multistream: two to four streams at once, side by side or one large with the
   others small, choosing which one is heard
