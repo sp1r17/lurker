@@ -176,7 +176,7 @@ layout_save :: proc(l: ^Layout) {
 		skipped_version:   string,
 		language:          string,
 		language_hide:     bool,
-	}{LAYOUT_VERSION, l.splits, l.volume, l.muted, QUALITY_LABELS[l.quality], l.low_latency, l.raids_off, l.hide_chat, l.text_size, l.notifications_off, l.chat.highlights[:], l.chat.ignored[:], l.update_checks_off, l.skipped_version, l.language, l.language_hide}
+	}{LAYOUT_VERSION, l.splits, l.volume, l.muted, quality_name(l.quality), l.low_latency, l.raids_off, l.hide_chat, l.text_size, l.notifications_off, l.chat.highlights[:], l.chat.ignored[:], l.update_checks_off, l.skipped_version, l.language, l.language_hide}
 	data, err := json.marshal(saved, {pretty = true}, context.temp_allocator)
 	if err != nil {
 		return

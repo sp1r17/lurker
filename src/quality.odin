@@ -1,108 +1,247 @@
 package app
 
+import "core:fmt"
+import "core:slice"
+import "core:strconv"
 import "core:strings"
 
-Quality :: enum {
+Quality_Kind :: enum {
 	Source,
-	P1440,
-	P1080,
-	P720,
-	P480,
-	P360,
+	Video,
 	Audio,
 }
 
-@(rodata)
-QUALITY_LABELS := [Quality]string {
-	.Source = "Source",
-	.P1440  = "1440p",
-	.P1080  = "1080p",
-	.P720   = "720p",
-	.P480   = "480p",
-	.P360   = "360p",
-	.Audio  = "Audio only",
+// A quality to play: Source (the stream's best), audio only, or a rendition by
+// the height and frame rate in streamlink's name for it ("936p60"). Twitch leaves
+// the frame rate out of its 30 fps live renditions ("480p"): `bare`, and fps 30.
+// Clips' are "720p0".
+Quality :: struct {
+	kind:   Quality_Kind,
+	height: int,
+	fps:    int,
+	bare:   bool,
 }
 
-// What streamlink is asked for, first match wins. Twitch names renditions with
-// their frame rate ("480p30", "720p0" for clips), and streamlink matches names
-// exactly, so each is listed; the fallbacks keep a channel without that rendition
-// playing. Past broadcasts call the audio "audio".
-@(rodata)
-QUALITY_STREAMS := [Quality]string {
-	.Source = "best",
-	.P1440  = "1440p60,1440p30,1440p0,1440p,best",
-	.P1080  = "1080p60,1080p30,1080p0,1080p,best",
-	.P720   = "720p60,720p30,720p0,720p,best",
-	.P480   = "480p60,480p30,480p0,480p,360p30,360p0,360p,worst",
-	.P360   = "360p60,360p30,360p0,360p,worst",
-	.Audio  = "audio_only,audio",
+QUALITY_SOURCE :: Quality {
+	kind = .Source,
+}
+QUALITY_AUDIO :: Quality {
+	kind = .Audio,
 }
 
-Quality_Set :: bit_set[Quality]
+MAX_RENDITIONS :: 16
 
-// The qualities a stream has, from streamlink's names for its renditions. Source
-// is always there.
-qualities_from_streams :: proc(names: []string) -> Quality_Set {
-	found := Quality_Set{.Source}
-	for name in names {
-		if name == "audio_only" || name == "audio" {
-			found += {.Audio}
-			continue
-		}
-		for q in Quality.P1440 ..= Quality.P360 {
-			if strings.has_prefix(name, QUALITY_LABELS[q]) {
-				found += {q}
-			}
+// The renditions a stream has, from streamlink: its videos, best first (so
+// video[0] is Source), and whether it has audio only. None until known.
+Renditions :: struct {
+	video: [MAX_RENDITIONS]Quality,
+	count: int,
+	audio: bool,
+}
+
+renditions_known :: proc(r: Renditions) -> bool {
+	return r.count > 0
+}
+
+// The rendition streamlink's `name` is ("720p60", "480p", "1080p0"); false for any
+// other name ("best", "audio_only", "720p60_alt").
+quality_from_name :: proc(name: string) -> (q: Quality, ok: bool) {
+	p := strings.index_byte(name, 'p')
+	if p <= 0 || !all_digits(name[:p]) || !all_digits(name[p + 1:]) {
+		return {}, false
+	}
+	q = {
+		kind   = .Video,
+	}
+	q.height, _ = strconv.parse_int(name[:p], 10)
+	if p + 1 == len(name) {
+		q.fps = 30
+		q.bare = true
+	} else {
+		q.fps, _ = strconv.parse_int(name[p + 1:], 10)
+	}
+	return q, true
+}
+
+@(private = "file")
+all_digits :: proc(s: string) -> bool {
+	for c in transmute([]u8)s {
+		if c < '0' || c > '9' {
+			return false
 		}
 	}
-	return found
+	return true
 }
 
-// What plays when `q` is asked for and the stream has `available`: the first of its
-// QUALITY_STREAMS there, Source for "best", and the lowest there for "worst".
-quality_playing :: proc(q: Quality, available: Quality_Set) -> Quality {
-	if q in available {
+// Streamlink's name for `q` ("720p60", "480p"); also how it's saved. Allocated
+// with the temp allocator.
+quality_name :: proc(q: Quality) -> string {
+	switch q.kind {
+	case .Source:
+		return "Source"
+	case .Audio:
+		return "Audio only"
+	case .Video:
+	}
+	return fmt.tprintf("%dp", q.height) if q.bare else fmt.tprintf("%dp%d", q.height, q.fps)
+}
+
+// What the quality menu calls `q`: like Twitch, the frame rate only when it's
+// over 30 ("936p60", "720p"). Allocated with the temp allocator.
+quality_label :: proc(q: Quality) -> string {
+	if q.kind == .Video && q.fps <= 30 {
+		return fmt.tprintf("%dp", q.height)
+	}
+	return quality_name(q)
+}
+
+// The quality saved as `label` ("720p60", from quality_name), or Source.
+quality_from_label :: proc(label: string) -> Quality {
+	if strings.equal_fold(label, "Audio only") {
+		return QUALITY_AUDIO
+	}
+	if q, ok := quality_from_name(label); ok {
 		return q
 	}
-	names := QUALITY_STREAMS[q]
-	for name in strings.split_iterator(&names, ",") {
-		switch name {
-		case "best":
-			return .Source
-		case "worst":
-			for i := int(Quality.P360); i >= int(Quality.Source); i -= 1 {
-				if Quality(i) in available {
-					return Quality(i)
-				}
-			}
-		case:
-			if found := qualities_from_streams({name}) - {.Source}; found != {} {
-				for f in found {
-					if f in available {
-						return f
-					}
-				}
-			}
+	return QUALITY_SOURCE
+}
+
+// The renditions a stream has, from streamlink's names for its streams.
+renditions_from_streams :: proc(names: []string) -> Renditions {
+	r: Renditions
+	for name in names {
+		if name == "audio_only" || name == "audio" {
+			r.audio = true
+			continue
+		}
+		q, ok := quality_from_name(name)
+		if !ok || r.count == MAX_RENDITIONS || slice.contains(r.video[:r.count], q) {
+			continue
+		}
+		r.video[r.count] = q
+		r.count += 1
+	}
+	slice.sort_by(r.video[:r.count], proc(a, b: Quality) -> bool {
+		return a.height > b.height || (a.height == b.height && a.fps > b.fps)
+	})
+	return r
+}
+
+// What plays when `q` is asked for from a stream with `r`: the rendition of the
+// height nearest to it (the higher one, between two as near), in the frame rate
+// nearest to it. Source is the best rendition; audio only, when there's none, too.
+// `q` itself until the renditions are known.
+quality_playing :: proc(q: Quality, r: Renditions) -> Quality {
+	r := r
+	if !renditions_known(r) {
+		return q
+	}
+	switch q.kind {
+	case .Source:
+		return r.video[0]
+	case .Audio:
+		return QUALITY_AUDIO if r.audio else r.video[0]
+	case .Video:
+	}
+	best := r.video[0]
+	for v in r.video[1:r.count] {
+		dh, best_dh := abs(v.height - q.height), abs(best.height - q.height)
+		if dh < best_dh || (v.height == best.height && abs(v.fps - q.fps) < abs(best.fps - q.fps)) {
+			best = v
 		}
 	}
-	return .Source
+	return best
+}
+
+// What streamlink is asked for, first match wins, when `q` is wanted from a
+// stream with `r`: the rendition quality_playing picks. Before the renditions are
+// known, it's `q`'s height in the usual frame rates, then Source (quality_blind);
+// past broadcasts call the audio "audio". Allocated with the temp allocator.
+quality_streams :: proc(q: Quality, r: Renditions) -> string {
+	if renditions_known(r) {
+		playing := quality_playing(q, r)
+		if playing.kind == .Video {
+			// Source still, should Twitch not have it for the codecs allowed.
+			return fmt.tprintf("%s,best", quality_name(playing))
+		}
+	}
+	switch q.kind {
+	case .Source:
+		return "best"
+	case .Audio:
+		return "audio_only,audio,best"
+	case .Video:
+	}
+	names := make([dynamic]string, context.temp_allocator)
+	for c in blind_candidates(q) {
+		append(&names, quality_name(c))
+	}
+	append(&names, "best")
+	return strings.join(names[:], ",", context.temp_allocator)
+}
+
+// `q`'s height in each frame rate, `q`'s own first.
+@(private = "file")
+blind_candidates :: proc(q: Quality) -> [6]Quality {
+	h := q.height
+	return {
+		q,
+		{kind = .Video, height = h, fps = 60},
+		{kind = .Video, height = h, fps = 50},
+		{kind = .Video, height = h, fps = 30},
+		{kind = .Video, height = h, fps = 30, bare = true},
+		{kind = .Video, height = h, fps = 0},
+	}
+}
+
+// What quality_streams asked for before the renditions were known plays, now
+// they are: so the stream can be restarted if it isn't quality_playing's pick.
+quality_blind :: proc(q: Quality, r: Renditions) -> Quality {
+	r := r
+	switch q.kind {
+	case .Source:
+		return r.video[0]
+	case .Audio:
+		return QUALITY_AUDIO if r.audio else r.video[0]
+	case .Video:
+	}
+	for c in blind_candidates(q) {
+		if slice.contains(r.video[:r.count], c) {
+			return c
+		}
+	}
+	return r.video[0]
 }
 
 // The codecs streamlink tells Twitch the player can play. Twitch only sends 1440p
-// as H.265 or AV1, and only when asked; the lower qualities stay H.264, which
-// every machine can decode.
-quality_codecs :: proc(q: Quality) -> string {
-	return "h264,h265,av1" if q == .Source || q == .P1440 else "h264"
+// as H.265 or AV1, and only when asked; 1080p and below stay H.264, which every
+// machine can decode.
+quality_codecs :: proc(q: Quality, r: Renditions) -> string {
+	playing := quality_playing(q, r)
+	return "h264,h265,av1" if playing.kind == .Source || playing.height > 1080 else "h264"
 }
 
-// The quality saved under `label` ("720p"), or Source.
-quality_from_label :: proc(label: string) -> Quality {
-	for name, q in QUALITY_LABELS {
-		if strings.equal_fold(name, label) {
-			return q
+// The quality menu's choices: Source (the best rendition), the stream's other
+// renditions, then audio only. Until those are known: Source, the saved quality
+// `q`, audio only.
+quality_choices :: proc(q: Quality, r: Renditions) -> (choices: [MAX_RENDITIONS + 2]Quality, n: int) {
+	r := r
+	choices[0] = QUALITY_SOURCE
+	n = 1
+	if renditions_known(r) {
+		for v in r.video[1:r.count] {
+			choices[n] = v
+			n += 1
 		}
+	} else if q.kind == .Video {
+		choices[n] = q
+		n += 1
 	}
-	return .Source
+	if r.audio || !renditions_known(r) {
+		choices[n] = QUALITY_AUDIO
+		n += 1
+	}
+	return
 }
 
 Qualities_Job :: struct {
@@ -110,7 +249,7 @@ Qualities_Job :: struct {
 	client_id: string,
 	token:     string,
 	session:   int,
-	found:     Quality_Set,
+	found:     Renditions,
 	ok:        bool,
 }
 
@@ -153,10 +292,6 @@ finish_qualities_job :: proc(app: ^App, p: ^Qualities_Job) {
 		return
 	}
 	w.qualities = p.found
+	watch_renditions_found(app)
 }
 
-// The qualities the quality menu offers: the stream's, or all of them until those
-// are known.
-watch_qualities :: proc(app: ^App) -> Quality_Set {
-	return app.watch.qualities if app.watch.qualities != {} else ~Quality_Set{}
-}

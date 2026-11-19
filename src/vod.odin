@@ -52,6 +52,7 @@ Vod_Url_Job :: struct {
 	session:   int,
 	// Owned, if found.
 	url:       string,
+	renditions: Renditions,
 	ok:        bool,
 }
 
@@ -201,7 +202,9 @@ watch_play_vod :: proc(app: ^App, start: f64 = -1) {
 	w.retrying = false
 	w.playing_vod = true
 	w.vod_pending = true
-	qualities_request(app, vod_page(w.vod.id, w.vod.kind))
+	if w.qualities_page != vod_page(w.vod.id, w.vod.kind) {
+		w.qualities = {}
+	}
 	job := Vod_Url_Job {
 		vod_id    = strings.clone(w.vod.id),
 		kind      = w.vod.kind,
@@ -220,7 +223,7 @@ watch_play_vod :: proc(app: ^App, start: f64 = -1) {
 @(private = "file")
 run_vod_url_job :: proc(job: ^Job) {
 	p := &job.payload.(Vod_Url_Job)
-	p.url, p.ok = streamlink_vod_url(p.vod_id, p.kind, p.quality, p.client_id, p.token)
+	p.url, p.renditions, p.ok = streamlink_vod_url(p.vod_id, p.kind, p.quality, p.client_id, p.token)
 	if p.ok && p.recording {
 		snapshot: string
 		snapshot, p.ok = snapshot_recording(p.url)
@@ -235,6 +238,10 @@ finish_vod_url_job :: proc(app: ^App, p: ^Vod_Url_Job) {
 		return
 	}
 	w.vod_pending = false
+	// The quality menu offers the renditions the video was found in.
+	delete(w.qualities_page)
+	w.qualities_page = strings.clone(vod_page(w.vod.id, w.vod.kind))
+	w.qualities = p.renditions
 	if !p.ok {
 		w.status = .Failed
 		return
