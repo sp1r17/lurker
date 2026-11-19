@@ -6,6 +6,7 @@ import "core:log"
 import "core:net"
 import "core:slice"
 import "core:strings"
+import "core:time"
 
 TOKEN_URL :: "https://id.twitch.tv/oauth2/token"
 HELIX_URL :: "https://api.twitch.tv/helix"
@@ -948,7 +949,7 @@ Clip_Node :: struct {
 	videoOffsetSeconds: int,
 }
 
-// Points into `n`.
+// Points into `n`, apart from a live broadcast's thumbnail address (temp allocator).
 @(private = "file")
 vod_from_node :: proc(n: Video_Node) -> Vod {
 	v := Vod {
@@ -972,6 +973,18 @@ vod_from_node :: proc(n: Video_Node) -> Vod {
 	}
 	if owner, ok := n.owner.?; ok {
 		v.login, v.channel_name = owner.login, owner.displayName
+	}
+	// Twitch has no thumbnail for a broadcast until it's over, just a blank
+	// "processing" one: show the stream as it is now, like its live card. A new
+	// query string gets the current frame, not one cached earlier.
+	if v.recording && v.login != "" {
+		v.thumbnail_url = fmt.tprintf(
+			"https://static-cdn.jtvnw.net/previews-ttv/live_user_%s-%dx%d.jpg?r=%d",
+			v.login,
+			VIDEO_THUMBNAIL_SIZE.x,
+			VIDEO_THUMBNAIL_SIZE.y,
+			time.to_unix_seconds(time.now()),
+		)
 	}
 	return v
 }

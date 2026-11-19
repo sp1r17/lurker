@@ -1,6 +1,7 @@
 package app
 
 import "core:fmt"
+import "core:strings"
 import "core:testing"
 import "core:time"
 
@@ -215,6 +216,8 @@ channel_videos_read :: proc(t: ^testing.T) {
 	testing.expect(t, videos[0].recording)
 	testing.expect_value(t, videos[0].login, "caedrel")
 	testing.expect_value(t, videos[0].game, "League of Legends")
+	// Still live: the stream as it is now, not Twitch's blank one.
+	testing.expect(t, strings.has_prefix(videos[0].thumbnail_url, "https://static-cdn.jtvnw.net/previews-ttv/live_user_caedrel-440x248.jpg?r="))
 	testing.expect_value(t, videos[1].kind, Video_Kind.Highlight)
 
 	clips := `{"data":{"user":{"clips":{"edges":[{"cursor":"MQ==","node":{"slug":"Funny-Clip","title":"MAAAAN","durationSeconds":16,` +
