@@ -1150,13 +1150,39 @@ check_errors :: proc(errors: Graphql_Errors) -> Twitch_Error {
 	return .None
 }
 
-// A page of `login`'s videos of one kind, newest first (clips: most viewed),
-// after `cursor` ("" for the first). `next` is the cursor for the page after, or
-// "" at the end. Allocated with the temp allocator.
+// How far back clips are listed from (most viewed first; Twitch refuses to list
+// them newest first), as GraphQL names it, and as the Videos page shows it.
+Clip_Period :: enum {
+	All_Time,
+	Last_Month,
+	Last_Week,
+	Last_Day,
+}
+
+@(rodata)
+CLIP_PERIOD_NAMES := [Clip_Period]string {
+	.All_Time   = "ALL_TIME",
+	.Last_Month = "LAST_MONTH",
+	.Last_Week  = "LAST_WEEK",
+	.Last_Day   = "LAST_DAY",
+}
+
+@(rodata)
+CLIP_PERIOD_LABELS := [Clip_Period]string {
+	.All_Time   = "All time",
+	.Last_Month = "Last 30 days",
+	.Last_Week  = "Last 7 days",
+	.Last_Day   = "Last 24 hours",
+}
+
+// A page of `login`'s videos of one kind, newest first (clips: the most viewed in
+// `period`), after `cursor` ("" for the first). `next` is the cursor for the page
+// after, or "" at the end. Allocated with the temp allocator.
 get_channel_videos :: proc(
 	client_id, token, login: string,
 	kind: Video_Kind,
 	cursor := "",
+	period := Clip_Period.All_Time,
 ) -> (
 	videos: []Vod,
 	next: string,
@@ -1170,8 +1196,9 @@ get_channel_videos :: proc(
 	list: string
 	if kind == .Clip {
 		list = fmt.tprintf(
-			"clips(first: %d, after: $cursor, criteria: {{ period: ALL_TIME, sort: VIEWS_DESC }}) {{ edges {{ cursor node {{ %s }} }} pageInfo {{ hasNextPage }} }}",
+			"clips(first: %d, after: $cursor, criteria: {{ period: %s, sort: VIEWS_DESC }}) {{ edges {{ cursor node {{ %s }} }} pageInfo {{ hasNextPage }} }}",
 			VIDEOS_PAGE,
+			CLIP_PERIOD_NAMES[period],
 			CLIP_FIELDS,
 		)
 	} else {

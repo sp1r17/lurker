@@ -42,6 +42,9 @@ Channel_Videos :: struct {
 	back_view:   Browse_View,
 	// From the last draw, in pixels.
 	kind_buttons: [Video_Kind]Rect,
+	// How far back the clips go, and the button that changes it.
+	clip_period:  Clip_Period,
+	period_button: Rect,
 	chat_button:  Rect,
 }
 
@@ -130,6 +133,7 @@ Videos_Job :: struct {
 	login:     string,
 	kind:      Video_Kind,
 	cursor:    string,
+	period:    Clip_Period,
 	check:     Auth_Check,
 	ok:        bool,
 	// Owned.
@@ -166,6 +170,7 @@ videos_fetch :: proc(app: ^App, kind: Video_Kind, cursor: string) {
 			login = strings.clone(v.login),
 			kind = kind,
 			cursor = strings.clone(cursor),
+			period = v.clip_period,
 		},
 	)
 }
@@ -174,13 +179,13 @@ videos_fetch :: proc(app: ^App, kind: Video_Kind, cursor: string) {
 run_videos_job :: proc(job: ^Job) {
 	p := &job.payload.(Videos_Job)
 	p.check = .Valid
-	videos, next, err := get_channel_videos(p.client_id, p.auth.access_token, p.login, p.kind, p.cursor)
+	videos, next, err := get_channel_videos(p.client_id, p.auth.access_token, p.login, p.kind, p.cursor, p.period)
 	if err == .Unauthorized && p.auth.refresh_token != "" {
 		p.check = refresh_auth(p.client_id, &p.auth)
 		if p.check != .Refreshed {
 			return
 		}
-		videos, next, err = get_channel_videos(p.client_id, p.auth.access_token, p.login, p.kind, p.cursor)
+		videos, next, err = get_channel_videos(p.client_id, p.auth.access_token, p.login, p.kind, p.cursor, p.period)
 	}
 	if err != .None {
 		return
@@ -198,7 +203,8 @@ finish_videos_job :: proc(app: ^App, p: ^Videos_Job) {
 		apply_auth_check(app, p.check, p.auth)
 	}
 	v := &app.browse.videos
-	if p.login != v.login {
+	// Clips from before the period changed are dropped too.
+	if p.login != v.login || (p.kind == .Clip && p.period != v.clip_period) {
 		return
 	}
 	l := &v.lists[p.kind]
@@ -230,6 +236,15 @@ videos_click :: proc(app: ^App, x, y: f32, card: int) -> bool {
 			b.hovered = -1
 			return true
 		}
+	}
+	if v.period_button.w > 0 && in_rect(v.period_button, x, y) {
+		// The next period, after the last back to the first; the clips are
+		// fetched again for it.
+		v.clip_period = Clip_Period((int(v.clip_period) + 1) % len(Clip_Period))
+		video_list_clear(app, &v.lists[.Clip])
+		b.scroll[.Videos] = 0
+		b.hovered = -1
+		return true
 	}
 	if v.chat_button.w > 0 && in_rect(v.chat_button, x, y) {
 		watch_start(app, v.login)
@@ -299,6 +314,15 @@ draw_videos :: proc(app: ^App, content: Rect) {
 		draw_rect(r, button, BROWSE_ACCENT if shown else (BROWSE_CARD_HOVER if hovered else BROWSE_PLACEHOLDER))
 		draw_centered(r, .Bold, text_size, button, label, BROWSE_BACKGROUND if shown else BROWSE_TEXT)
 		bx += button.w + 8 * scale
+	}
+	// For clips: how far back they go, clicked to change.
+	v.period_button = {}
+	if v.kind == .Clip {
+		label := fmt.tprintf("Most viewed: %s", CLIP_PERIOD_LABELS[v.clip_period])
+		lw := text_width(r, .Regular, text_size, label)
+		v.period_button = {bx + 8 * scale, button_y + (bh - lh_text) / 2, lw, lh_text}
+		hovered := in_rect(v.period_button, app.mouse.x, app.mouse.y)
+		draw_text(r, .Regular, text_size, v.period_button.x, v.period_button.y, label, BROWSE_TEXT if hovered else BROWSE_ACCENT)
 	}
 
 	list := Rect{content.x, button_y + bh, content.w, content.y + content.h - button_y - bh}
