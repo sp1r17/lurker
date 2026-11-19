@@ -75,3 +75,7 @@ Pick what's worth doing before 1.0; everything else can come after.
 - Intel Macs and older macOS versions
 - Other platforms' chats (YouTube, Kick) beside Twitch
 - Themes
+- Multistream: two to four streams at once, side by side or one large with the
+  others small, choosing which one is heard
+- A preview of a stream when hovering its card
+- The stream being watched kept playing as a live thumbnail while browsing
