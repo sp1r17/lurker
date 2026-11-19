@@ -28,6 +28,8 @@ Layout :: struct {
 	low_latency: bool,
 	// Not following the watched channel's raids (raid.odin).
 	raids_off:   bool,
+	// The stream stats show over the video (stream_stats.odin).
+	stats:       bool,
 	// The chats were hidden last, for every channel.
 	hide_chat:   bool,
 	// MIN_TEXT_SIZE to MAX_TEXT_SIZE percent.
@@ -91,6 +93,7 @@ parse_layout :: proc(data: []byte, l: ^Layout) -> bool {
 		quality:     string,
 		low_latency: bool,
 		raids_off:   bool,
+		stats:       bool,
 		hide_chat:   bool,
 		text_size:   int,
 		notifications_off: bool,
@@ -114,6 +117,7 @@ parse_layout :: proc(data: []byte, l: ^Layout) -> bool {
 	l.quality = quality_from_label(saved.quality)
 	l.low_latency = saved.low_latency
 	l.raids_off = saved.raids_off
+	l.stats = saved.stats
 	l.hide_chat = saved.hide_chat
 	l.notifications_off = saved.notifications_off
 	l.update_checks_off = saved.update_checks_off
@@ -158,7 +162,7 @@ layout_save :: proc(l: ^Layout) {
 	if !ok {
 		return
 	}
-	// The quality is saved by name, so reordering the enum can't change it.
+	// The quality is saved by name ("720p60").
 	saved := struct {
 		version:     int,
 		splits:      map[string][dynamic]string,
@@ -167,6 +171,7 @@ layout_save :: proc(l: ^Layout) {
 		quality:     string,
 		low_latency: bool,
 		raids_off:   bool,
+		stats:       bool,
 		hide_chat:   bool,
 		text_size:   int,
 		notifications_off: bool,
@@ -176,7 +181,7 @@ layout_save :: proc(l: ^Layout) {
 		skipped_version:   string,
 		language:          string,
 		language_hide:     bool,
-	}{LAYOUT_VERSION, l.splits, l.volume, l.muted, quality_name(l.quality), l.low_latency, l.raids_off, l.hide_chat, l.text_size, l.notifications_off, l.chat.highlights[:], l.chat.ignored[:], l.update_checks_off, l.skipped_version, l.language, l.language_hide}
+	}{LAYOUT_VERSION, l.splits, l.volume, l.muted, quality_name(l.quality), l.low_latency, l.raids_off, l.stats, l.hide_chat, l.text_size, l.notifications_off, l.chat.highlights[:], l.chat.ignored[:], l.update_checks_off, l.skipped_version, l.language, l.language_hide}
 	data, err := json.marshal(saved, {pretty = true}, context.temp_allocator)
 	if err != nil {
 		return

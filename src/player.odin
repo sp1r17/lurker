@@ -3,6 +3,7 @@ package app
 import "core:fmt"
 import "core:log"
 import "core:strings"
+import "core:time"
 import "mpv"
 import gl "vendor:OpenGL"
 import sdl "vendor:sdl3"
@@ -28,6 +29,58 @@ Player :: struct {
 	position:      Maybe(f64),
 	duration:      Maybe(f64),
 	paused:        bool,
+	// For the stream stats (stream_stats.odin).
+	stats:         Player_Stats,
+}
+
+// How playback is going, as mpv last reported it, for the stream stats. Reset
+// with each file played; nil while mpv has no value.
+Player_Stats :: struct {
+	height:          Maybe(i64),
+	fps:             Maybe(f64),
+	// mpv's names ("h264"; "vaapi", "no"). Owned.
+	codec:           string,
+	hwdec:           string,
+	// Bits per second, as the demuxer measures them.
+	video_bitrate:   Maybe(f64),
+	audio_bitrate:   Maybe(f64),
+	// Bytes per second coming in, now; and in all, since the file was loaded
+	// (time.tick_now), which gives the average.
+	net_speed:       Maybe(f64),
+	received:        f64,
+	loaded_at:       time.Tick,
+	speed_at:        time.Tick,
+	// Seconds buffered ahead.
+	buffer:          Maybe(f64),
+	// Frames dropped to keep up: by the video output, and by the decoder.
+	dropped:         i64,
+	decoder_dropped: i64,
+}
+
+@(private = "file")
+STATS_PROPERTIES := [?]struct {
+	name:   cstring,
+	format: mpv.Format,
+} {
+	{"video-params/h", .Int64},
+	{"estimated-vf-fps", .Double},
+	{"video-format", .String},
+	{"hwdec-current", .String},
+	{"video-bitrate", .Double},
+	{"audio-bitrate", .Double},
+	{"cache-speed", .Double},
+	{"demuxer-cache-duration", .Double},
+	{"frame-drop-count", .Int64},
+	{"decoder-frame-drop-count", .Int64},
+}
+
+@(private = "file")
+stats_reset :: proc(s: ^Player_Stats) {
+	delete(s.codec)
+	delete(s.hwdec)
+	s^ = {}
+	s.loaded_at = time.tick_now()
+	s.speed_at = s.loaded_at
 }
 
 Player_Error :: enum {
@@ -83,6 +136,9 @@ player_init :: proc(p: ^Player) -> Player_Error {
 	mpv.observe_property(p.handle, 0, "time-pos", .Double)
 	mpv.observe_property(p.handle, 0, "duration", .Double)
 	mpv.observe_property(p.handle, 0, "pause", .Flag)
+	for prop in STATS_PROPERTIES {
+		mpv.observe_property(p.handle, 0, prop.name, prop.format)
+	}
 	mpv.set_wakeup_callback(p.handle, push_event, rawptr(uintptr(p.events_event)))
 	mpv.render_context_set_update_callback(p.render, push_event, rawptr(uintptr(p.redraw_event)))
 	return .None
@@ -101,6 +157,7 @@ player_destroy :: proc(p: ^Player) {
 	// The render context goes first: it holds GL objects and keeps the core alive.
 	mpv.render_context_free(p.render)
 	mpv.terminate_destroy(p.handle)
+	stats_reset(&p.stats)
 	gl.DeleteFramebuffers(1, &p.fbo)
 	gl.DeleteTextures(1, &p.texture)
 }
@@ -113,6 +170,7 @@ LOW_LATENCY_OPTIONS :: "cache=no,cache-pause=no,audio-buffer=0,stream-buffer-siz
 // Plays `url`. With `low_latency`, mpv buffers as little as it can; the options
 // apply to this file only, so they're gone with the next.
 player_load :: proc(p: ^Player, url: string, low_latency := false) {
+	stats_reset(&p.stats)
 	curl := strings.clone_to_cstring(url, context.temp_allocator)
 	if low_latency {
 		player_command(p, {"loadfile", curl, "replace", "-1", LOW_LATENCY_OPTIONS})
@@ -125,6 +183,7 @@ player_load :: proc(p: ^Player, url: string, low_latency := false) {
 // `online_segments`, `url` is a local playlist whose segments are on the web,
 // which FFmpeg only fetches from a local playlist when told to.
 player_load_at :: proc(p: ^Player, url: string, start: f64, online_segments := false) {
+	stats_reset(&p.stats)
 	curl := strings.clone_to_cstring(url, context.temp_allocator)
 	options := fmt.tprintf("start=%.1f", start)
 	if online_segments {
@@ -154,10 +213,46 @@ player_paused :: proc(p: ^Player) -> bool {
 @(private = "file")
 property_changed :: proc(p: ^Player, prop: ^mpv.Event_Property) {
 	number: Maybe(f64)
-	if prop.format == .Double {
+	integer: Maybe(i64)
+	text: string
+	#partial switch prop.format {
+	case .Double:
 		number = (^f64)(prop.data)^
+	case .Int64:
+		integer = (^i64)(prop.data)^
+	case .String:
+		text = string((^cstring)(prop.data)^)
 	}
+	s := &p.stats
 	switch string(prop.name) {
+	case "video-params/h":
+		s.height = integer
+	case "estimated-vf-fps":
+		s.fps = number
+	case "video-format":
+		delete(s.codec)
+		s.codec = strings.clone(text)
+	case "hwdec-current":
+		delete(s.hwdec)
+		s.hwdec = strings.clone(text)
+	case "video-bitrate":
+		s.video_bitrate = number
+	case "audio-bitrate":
+		s.audio_bitrate = number
+	case "cache-speed":
+		// What came in since the last report, at the speed it reported.
+		now := time.tick_now()
+		if speed, ok := s.net_speed.?; ok {
+			s.received += speed * time.duration_seconds(time.tick_diff(s.speed_at, now))
+		}
+		s.net_speed = number
+		s.speed_at = now
+	case "demuxer-cache-duration":
+		s.buffer = number
+	case "frame-drop-count":
+		s.dropped = integer.? or_else 0
+	case "decoder-frame-drop-count":
+		s.decoder_dropped = integer.? or_else 0
 	case "time-pos":
 		p.position = number
 	case "duration":

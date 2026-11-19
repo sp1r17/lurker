@@ -46,6 +46,7 @@ Job_Payload :: union {
 	Raid_Subscribe_Job,
 	Card_Follows_Job,
 	Category_Follow_Job,
+	Ping_Job,
 }
 
 Jobs :: struct {
@@ -195,6 +196,7 @@ destroy_job :: proc(job: ^Job) {
 		destroy_card_follows_job(&p)
 	case Category_Follow_Job:
 		destroy_category_follow_job(&p)
+	case Ping_Job:
 	}
 	free(job)
 }

@@ -131,3 +131,29 @@ http_request :: proc(
 	curl.easy_getinfo(h, .RESPONSE_CODE, &status)
 	return {status = int(status), body = sink.body[:]}, true
 }
+
+// One round trip to `host` over the network, in ms: how long a TCP connection
+// to it (port 443) takes to open, less the name lookup. A fresh connection each
+// time, so it's measured rather than reused. Blocking: for a job.
+http_ping :: proc(host: string) -> (ms: f64, ok: bool) {
+	h := curl.easy_init()
+	if h == nil {
+		return 0, false
+	}
+	defer curl.easy_cleanup(h)
+	curl.easy_setopt(h, .URL, strings.clone_to_cstring(strings.concatenate({"https://", host, "/"}, context.temp_allocator), context.temp_allocator))
+	curl.easy_setopt(h, .CONNECT_ONLY, c.long(1))
+	curl.easy_setopt(h, .TIMEOUT, c.long(5))
+	curl.easy_setopt(h, .NOSIGNAL, c.long(1))
+	curl.easy_setopt(h, .NOPROGRESS, c.long(0))
+	curl.easy_setopt(h, .XFERINFOFUNCTION, check_cancelled)
+	curl_tls_options(h)
+	if curl.easy_perform(h) != .E_OK {
+		return 0, false
+	}
+	lookup, connect: curl.off_t
+	curl.easy_getinfo(h, .NAMELOOKUP_TIME_T, &lookup)
+	curl.easy_getinfo(h, .CONNECT_TIME_T, &connect)
+	// In microseconds.
+	return f64(connect - lookup) / 1000, connect > 0
+}
