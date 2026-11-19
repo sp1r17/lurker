@@ -225,6 +225,11 @@ Chat_Message :: struct {
 	fragments: [dynamic]Fragment,
 	// When it was sent, in Unix milliseconds: Twitch's time, or when it arrived.
 	sent_ms:   i64,
+	// Its place in the chat view, counting every message and leaving out bots'
+	// (hidden_as_bot), for the alternating backgrounds: each message keeps its
+	// shade as others arrive.
+	line:          i64,
+	line_unbotted: i64,
 	// Cached by the chat view, and by the user card, which is narrower.
 	layout:      Message_Layout,
 	card_layout: Message_Layout,
@@ -249,6 +254,8 @@ destroy_chat_message :: proc(m: Chat_Message) {
 	delete(m.fragments)
 	delete(m.layout.items)
 	delete(m.card_layout.items)
+	delete(m.layout.stamp)
+	delete(m.card_layout.stamp)
 }
 
 destroy_fragments :: proc(fragments: []Fragment) {
