@@ -1,8 +1,10 @@
 package app
 
+import "core:fmt"
 import "core:slice"
 import "core:strings"
 import "core:unicode/utf8"
+import sdl "vendor:sdl3"
 
 CHAT_MAX_MESSAGES :: 1000
 // Sizes in logical pixels, scaled by the display scale.
@@ -59,13 +61,100 @@ Assets :: struct {
 	now_ms:        int,
 	// Set while drawing: ms until an animated image on screen changes frame, or -1.
 	next_frame_ms: int,
+	// The user's chat settings (Layout.chat), for laying messages out; nil in
+	// tests.
+	rules:         ^Chat_Rules,
 }
 
 // The user's own chat rules, kept in layout.json: phrases that highlight a message,
-// and people whose messages are hidden. Lowercase and owned.
+// and people whose messages are hidden (lowercase and owned); and how messages
+// are shown.
 Chat_Rules :: struct {
-	highlights: [dynamic]string,
-	ignored:    [dynamic]string,
+	highlights:      [dynamic]string,
+	ignored:         [dynamic]string,
+	// The time each was sent, before it.
+	timestamps:      bool,
+	// The streamer's and moderators' messages, marked out.
+	highlight_staff: bool,
+	// Known bots' messages and "!commands", left out.
+	hide_bots:       bool,
+	// Every other message on a lighter background.
+	alternate_lines: bool,
+}
+
+// Chat bots common enough to hide by name (Chat_Rules.hide_bots), lowercase.
+CHAT_BOTS :: [?]string {
+	"nightbot",
+	"streamelements",
+	"streamlabs",
+	"moobot",
+	"fossabot",
+	"wizebot",
+	"sery_bot",
+	"botrixoficial",
+	"soundalerts",
+	"streamlootsbot",
+	"pokemoncommunitygame",
+	"kofistreambot",
+	"blerp",
+	"commanderroot",
+}
+
+// Backgrounds for the streamer's and moderators' messages
+// (Chat_Rules.highlight_staff), and the lighter one for every other message.
+CHAT_STREAMER_BACKGROUND :: Color{0xb0, 0x3a, 0x7a, 60}
+CHAT_MODERATOR_BACKGROUND :: Color{0x1f, 0x8f, 0x8f, 55}
+CHAT_ALTERNATE_BACKGROUND :: Color{0xff, 0xff, 0xff, 9}
+
+// Whether `m` is left out as a bot's, or a "!command" (Chat_Rules.hide_bots).
+hidden_as_bot :: proc(m: ^Chat_Message) -> bool {
+	if m.kind == .System || m.login == "" {
+		return false
+	}
+	bots := CHAT_BOTS
+	if slice.contains(bots[:], m.login) {
+		return true
+	}
+	for f in m.fragments {
+		if f.kind == .Text {
+			text := strings.trim_left_space(f.text)
+			if text == "" {
+				continue
+			}
+			return text[0] == '!' && len(text) > 1 && text[1] != ' ' && text[1] != '!'
+		}
+		return false
+	}
+	return false
+}
+
+// The background marking out the streamer's or a moderator's message, if any.
+staff_background :: proc(m: ^Chat_Message) -> (color: Color, ok: bool) {
+	for key in m.badges {
+		switch {
+		case strings.has_prefix(key, "broadcaster/"):
+			return CHAT_STREAMER_BACKGROUND, true
+		case strings.has_prefix(key, "moderator/") || strings.has_prefix(key, "lead_moderator/"):
+			return CHAT_MODERATOR_BACKGROUND, true
+		}
+	}
+	return {}, false
+}
+
+// "14:05", or "2:05 PM" where the system uses a 12-hour clock: when `sent_ms`
+// (Unix milliseconds) was, local time. Allocated with the temp allocator.
+format_chat_time :: proc(sent_ms: i64) -> string {
+	dt: sdl.DateTime
+	if !sdl.TimeToDateTime(sdl.Time(sent_ms * 1_000_000), &dt, true) {
+		return ""
+	}
+	date_format: sdl.DateFormat
+	time_format: sdl.TimeFormat
+	if sdl.GetDateTimeLocalePreferences(&date_format, &time_format) && time_format == .HR12 {
+		hour := int(dt.hour) % 12
+		return fmt.tprintf("%d:%02d %s", 12 if hour == 0 else hour, dt.minute, "PM" if dt.hour >= 12 else "AM")
+	}
+	return fmt.tprintf("%02d:%02d", dt.hour, dt.minute)
 }
 
 chat_rules_destroy :: proc(r: ^Chat_Rules) {
@@ -448,8 +537,13 @@ draw_chat_view :: proc(a: ^Assets, v: ^Chat_View, rect: Rect, scale: f32, filter
 	all_measured := true
 	query := parse_filter(filter)
 	v.matches = 0
+	// Every other message shown, counted from the newest.
+	shown := 0
 	for i := len(v.messages) - 1; i >= 0; i -= 1 {
 		m := &v.messages[i]
+		if v.rules != nil && v.rules.hide_bots && hidden_as_bot(m) {
+			continue
+		}
 		if filter != "" {
 			if !message_matches(m, query) {
 				continue
@@ -459,14 +553,23 @@ draw_chat_view :: proc(a: ^Assets, v: ^Chat_View, rect: Rect, scale: f32, filter
 		layout := message_layout(a, v.emotes, m, scale, content_w)
 		top := bottom - layout.height
 		if top < rect.y + rect.h {
-			if m.mention {
-				draw_rect(r, {rect.x, top - gap / 2, rect.w, layout.height + gap}, CHAT_MENTION_BACKGROUND)
-			} else if m.accent != .None {
-				draw_rect(r, {rect.x, top - gap / 2, rect.w, layout.height + gap}, CHAT_ACCENT_BACKGROUNDS[m.accent])
+			line := Rect{rect.x, top - gap / 2, rect.w, layout.height + gap}
+			if v.rules != nil && v.rules.alternate_lines && shown % 2 == 1 {
+				draw_rect(r, line, CHAT_ALTERNATE_BACKGROUND)
+			}
+			staff, is_staff := staff_background(m)
+			switch {
+			case m.mention:
+				draw_rect(r, line, CHAT_MENTION_BACKGROUND)
+			case m.accent != .None:
+				draw_rect(r, line, CHAT_ACCENT_BACKGROUNDS[m.accent])
+			case v.rules != nil && v.rules.highlight_staff && is_staff:
+				draw_rect(r, line, staff)
 			}
 			draw_message(a, v, m, layout, rect.x + pad, top)
 			append(&v.message_hits, Message_Hit{{rect.x, top - gap / 2, rect.w, layout.height + gap}, i})
 		}
+		shown += 1
 		total += layout.height + gap
 		bottom = top - gap
 		if bottom < rect.y {
@@ -582,6 +685,7 @@ Message_Layout :: struct {
 	text_scale:     f32,
 	images_version: int,
 	hide_reply:     bool,
+	timestamps:     bool,
 	height:         f32,
 	items:          [dynamic]Layout_Item,
 }
@@ -596,11 +700,13 @@ message_layout :: proc(a: ^Assets, channel: ^Emotes, m: ^Chat_Message, scale, wi
 // message_layout, cached in `l` rather than the message's own layout. With
 // `hide_reply`, a reply leaves out what it replies to (shown just above it).
 message_layout_into :: proc(a: ^Assets, channel: ^Emotes, m: ^Chat_Message, l: ^Message_Layout, scale, width: f32, hide_reply := false) -> ^Message_Layout {
-	if l.height > 0 && l.width == width && l.scale == scale && l.text_scale == a.renderer.text_scale && l.images_version == a.images.version && l.hide_reply == hide_reply {
+	timestamps := a.rules != nil && a.rules.timestamps && m.sent_ms > 0
+	if l.height > 0 && l.width == width && l.scale == scale && l.text_scale == a.renderer.text_scale && l.images_version == a.images.version && l.hide_reply == hide_reply && l.timestamps == timestamps {
 		return l
 	}
 	clear(&l.items)
 	l.hide_reply = hide_reply
+	l.timestamps = timestamps
 	l.width = width
 	l.scale = scale
 	l.text_scale = a.renderer.text_scale
@@ -638,6 +744,14 @@ message_layout_into :: proc(a: ^Assets, channel: ^Emotes, m: ^Chat_Message, l: ^
 		}
 		b.in_reply = false
 		end_line(&b)
+	}
+
+	// The time it was sent, first on its line.
+	if timestamps {
+		if stamp := format_chat_time(m.sent_ms); stamp != "" {
+			put_text(&b, .Regular, CHAT_SYSTEM_TEXT, stamp)
+			space(&b, .Regular)
+		}
 	}
 
 	for key in m.badges {

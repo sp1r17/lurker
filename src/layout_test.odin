@@ -39,6 +39,13 @@ layout_volume_defaults_when_missing :: proc(t: ^testing.T) {
 	testing.expect(t, parse_layout(transmute([]byte)string(`{"splits":{},"latency_buffer_ms":777,"max_height":999}`), &odd))
 	testing.expect_value(t, odd.latency_buffer_ms, 0)
 	testing.expect_value(t, odd.max_height, 0)
+	chat: Layout
+	defer layout_destroy(&chat)
+	testing.expect(t, parse_layout(transmute([]byte)string(`{"splits":{},"chat_timestamps":true,"chat_hide_bots":true}`), &chat))
+	testing.expect(t, chat.chat.timestamps)
+	testing.expect(t, chat.chat.hide_bots)
+	testing.expect(t, !chat.chat.highlight_staff)
+	testing.expect(t, !chat.chat.alternate_lines)
 	sorted: Layout
 	defer layout_destroy(&sorted)
 	testing.expect(t, parse_layout(transmute([]byte)string(`{"splits":{},"stream_sort":"Started","start_view":"History"}`), &sorted))
