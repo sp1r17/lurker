@@ -34,7 +34,8 @@ Streamlink :: struct {
 	running: bool,
 }
 
-// Starts streamlink on `channel`. Play streamlink_url(s) in mpv. With a `token`,
+// Starts streamlink on `channel`, in `quality` as the stream's `renditions` have it
+// (or as near as streamlink finds, when they're unknown). Play streamlink_url(s) in mpv. With a `token`,
 // streamlink asks Twitch for the stream as that user, so their Turbo or channel
 // subscription can remove the ads at the source. The token is tied to `client_id`,
 // so that's sent too, replacing the website client ID streamlink sends by default.
@@ -43,6 +44,7 @@ Streamlink :: struct {
 streamlink_start :: proc(
 	channel: string,
 	quality: Quality,
+	renditions: Renditions,
 	low_latency: bool,
 	client_id := "",
 	token := "",
@@ -52,7 +54,7 @@ streamlink_start :: proc(
 ) {
 	command := make([dynamic]string, context.temp_allocator)
 	append(&command, streamlink_program(), "--loglevel", "error")
-	append(&command, "--twitch-supported-codecs", quality_codecs(quality))
+	append(&command, "--twitch-supported-codecs", quality_codecs(quality, renditions))
 	if low_latency {
 		append(&command, "--twitch-low-latency")
 	}
@@ -64,7 +66,7 @@ streamlink_start :: proc(
 		append(&command, "--config", config)
 	}
 	output := stream_output_args(&command) or_return
-	append(&command, fmt.tprintf("https://twitch.tv/%s", channel), QUALITY_STREAMS[quality])
+	append(&command, fmt.tprintf("https://twitch.tv/%s", channel), quality_streams(quality, renditions))
 	return streamlink_spawn(command[:], output)
 }
 
@@ -94,29 +96,47 @@ write_streamlink_config :: proc(client_id, token: string) -> (path: string, ok: 
 	return joined, true
 }
 
-// The address of past broadcast `vod_id`'s video, which mpv plays directly (so it
-// can seek), from streamlink. Blocks while streamlink looks it up: for a job. With
-// a `token`, subscriber-only broadcasts work too. Allocated with `allocator`.
-streamlink_vod_url :: proc(vod_id: string, kind: Video_Kind, quality: Quality, client_id := "", token := "", allocator := context.allocator) -> (url: string, ok: bool) {
-	command := make([dynamic]string, context.temp_allocator)
-	append(&command, streamlink_program(), "--stream-url", "--loglevel", "error")
-	append(&command, "--twitch-supported-codecs", quality_codecs(quality))
-	if token != "" {
-		config := write_streamlink_config(client_id, token) or_return
-		append(&command, "--config", config)
+// The address of past broadcast `vod_id`'s video in `quality` (quality_playing),
+// which mpv plays directly (so it can seek), and the renditions it has, from
+// streamlink. Blocks while streamlink looks it up: for a job. With a `token`,
+// subscriber-only broadcasts work too. Allocated with `allocator`.
+streamlink_vod_url :: proc(
+	vod_id: string,
+	kind: Video_Kind,
+	quality: Quality,
+	client_id := "",
+	token := "",
+	allocator := context.allocator,
+) -> (
+	url: string,
+	renditions: Renditions,
+	ok: bool,
+) {
+	streams, listed := streamlink_streams(vod_page(vod_id, kind), client_id, token)
+	if !listed {
+		log.errorf("streamlink can't find broadcast %s", vod_id)
+		return "", {}, false
 	}
-	append(&command, vod_page(vod_id, kind), QUALITY_STREAMS[quality])
-	state, stdout, stderr, err := os.process_exec({command = command[:]}, context.temp_allocator)
-	if err != nil {
-		log.errorf("can't run streamlink: %v", err)
-		return "", false
+	names := make([dynamic]string, context.temp_allocator)
+	for name in streams {
+		append(&names, name)
 	}
-	out := strings.trim_space(string(stdout))
-	if state.exit_code != 0 || !strings.has_prefix(out, "https://") {
-		log.errorf("streamlink can't find the broadcast: %s", strings.trim_space(string(stderr)))
-		return "", false
+	renditions = renditions_from_streams(names[:])
+	playing := quality_playing(quality, renditions)
+	name := "best"
+	switch playing.kind {
+	case .Video:
+		name = quality_name(playing)
+	case .Audio:
+		name = "audio" if "audio" in streams else "audio_only"
+	case .Source:
 	}
-	return strings.clone(out, allocator), true
+	found := streams[name] or_else streams["best"]
+	if !strings.has_prefix(found, "https://") {
+		log.errorf("streamlink can't find the broadcast's %s", name)
+		return "", {}, false
+	}
+	return strings.clone(found, allocator), renditions, true
 }
 
 // The Twitch page streamlink is given for a past broadcast or clip. Allocated with
@@ -125,38 +145,54 @@ vod_page :: proc(vod_id: string, kind: Video_Kind) -> string {
 	return fmt.tprintf("https://clips.twitch.tv/%s", vod_id) if kind == .Clip else fmt.tprintf("https://www.twitch.tv/videos/%s", vod_id)
 }
 
-// The qualities the stream at `page` has, from streamlink. Every codec is allowed,
-// so 1440p shows up where there is one; with a `token`, renditions only some
-// accounts get are included. Blocks while streamlink looks: for a job.
-streamlink_qualities :: proc(page: string, client_id := "", token := "") -> (found: Quality_Set, ok: bool) {
+// The renditions the stream at `page` has, from streamlink. Every codec is
+// allowed, so 1440p shows up where there is one; with a `token`, renditions only
+// some accounts get are included. Blocks while streamlink looks: for a job.
+streamlink_qualities :: proc(page: string, client_id := "", token := "") -> (found: Renditions, ok: bool) {
+	streams := streamlink_streams(page, client_id, token) or_return
+	names := make([dynamic]string, context.temp_allocator)
+	for name in streams {
+		append(&names, name)
+	}
+	return renditions_from_streams(names[:]), true
+}
+
+// The streams at `page` by streamlink's names for them, with their addresses,
+// every codec allowed. Allocated with the temp allocator.
+@(private = "file")
+streamlink_streams :: proc(page: string, client_id, token: string) -> (streams: map[string]string, ok: bool) {
 	command := make([dynamic]string, context.temp_allocator)
 	append(&command, streamlink_program(), "--json", "--loglevel", "error")
-	append(&command, "--twitch-supported-codecs", quality_codecs(.P1440))
+	append(&command, "--twitch-supported-codecs", "h264,h265,av1")
 	if token != "" {
 		config := write_streamlink_config(client_id, token) or_return
 		append(&command, "--config", config)
 	}
 	append(&command, page)
-	state, stdout, _, err := os.process_exec({command = command[:]}, context.temp_allocator)
+	state, stdout, stderr, err := os.process_exec({command = command[:]}, context.temp_allocator)
 	if err != nil {
 		log.errorf("can't run streamlink: %v", err)
-		return {}, false
+		return nil, false
 	}
 	if state.exit_code != 0 {
-		return {}, false
+		log.debugf("streamlink can't find %s: %s", page, strings.trim_space(string(stderr)))
+		return nil, false
+	}
+	Stream :: struct {
+		url: string,
 	}
 	Listing :: struct {
-		streams: map[string]json.Value,
+		streams: map[string]Stream,
 	}
 	listing: Listing
 	if json.unmarshal(stdout, &listing, allocator = context.temp_allocator) != nil {
-		return {}, false
+		return nil, false
 	}
-	names := make([dynamic]string, context.temp_allocator)
-	for name in listing.streams {
-		append(&names, name)
+	streams = make(map[string]string, context.temp_allocator)
+	for name, stream in listing.streams {
+		streams[name] = stream.url
 	}
-	return qualities_from_streams(names[:]), true
+	return streams, true
 }
 
 // Stops streamlink: asked first, then killed if it doesn't exit in time.

@@ -87,13 +87,18 @@ Watch :: struct {
 	retries:          int,
 	retrying:         bool,
 	quality_menu:     bool,
-	// The qualities the stream playing has (empty until known), and the page they
+	// The renditions the stream playing has (none until known), and the page they
 	// were looked up for. Owned.
-	qualities:        Quality_Set,
+	qualities:        Renditions,
 	qualities_page:   string,
+	// The live stream was started before its renditions were known: it's
+	// restarted if it isn't in the one quality_playing picks once they are.
+	started_blind:    bool,
 	// From the last draw, in pixels (zero size when hidden).
 	quality_button:   Rect,
-	quality_items:    [Quality]Rect,
+	// The quality menu's choices (quality_choices) and where each was drawn.
+	quality_choices:  [MAX_RENDITIONS + 2]Quality,
+	quality_items:    [MAX_RENDITIONS + 2]Rect,
 	latency_item:     Rect,
 	raids_item:       Rect,
 	// Listens for the channel raiding another, to follow it (raid.odin); nil when
@@ -284,10 +289,11 @@ start_stream :: proc(app: ^App, signed: bool) {
 	ok: bool
 	l := &app.layout
 	qualities_request(app, fmt.tprintf("https://twitch.tv/%s", w.channel))
+	w.started_blind = !renditions_known(w.qualities)
 	if signed {
-		s, ok = streamlink_start(w.channel, l.quality, l.low_latency, app.client_id, app.auth.access_token)
+		s, ok = streamlink_start(w.channel, l.quality, w.qualities, l.low_latency, app.client_id, app.auth.access_token)
 	} else {
-		s, ok = streamlink_start(w.channel, l.quality, l.low_latency)
+		s, ok = streamlink_start(w.channel, l.quality, w.qualities, l.low_latency)
 	}
 	if !ok {
 		w.status = .Failed
@@ -304,9 +310,27 @@ watch_set_quality :: proc(app: ^App, q: Quality) {
 	if q == app.layout.quality {
 		return
 	}
+	was := quality_playing(app.layout.quality, w.qualities)
 	app.layout.quality = q
 	layout_save(&app.layout)
-	restart_stream(app)
+	// Source, say, may be the rendition already playing.
+	if !renditions_known(w.qualities) || quality_playing(q, w.qualities) != was {
+		restart_stream(app)
+	}
+}
+
+// The live stream's renditions are known now: if it was started without them and
+// isn't in the one the quality picks, it starts again in that one.
+watch_renditions_found :: proc(app: ^App) {
+	w := &app.watch
+	if !w.started_blind || w.playing_vod {
+		return
+	}
+	w.started_blind = false
+	q := app.layout.quality
+	if quality_blind(q, w.qualities) != quality_playing(q, w.qualities) {
+		restart_stream(app)
+	}
 }
 
 // Turns low latency on or off (restarting the stream) and remembers it.
@@ -375,7 +399,7 @@ on_controls :: proc(app: ^App, x, y: f32) -> bool {
 	}
 	if w.quality_menu {
 		for item in w.quality_items {
-			if in_rect(item, x, y) {
+			if item.w > 0 && in_rect(item, x, y) {
 				return true
 			}
 		}
@@ -411,9 +435,9 @@ controls_click :: proc(app: ^App, x, y: f32) -> bool {
 		return true
 	}
 	if w.quality_menu {
-		for item, q in w.quality_items {
-			if in_rect(item, x, y) {
-				watch_set_quality(app, q)
+		for item, i in w.quality_items {
+			if item.w > 0 && in_rect(item, x, y) {
+				watch_set_quality(app, w.quality_choices[i])
 				return true
 			}
 		}
@@ -460,8 +484,8 @@ draw_controls :: proc(app: ^App) {
 	scale := app.scale
 	size := BROWSE_CARD_TEXT_SIZE * scale
 	pad := 12 * scale
-	playing := quality_playing(app.layout.quality, watch_qualities(app))
-	label := QUALITY_LABELS[playing]
+	playing := quality_playing(app.layout.quality, w.qualities)
+	label := quality_label(playing)
 	lh := line_height(r, .Bold, size)
 	// A chevron after the label, drawn: Noto Sans has no "▼".
 	arrow := lh * 0.4
@@ -489,18 +513,26 @@ draw_controls :: proc(app: ^App) {
 	// Grows with the text size, to fit its labels.
 	item_h := MENU_ITEM_HEIGHT * scale * r.text_scale
 	divider := 9 * scale
+	choices, items := quality_choices(app.layout.quality, w.qualities)
+	w.quality_choices = choices
+	labels: [len(choices)]string
 	menu_w := max(MENU_WIDTH * scale * r.text_scale, bw)
-	offered := watch_qualities(app)
-	items := card(offered)
+	for c, i in choices[:items] {
+		labels[i] = quality_label(quality_playing(c, w.qualities))
+		if c.kind == .Source && renditions_known(w.qualities) {
+			labels[i] = fmt.tprintf("%s (Source)", labels[i])
+		}
+		// Room for the check mark too (draw_menu_item).
+		lh_regular := line_height(r, .Regular, size)
+		menu_w = max(menu_w, text_width(r, .Bold, size, labels[i]) + 2 * pad + lh_regular * 0.55 + 8 * scale)
+	}
 	menu_h := item_h * f32(items + 2) + divider
 	menu := Rect{w.quality_button.x + w.quality_button.w - menu_w, w.quality_button.y - 6 * scale - menu_h, menu_w, menu_h}
 	draw_rect(r, menu, USER_CARD_BACKGROUND)
-	row := 0
-	for q in offered {
-		item := Rect{menu.x, menu.y + f32(row) * item_h, menu.w, item_h}
-		row += 1
-		w.quality_items[q] = item
-		draw_menu_item(app, item, QUALITY_LABELS[q], q == playing)
+	for c, i in choices[:items] {
+		item := Rect{menu.x, menu.y + f32(i) * item_h, menu.w, item_h}
+		w.quality_items[i] = item
+		draw_menu_item(app, item, labels[i], quality_playing(c, w.qualities) == playing)
 	}
 	line_y := menu.y + item_h * f32(items) + divider / 2
 	draw_rect(r, {menu.x + pad, line_y, menu.w - 2 * pad, scale}, USER_CARD_BORDER)
@@ -917,7 +949,7 @@ draw_watch :: proc(app: ^App) {
 	text_size := BROWSE_CARD_TEXT_SIZE * app.scale
 	switch w.status {
 	case .Playing:
-		if app.layout.quality == .Audio {
+		if quality_playing(app.layout.quality, w.qualities).kind == .Audio {
 			draw_centered(&a.renderer, .Regular, text_size, video, fmt.tprintf("Audio only · %s", w.channel), BROWSE_DIM_TEXT)
 		} else {
 			draw_image(&a.renderer, app.player.texture, video)
