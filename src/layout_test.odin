@@ -28,11 +28,24 @@ layout_volume_defaults_when_missing :: proc(t: ^testing.T) {
 
 	saved: Layout
 	defer layout_destroy(&saved)
-	testing.expect(t, parse_layout(transmute([]byte)string(`{"splits":{},"volume":0,"muted":true,"quality":"720p","low_latency":true,"hide_chat":true,"text_size":120,"notifications_off":true,"chat_timestamps":true,"chat_hide_bots":true}`), &saved))
-	testing.expect(t, saved.chat.timestamps)
-	testing.expect(t, saved.chat.hide_bots)
-	testing.expect(t, !saved.chat.highlight_staff)
-	testing.expect(t, !saved.chat.alternate_lines)
+	testing.expect(t, parse_layout(transmute([]byte)string(`{"splits":{},"volume":0,"muted":true,"quality":"720p","low_latency":true,"hide_chat":true,"text_size":120,"notifications_off":true,"chat_sync":true,"latency_buffer_ms":2000,"max_height":720,"next_clip_off":true}`), &saved))
+	testing.expect(t, saved.chat_sync)
+	testing.expect_value(t, saved.latency_buffer_ms, 2000)
+	testing.expect_value(t, saved.max_height, 720)
+	testing.expect(t, saved.next_clip_off)
+	// Values not offered are left at their defaults.
+	odd: Layout
+	defer layout_destroy(&odd)
+	testing.expect(t, parse_layout(transmute([]byte)string(`{"splits":{},"latency_buffer_ms":777,"max_height":999}`), &odd))
+	testing.expect_value(t, odd.latency_buffer_ms, 0)
+	testing.expect_value(t, odd.max_height, 0)
+	chat: Layout
+	defer layout_destroy(&chat)
+	testing.expect(t, parse_layout(transmute([]byte)string(`{"splits":{},"chat_timestamps":true,"chat_hide_bots":true}`), &chat))
+	testing.expect(t, chat.chat.timestamps)
+	testing.expect(t, chat.chat.hide_bots)
+	testing.expect(t, !chat.chat.highlight_staff)
+	testing.expect(t, !chat.chat.alternate_lines)
 	testing.expect_value(t, saved.volume, 0)
 	testing.expect(t, saved.muted)
 	testing.expect_value(t, quality_name(saved.quality), "720p")

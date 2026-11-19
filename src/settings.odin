@@ -14,6 +14,14 @@ Setting_Switch :: enum {
 	Chat_Highlight_Staff,
 	Chat_Hide_Bots,
 	Chat_Alternate_Lines,
+	Chat_Sync,
+	Next_Clip,
+}
+
+// Settings with a few values, shown as the value; a click moves to the next.
+Setting_Choice :: enum {
+	Latency_Buffer,
+	Max_Quality,
 }
 
 // The Settings page's lists, each with a box to add to it and a button on each
@@ -36,6 +44,7 @@ Settings_Page :: struct {
 	boxes:      [Setting_List]Rect,
 	remove:     [Setting_List][dynamic]Rect,
 	switches:   [Setting_Switch]Rect,
+	choices:    [Setting_Choice]Rect,
 	smaller:    Rect,
 	larger:     Rect,
 }
@@ -209,8 +218,55 @@ setting_on :: proc(app: ^App, s: Setting_Switch) -> bool {
 		return l.chat.hide_bots
 	case .Chat_Alternate_Lines:
 		return l.chat.alternate_lines
+	case .Chat_Sync:
+		return l.chat_sync
+	case .Next_Clip:
+		return !l.next_clip_off
 	}
 	return false
+}
+
+// The choice's value, as shown.
+@(private = "file")
+setting_value :: proc(app: ^App, c: Setting_Choice) -> string {
+	l := &app.layout
+	switch c {
+	case .Latency_Buffer:
+		if l.latency_buffer_ms == 0 {
+			return "None"
+		}
+		return fmt.tprintf("%d s", l.latency_buffer_ms / 1000)
+	case .Max_Quality:
+		if l.max_height == 0 {
+			return "No limit"
+		}
+		return fmt.tprintf("%dp", l.max_height)
+	}
+	return ""
+}
+
+// Moves the choice on to its next value, after the last back to the first.
+@(private = "file")
+setting_next :: proc(app: ^App, c: Setting_Choice) {
+	next :: proc(values: []int, current: int) -> int {
+		for v, i in values {
+			if v == current {
+				return values[(i + 1) % len(values)]
+			}
+		}
+		return values[0]
+	}
+	l := &app.layout
+	switch c {
+	case .Latency_Buffer:
+		buffers := LOW_LATENCY_BUFFERS
+		l.latency_buffer_ms = next(buffers[:], l.latency_buffer_ms)
+	case .Max_Quality:
+		heights := MAX_HEIGHTS
+		l.max_height = next(heights[:], l.max_height)
+	}
+	// Nothing is playing while browsing: the next stream picks it up.
+	layout_save(l)
 }
 
 @(private = "file")
@@ -240,6 +296,12 @@ setting_toggle :: proc(app: ^App, s: Setting_Switch) {
 	case .Chat_Alternate_Lines:
 		app.layout.chat.alternate_lines = !app.layout.chat.alternate_lines
 		layout_save(&app.layout)
+	case .Chat_Sync:
+		app.layout.chat_sync = !app.layout.chat_sync
+		layout_save(&app.layout)
+	case .Next_Clip:
+		app.layout.next_clip_off = !app.layout.next_clip_off
+		layout_save(&app.layout)
 	}
 }
 
@@ -257,6 +319,12 @@ settings_click :: proc(app: ^App, x, y: f32) -> bool {
 	for s in Setting_Switch {
 		if in_rect(p.switches[s], x, y) {
 			setting_toggle(app, s)
+			return true
+		}
+	}
+	for c in Setting_Choice {
+		if in_rect(p.choices[c], x, y) {
+			setting_next(app, c)
 			return true
 		}
 	}
@@ -331,6 +399,12 @@ draw_settings :: proc(app: ^App, content: Rect) {
 		.Chat_Highlight_Staff = "Highlight the streamer's and moderators' messages",
 		.Chat_Hide_Bots       = "Hide bots and !commands",
 		.Chat_Alternate_Lines = "Alternate message backgrounds",
+		.Chat_Sync     = "Delay chat to match the stream",
+		.Next_Clip     = "Play the next clip when one ends",
+	}
+	choice_labels := [Setting_Choice]string {
+		.Latency_Buffer = "Low latency buffer",
+		.Max_Quality    = "Highest quality",
 	}
 	lists := [Setting_List]struct {
 		label, hint, none: string,
@@ -343,14 +417,15 @@ draw_settings :: proc(app: ^App, content: Rect) {
 	Section :: struct {
 		title:    string,
 		switches: []Setting_Switch,
+		choices:  []Setting_Choice,
 		lists:    []Setting_List,
 		// The text size, the language and the account rows.
 		text_size, language, account: bool,
 	}
 	sections := [?]Section {
 		{title = "General", switches = {.Notifications, .Update_Checks}, text_size = true},
-		{title = "Streams", switches = {.Low_Latency, .Follow_Raids}, language = true},
-		{title = "Chat", switches = {.Chat_Timestamps, .Chat_Highlight_Staff, .Chat_Hide_Bots, .Chat_Alternate_Lines}, lists = {.Highlights, .Ignored}},
+		{title = "Streams", switches = {.Low_Latency, .Follow_Raids, .Next_Clip}, choices = {.Latency_Buffer, .Max_Quality}, language = true},
+		{title = "Chat", switches = {.Chat_Sync, .Chat_Timestamps, .Chat_Highlight_Staff, .Chat_Hide_Bots, .Chat_Alternate_Lines}, lists = {.Highlights, .Ignored}},
 		{title = "Blocked", lists = {.Blocked_Channels, .Blocked_Categories}},
 		{title = "Account", account = true},
 	}
@@ -359,7 +434,7 @@ draw_settings :: proc(app: ^App, content: Rect) {
 	total_h := pad
 	for s in sections {
 		total_h += lh + row_gap
-		total_h += f32(len(s.switches) + int(s.text_size) + int(s.language) + int(s.account)) * (row_h + row_gap)
+		total_h += f32(len(s.switches) + len(s.choices) + int(s.text_size) + int(s.language) + int(s.account)) * (row_h + row_gap)
 		for list in s.lists {
 			n := len(settings_entries(app, list))
 			total_h += row_h + row_gap + (f32(n) * (entry_h + row_gap) if n > 0 else lh_text + row_gap)
@@ -372,6 +447,7 @@ draw_settings :: proc(app: ^App, content: Rect) {
 	scroll^ = clamp(scroll^, 0, b.max_scroll[.Settings])
 
 	p.switches = {}
+	p.choices = {}
 	p.smaller, p.larger = {}, {}
 	// The language menu opens below it (browse_click, draw_language_menu).
 	b.language_button = {}
@@ -395,6 +471,21 @@ draw_settings :: proc(app: ^App, content: Rect) {
 			rect := draw_switch(app, row.x + row.w - row_pad, row.y + row.h / 2, setting_on(app, sw))
 			if visible(row, rest) {
 				p.switches[sw] = rect
+			}
+		}
+
+		for c in s.choices {
+			row := Rect{x, y, list_w, row_h}
+			y += row_h + row_gap
+			draw_rect(r, row, BROWSE_PLACEHOLDER)
+			draw_text(r, .Regular, name_size, row.x + row_pad, row.y + (row.h - lh_name) / 2, choice_labels[c], BROWSE_TEXT)
+			value := setting_value(app, c)
+			vw := text_width(r, .Regular, text_size, value)
+			button := Rect{row.x + row.w - row_pad - vw, row.y + (row.h - lh_text) / 2, vw, lh_text}
+			hovered := in_rect(button, app.mouse.x, app.mouse.y)
+			draw_text(r, .Regular, text_size, button.x, button.y, value, BROWSE_TEXT if hovered else BROWSE_ACCENT)
+			if visible(row, rest) {
+				p.choices[c] = button
 			}
 		}
 

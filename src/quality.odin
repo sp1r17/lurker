@@ -34,9 +34,48 @@ MAX_RENDITIONS :: 16
 // The renditions a stream has, from streamlink: its videos, best first (so
 // video[0] is Source), and whether it has audio only. None until known.
 Renditions :: struct {
-	video: [MAX_RENDITIONS]Quality,
-	count: int,
-	audio: bool,
+	video:  [MAX_RENDITIONS]Quality,
+	count:  int,
+	audio:  bool,
+	// Some taller than the highest quality allowed were left out
+	// (renditions_capped): video[0] isn't Source.
+	capped: bool,
+}
+
+// The highest quality allowed (Layout.max_height): any, or a height.
+MAX_HEIGHTS :: [?]int{0, 1080, 720, 480, 360}
+
+// `r` without the renditions taller than `max_height` (0 for no limit), keeping
+// the lowest should they all be.
+renditions_capped :: proc(r: Renditions, max_height: int) -> Renditions {
+	if max_height <= 0 || r.count == 0 {
+		return r
+	}
+	r := r
+	capped := r
+	capped.count = 0
+	for v in r.video[:r.count] {
+		if v.height <= max_height {
+			capped.video[capped.count] = v
+			capped.count += 1
+		}
+	}
+	if capped.count == 0 {
+		capped.video[0] = r.video[r.count - 1]
+		capped.count = 1
+	}
+	capped.capped = capped.count < r.count
+	return capped
+}
+
+// What to ask for before the renditions are known, when `q` is wanted and the
+// highest allowed is `max_height` (0 for no limit): the limit, if `q` (Source,
+// say) could be above it.
+quality_capped :: proc(q: Quality, max_height: int) -> Quality {
+	if max_height <= 0 || q.kind == .Audio || (q.kind == .Video && q.height <= max_height) {
+		return q
+	}
+	return {kind = .Video, height = max_height, fps = 60}
 }
 
 renditions_known :: proc(r: Renditions) -> bool {
@@ -244,6 +283,11 @@ quality_choices :: proc(q: Quality, r: Renditions) -> (choices: [MAX_RENDITIONS 
 	return
 }
 
+// The quality to ask for: the saved one, within the highest allowed.
+watch_quality :: proc(app: ^App) -> Quality {
+	return quality_capped(app.layout.quality, app.layout.max_height)
+}
+
 Qualities_Job :: struct {
 	page:      string,
 	client_id: string,
@@ -291,7 +335,7 @@ finish_qualities_job :: proc(app: ^App, p: ^Qualities_Job) {
 	if app.screen != .Watch || p.session != app.session || p.page != w.qualities_page || !p.ok {
 		return
 	}
-	w.qualities = p.found
+	w.qualities = renditions_capped(p.found, app.layout.max_height)
 	watch_renditions_found(app)
 }
 

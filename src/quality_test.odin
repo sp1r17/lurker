@@ -93,3 +93,25 @@ the_menu_offers_the_streams_renditions :: proc(t: ^testing.T) {
 	testing.expect_value(t, n, 3)
 	testing.expect_value(t, choices[1], video(900, 60))
 }
+
+@(test)
+the_highest_quality_allowed_caps_renditions :: proc(t: ^testing.T) {
+	r := renditions_from_streams({"160p", "480p", "720p60", "936p60"})
+	capped := renditions_capped(r, 720)
+	testing.expect_value(t, capped.count, 3)
+	testing.expect_value(t, capped.video[0], video(720, 60))
+	testing.expect(t, capped.capped)
+	// Source within the limit: Source still.
+	testing.expect(t, !renditions_capped(r, 1080).capped)
+	testing.expect_value(t, renditions_capped(r, 0), r)
+	// All taller: the lowest stays.
+	tall := renditions_capped(renditions_from_streams({"936p60", "720p60"}), 480)
+	testing.expect_value(t, tall.count, 1)
+	testing.expect_value(t, tall.video[0], video(720, 60))
+	// Asked for before the renditions are known.
+	testing.expect_value(t, quality_capped(QUALITY_SOURCE, 720), video(720, 60))
+	testing.expect_value(t, quality_capped(video(1080, 60), 720), video(720, 60))
+	testing.expect_value(t, quality_capped(video(480, 30, bare = true), 720), video(480, 30, bare = true))
+	testing.expect_value(t, quality_capped(QUALITY_AUDIO, 720), QUALITY_AUDIO)
+	testing.expect_value(t, quality_capped(QUALITY_SOURCE, 0), QUALITY_SOURCE)
+}
