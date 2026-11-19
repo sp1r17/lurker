@@ -101,6 +101,13 @@ Watch :: struct {
 	quality_items:    [MAX_RENDITIONS + 2]Rect,
 	latency_item:     Rect,
 	raids_item:       Rect,
+	stats_item:       Rect,
+	// When this channel's watch began (Assets.now_ms), for the stats.
+	watching_since:   int,
+	// Ping to Twitch, measured while the stats show (ping_tick), and the latency
+	// to broadcaster (latency_tick).
+	ping:             Ping_Stats,
+	latency:          Latency_Stats,
 	// Listens for the channel raiding another, to follow it (raid.odin); nil when
 	// not listening.
 	raids:            ^Raid_Listener,
@@ -170,6 +177,7 @@ watch_start :: proc(app: ^App, channel: string, restore := true, info: ^Stream =
 		status    = .Starting,
 		show_chat = !app.layout.hide_chat,
 		speed     = 1,
+		watching_since = app.assets.now_ms,
 	}
 	if info != nil {
 		watch_set_info(app, info^)
@@ -222,6 +230,7 @@ watch_stop :: proc(app: ^App) {
 	delete(w.channel)
 	delete(w.channel_id)
 	delete(w.qualities_page)
+	latency_reset(&w.latency)
 	destroy_vod(w.vod)
 	replay_destroy(&w.replay)
 	vod_extras_clear(w)
@@ -284,6 +293,8 @@ start_stream :: proc(app: ^App, signed: bool) {
 	w.signed_stream = signed
 	w.ended_at = 0
 	w.started_at = app.assets.now_ms
+	// Another rendition, or the stream started over: its anchor is taken again.
+	latency_reset(&w.latency)
 	w.retry_at = 0
 	s: Streamlink
 	ok: bool
@@ -403,7 +414,7 @@ on_controls :: proc(app: ^App, x, y: f32) -> bool {
 				return true
 			}
 		}
-		if in_rect(w.latency_item, x, y) || in_rect(w.raids_item, x, y) {
+		if in_rect(w.latency_item, x, y) || in_rect(w.raids_item, x, y) || in_rect(w.stats_item, x, y) {
 			return true
 		}
 	}
@@ -449,6 +460,10 @@ controls_click :: proc(app: ^App, x, y: f32) -> bool {
 			watch_toggle_raids(app)
 			return true
 		}
+		if in_rect(w.stats_item, x, y) {
+			watch_toggle_stats(app)
+			return true
+		}
 	}
 	if w.quality_button.w > 0 && in_rect(w.quality_button, x, y) {
 		w.quality_menu = !w.quality_menu
@@ -477,6 +492,7 @@ draw_controls :: proc(app: ^App) {
 	w.quality_items = {}
 	w.latency_item = {}
 	w.raids_item = {}
+	w.stats_item = {}
 	if !controls_visible(app) {
 		return
 	}
@@ -509,7 +525,7 @@ draw_controls :: proc(app: ^App) {
 		return
 	}
 
-	// The qualities, a divider, then the low latency and raid switches.
+	// The qualities, a divider, then the low latency, raid and stats switches.
 	// Grows with the text size, to fit its labels.
 	item_h := MENU_ITEM_HEIGHT * scale * r.text_scale
 	divider := 9 * scale
@@ -526,7 +542,7 @@ draw_controls :: proc(app: ^App) {
 		lh_regular := line_height(r, .Regular, size)
 		menu_w = max(menu_w, text_width(r, .Bold, size, labels[i]) + 2 * pad + lh_regular * 0.55 + 8 * scale)
 	}
-	menu_h := item_h * f32(items + 2) + divider
+	menu_h := item_h * f32(items + 3) + divider
 	menu := Rect{w.quality_button.x + w.quality_button.w - menu_w, w.quality_button.y - 6 * scale - menu_h, menu_w, menu_h}
 	hidden := menu_hover_begin(app, menu)
 	defer menu_hover_end(app, hidden)
@@ -538,10 +554,12 @@ draw_controls :: proc(app: ^App) {
 	}
 	line_y := menu.y + item_h * f32(items) + divider / 2
 	draw_rect(r, {menu.x + pad, line_y, menu.w - 2 * pad, scale}, USER_CARD_BORDER)
-	w.latency_item = {menu.x, menu.y + menu_h - 2 * item_h, menu.w, item_h}
+	w.latency_item = {menu.x, menu.y + menu_h - 3 * item_h, menu.w, item_h}
 	draw_menu_item(app, w.latency_item, "Low latency", app.layout.low_latency)
-	w.raids_item = {menu.x, menu.y + menu_h - item_h, menu.w, item_h}
+	w.raids_item = {menu.x, menu.y + menu_h - 2 * item_h, menu.w, item_h}
 	draw_menu_item(app, w.raids_item, "Follow raids", !app.layout.raids_off)
+	w.stats_item = {menu.x, menu.y + menu_h - item_h, menu.w, item_h}
+	draw_menu_item(app, w.stats_item, "Stream stats", app.layout.stats)
 }
 
 draw_menu_item :: proc(app: ^App, item: Rect, label: string, checked: bool, color := BROWSE_TEXT) {
@@ -742,6 +760,8 @@ watch_key :: proc(app: ^App, key: sdl.KeyboardEvent) -> bool {
 		set_volume(app, app.layout.volume - VOLUME_STEP, app.layout.muted)
 	case sdl.K_C:
 		watch_show_chat(app, !w.show_chat)
+	case sdl.K_I:
+		watch_toggle_stats(app)
 	case sdl.K_RETURN, sdl.K_KP_ENTER:
 		if (w.status == .Offline || w.status == .Ended) && w.vod_state == .Found {
 			watch_play_vod(app)
@@ -989,6 +1009,7 @@ draw_watch :: proc(app: ^App) {
 	draw_stream_info(app)
 	draw_volume(app)
 	draw_resume_notice(app)
+	draw_stream_stats(app)
 	draw_controls(app)
 	w.hide_button = {}
 	w.show_tab = {}

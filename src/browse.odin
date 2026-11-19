@@ -2,6 +2,7 @@ package app
 
 import "core:fmt"
 import "core:strings"
+import "core:time"
 import "core:unicode/utf8"
 import sdl "vendor:sdl3"
 
@@ -1271,6 +1272,7 @@ draw_stream_list :: proc(app: ^App, l: ^Stream_List, content: Rect, empty_messag
 	gap := BROWSE_GAP * scale
 	text_size := BROWSE_CARD_TEXT_SIZE * scale
 	message := ""
+	now := time.now()
 	switch {
 	case l.state == .Empty || (l.state == .Loading && len(l.streams) == 0):
 		message = "Loading..."
@@ -1356,6 +1358,17 @@ draw_stream_list :: proc(app: ^App, l: ^Stream_List, content: Rect, empty_messag
 		draw_rect(r, badge, VIEWERS_BACKGROUND)
 		draw_rect(r, {badge.x + 5 * scale, badge.y + (badge.h - dot) / 2, dot, dot}, LIVE_RED)
 		draw_text(r, .Regular, text_size, badge.x + dot + 9 * scale, badge.y + 2 * scale, viewers, BROWSE_TEXT)
+		// How long it's been live, over the bottom right; redrawn as the minutes
+		// go by.
+		if uptime, next_ms, ok := format_card_uptime(s.started_at, now); ok {
+			uw := text_width(r, .Regular, text_size, uptime)
+			tag := Rect{thumb.x + thumb.w - inset - uw - 12 * scale, badge.y, uw + 12 * scale, badge.h}
+			draw_rect(r, tag, VIEWERS_BACKGROUND)
+			draw_text(r, .Regular, text_size, tag.x + 6 * scale, tag.y + 2 * scale, uptime, BROWSE_TEXT)
+			if a.next_frame_ms < 0 || next_ms < a.next_frame_ms {
+				a.next_frame_ms = next_ms
+			}
+		}
 		if grayed {
 			code := language_badge(s)
 			tag := Rect{thumb.x + inset, thumb.y + inset, text_width(r, .Bold, text_size, code) + 12 * scale, lh_text + 4 * scale}

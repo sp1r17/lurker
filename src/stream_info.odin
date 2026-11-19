@@ -111,6 +111,22 @@ format_uptime :: proc(started_at: string, now: time.Time) -> (text: string, ok: 
 	return fmt.tprintf("%d:%02d:%02d", seconds / 3600, seconds % 3600 / 60, seconds % 60), true
 }
 
+// "2h 05m", or "45m": how long the stream has been live, for its card; and how
+// many ms until that changes.
+format_card_uptime :: proc(started_at: string, now: time.Time) -> (text: string, next_ms: int, ok: bool) {
+	started, consumed := time.rfc3339_to_time_utc(started_at)
+	if consumed == 0 {
+		return "", 0, false
+	}
+	seconds := max(0, int(time.duration_seconds(time.diff(started, now))))
+	minutes := seconds / 60
+	next_ms = (60 - seconds % 60) * 1000
+	if minutes < 60 {
+		return fmt.tprintf("%dm", minutes), next_ms, true
+	}
+	return fmt.tprintf("%dh %02dm", minutes / 60, minutes % 60), next_ms, true
+}
+
 // Whether the video's controls and the stream info bar are showing.
 controls_visible :: proc(app: ^App) -> bool {
 	return app.assets.now_ms < app.watch.controls_until || app.watch.quality_menu

@@ -172,6 +172,7 @@ settings are stored in `~/.config/lurker` (`%APPDATA%\lurker` on Windows).
 | F | Fullscreen |
 | Double-click the video or the top bar | Maximize / restore |
 | C | Show or hide chat |
+| I | Show or hide the stream stats |
 | Enter | Chat in the focused split, or play an offline channel's last broadcast |
 | Ctrl+T / Ctrl+W | Open / close a chat split |
 | Ctrl+, | Settings |
