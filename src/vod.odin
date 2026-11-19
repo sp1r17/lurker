@@ -178,6 +178,17 @@ watch_play_vod :: proc(app: ^App, start: f64 = -1) {
 	if w.vod_state != .Found {
 		return
 	}
+	history_add(
+		&app.history,
+		{
+			kind = .Clip if w.vod.kind == .Clip else .Video,
+			id = w.vod.id,
+			login = w.vod.login,
+			channel_name = w.vod.channel_name,
+			title = w.vod.title,
+			game = w.vod.game,
+		},
+	)
 	// Leaving one video for another (or the same again) notes where it was.
 	watched_note(app)
 	start := start

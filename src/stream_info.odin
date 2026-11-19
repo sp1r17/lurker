@@ -99,6 +99,7 @@ watch_set_info :: proc(app: ^App, s: Stream) {
 	}
 	w.info = clone_stream(s)
 	w.has_info = true
+	history_update_live(&app.history, w.channel, s.user_name, s.title, s.game_name)
 }
 
 // "2:05:09": how long the stream has been live, from Helix's RFC 3339 start time.

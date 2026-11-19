@@ -67,14 +67,19 @@ Browse_View :: enum {
 	Videos,
 	// Settings, and what's blocked (settings.odin).
 	Settings,
+	// What was watched (history.odin).
+	History,
 }
+
+// The tabs the browse screen can open on (Layout.start_view).
+START_VIEWS :: [?]Browse_View{.Following, .Top, .Categories, .History}
 
 Search_Kind :: enum {
 	Channels,
 	Categories,
 }
 
-BROWSE_TABS :: [?]Browse_View{.Following, .Top, .Categories}
+BROWSE_TABS :: [?]Browse_View{.Following, .Top, .Categories, .History}
 BROWSE_TAB_LABELS := [Browse_View]string {
 	.Following           = "Following",
 	.Top                 = "Top",
@@ -84,6 +89,7 @@ BROWSE_TAB_LABELS := [Browse_View]string {
 	.Search              = "",
 	.Videos              = "",
 	.Settings            = "",
+	.History             = "History",
 }
 
 // Live streams as a grid of cards: the followed channels, Twitch's top streams, or
@@ -157,6 +163,11 @@ Browse :: struct {
 	// Each search result's follow button (zero size for none), and which one
 	// is waiting for a second click to unfollow (its index + 1; 0 for none).
 	follow_buttons:       [dynamic]Rect,
+	// The History tab's buttons, from the last draw.
+	history_remove:       [dynamic]Rect,
+	history_clear:        Rect,
+	// The header's sort order, on the stream lists.
+	sort_button:          Rect,
 	unfollow_armed:       int,
 	tabs:                 [Browse_View]Rect,
 	// The Categories tab's two section buttons.
@@ -210,6 +221,7 @@ browse_destroy :: proc(b: ^Browse) {
 	delete(b.results)
 	delete(b.cards)
 	delete(b.follow_buttons)
+	delete(b.history_remove)
 	card_menu_destroy(&b.card_menu)
 	language_menu_destroy(&b.language_menu)
 	settings_page_destroy(&b.settings)
@@ -240,7 +252,7 @@ browse_tick :: proc(app: ^App) -> (wait_ms: int) {
 	state: Browse_State
 	refreshed: int
 	switch b.view {
-	case .Settings:
+	case .Settings, .History:
 		return -1
 	case .Videos:
 		return videos_tick(app)
@@ -355,7 +367,7 @@ browse_refresh :: proc(app: ^App) {
 		search_start(app)
 	case .Videos:
 		videos_refresh(app)
-	case .Settings:
+	case .Settings, .History:
 	}
 }
 
@@ -466,6 +478,7 @@ finish_streams_job :: proc(app: ^App, p: ^Streams_Job) {
 	}
 	clear(&p.streams)
 	stream_list_drop_blocked(app, l)
+	stream_list_sort(l, app.layout.stream_sort)
 	l.state = .Loaded
 	if p.view == .Following {
 		live_notify(app, l.streams[:])
@@ -1044,6 +1057,10 @@ browse_click :: proc(app: ^App, x, y: f32) -> bool {
 			return true
 		}
 	}
+	if b.sort_button.w > 0 && in_rect(b.sort_button, x, y) {
+		browse_next_sort(app)
+		return true
+	}
 	if b.search_rect.w > 0 && in_rect(b.search_rect, x, y) {
 		browse_search_focus(app)
 		return true
@@ -1065,6 +1082,9 @@ browse_click :: proc(app: ^App, x, y: f32) -> bool {
 	}
 	if b.view == .Settings {
 		return settings_click(app, x, y)
+	}
+	if b.view == .History {
+		return history_click(app, x, y, browse_card_at(b, x, y))
 	}
 	for button, i in b.section_buttons {
 		if button.w > 0 && in_rect(button, x, y) {
@@ -1104,7 +1124,7 @@ browse_click :: proc(app: ^App, x, y: f32) -> bool {
 		}
 	case .Search:
 		search_open_row(app, i)
-	case .Videos, .Settings:
+	case .Videos, .Settings, .History:
 	// Handled above.
 	}
 	return true
@@ -1128,6 +1148,9 @@ on_browse_header_controls :: proc(app: ^App, x, y: f32) -> bool {
 		}
 	}
 	if b.settings_button.w > 0 && in_rect(b.settings_button, x, y) {
+		return true
+	}
+	if b.sort_button.w > 0 && in_rect(b.sort_button, x, y) {
 		return true
 	}
 	if app.update.bar.w > 0 && in_rect(app.update.bar, x, y) {
@@ -1180,6 +1203,8 @@ draw_browse :: proc(app: ^App, screen: Rect) {
 		draw_videos(app, content)
 	case .Settings:
 		draw_settings(app, content)
+	case .History:
+		draw_history(app, content)
 	}
 	draw_card_menu(app, screen)
 	draw_language_menu(app, b.language_button, screen)
@@ -1217,6 +1242,19 @@ draw_browse_header :: proc(app: ^App, screen: Rect) {
 		login := fmt.tprintf("R to refresh  ·  %s  ·  ", app.auth.login)
 		right = b.settings_button.x - text_width(r, .Regular, text_size, login)
 		draw_text(r, .Regular, text_size, right, text_y, login, BROWSE_DIM_TEXT)
+	}
+	// The stream lists' order, clicked to change.
+	b.sort_button = {}
+	if app.signed_in && (b.view == .Following || b.view == .Top || b.view == .Category) {
+		label := fmt.tprintf("Sort: %s", STREAM_SORT_LABELS[app.layout.stream_sort])
+		lw := text_width(r, .Regular, text_size, label)
+		sep := "  ·  "
+		right -= text_width(r, .Regular, text_size, sep)
+		draw_text(r, .Regular, text_size, right, text_y, sep, BROWSE_DIM_TEXT)
+		b.sort_button = {right - lw, text_y, lw, line_height(r, .Regular, text_size)}
+		hovered := in_rect(b.sort_button, app.mouse.x, app.mouse.y)
+		draw_text(r, .Regular, text_size, b.sort_button.x, text_y, label, BROWSE_TEXT if hovered else BROWSE_ACCENT)
+		right = b.sort_button.x
 	}
 
 	b.tabs = {}
@@ -1838,4 +1876,16 @@ fit_text :: proc(r: ^Renderer, font: Font, size: f32, text: string, max_w: f32) 
 		end = i
 	}
 	return strings.concatenate({strings.trim_right_space(text[:end]), ellipsis}, context.temp_allocator)
+}
+
+// Orders the stream lists the next way (Stream_Sort), and remembers it.
+browse_next_sort :: proc(app: ^App) {
+	b := &app.browse
+	app.layout.stream_sort = Stream_Sort((int(app.layout.stream_sort) + 1) % len(Stream_Sort))
+	layout_save(&app.layout)
+	for l in ([]^Stream_List{&b.following, &b.top, &b.category}) {
+		stream_list_sort(l, app.layout.stream_sort)
+	}
+	b.scroll[b.view] = 0
+	b.hovered = -1
 }

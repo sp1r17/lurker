@@ -30,6 +30,9 @@ Layout :: struct {
 	raids_off:   bool,
 	// The stream stats show over the video (stream_stats.odin).
 	stats:       bool,
+	// How stream lists are ordered, and the tab the browse screen opens on.
+	stream_sort: Stream_Sort,
+	start_view:  Browse_View,
 	// The chats were hidden last, for every channel.
 	hide_chat:   bool,
 	// MIN_TEXT_SIZE to MAX_TEXT_SIZE percent.
@@ -94,6 +97,8 @@ parse_layout :: proc(data: []byte, l: ^Layout) -> bool {
 		low_latency: bool,
 		raids_off:   bool,
 		stats:       bool,
+		stream_sort: Stream_Sort,
+		start_view:  Browse_View,
 		hide_chat:   bool,
 		text_size:   int,
 		notifications_off: bool,
@@ -118,6 +123,13 @@ parse_layout :: proc(data: []byte, l: ^Layout) -> bool {
 	l.low_latency = saved.low_latency
 	l.raids_off = saved.raids_off
 	l.stats = saved.stats
+	l.stream_sort = saved.stream_sort
+	// Only a tab.
+	for view in START_VIEWS {
+		if saved.start_view == view {
+			l.start_view = view
+		}
+	}
 	l.hide_chat = saved.hide_chat
 	l.notifications_off = saved.notifications_off
 	l.update_checks_off = saved.update_checks_off
@@ -172,6 +184,8 @@ layout_save :: proc(l: ^Layout) {
 		low_latency: bool,
 		raids_off:   bool,
 		stats:       bool,
+		stream_sort: Stream_Sort,
+		start_view:  Browse_View,
 		hide_chat:   bool,
 		text_size:   int,
 		notifications_off: bool,
@@ -181,8 +195,8 @@ layout_save :: proc(l: ^Layout) {
 		skipped_version:   string,
 		language:          string,
 		language_hide:     bool,
-	}{LAYOUT_VERSION, l.splits, l.volume, l.muted, quality_name(l.quality), l.low_latency, l.raids_off, l.stats, l.hide_chat, l.text_size, l.notifications_off, l.chat.highlights[:], l.chat.ignored[:], l.update_checks_off, l.skipped_version, l.language, l.language_hide}
-	data, err := json.marshal(saved, {pretty = true}, context.temp_allocator)
+	}{LAYOUT_VERSION, l.splits, l.volume, l.muted, quality_name(l.quality), l.low_latency, l.raids_off, l.stats, l.stream_sort, l.start_view, l.hide_chat, l.text_size, l.notifications_off, l.chat.highlights[:], l.chat.ignored[:], l.update_checks_off, l.skipped_version, l.language, l.language_hide}
+	data, err := json.marshal(saved, {pretty = true, use_enum_names = true}, context.temp_allocator)
 	if err != nil {
 		return
 	}

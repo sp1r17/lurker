@@ -186,6 +186,11 @@ watch_start :: proc(app: ^App, channel: string, restore := true, info: ^Stream =
 	}
 	if live {
 		start_stream(app, signed = app.signed_in)
+		entry := History_Entry{kind = .Live, id = channel, login = channel}
+		if info != nil {
+			entry.channel_name, entry.title, entry.game = info.user_name, info.title, info.game_name
+		}
+		history_add(&app.history, entry)
 	}
 	follow_lookup(app)
 	p := pane_new(app)

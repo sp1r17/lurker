@@ -12,6 +12,11 @@ Setting_Switch :: enum {
 	Follow_Raids,
 }
 
+// Settings with a few values, shown as the value; a click moves to the next.
+Setting_Choice :: enum {
+	Start_View,
+}
+
 // The Settings page's lists, each with a box to add to it and a button on each
 // entry to take it out.
 Setting_List :: enum {
@@ -32,6 +37,7 @@ Settings_Page :: struct {
 	boxes:      [Setting_List]Rect,
 	remove:     [Setting_List][dynamic]Rect,
 	switches:   [Setting_Switch]Rect,
+	choices:    [Setting_Choice]Rect,
 	smaller:    Rect,
 	larger:     Rect,
 }
@@ -201,6 +207,34 @@ setting_on :: proc(app: ^App, s: Setting_Switch) -> bool {
 	return false
 }
 
+// The choice's value, as shown.
+@(private = "file")
+setting_value :: proc(app: ^App, c: Setting_Choice) -> string {
+	switch c {
+	case .Start_View:
+		return BROWSE_TAB_LABELS[app.layout.start_view]
+	}
+	return ""
+}
+
+// Moves the choice on to its next value, after the last back to the first.
+@(private = "file")
+setting_next :: proc(app: ^App, c: Setting_Choice) {
+	l := &app.layout
+	switch c {
+	case .Start_View:
+		views := START_VIEWS
+		at := 0
+		for v, i in views {
+			if v == l.start_view {
+				at = i
+			}
+		}
+		l.start_view = views[(at + 1) % len(views)]
+	}
+	layout_save(l)
+}
+
 @(private = "file")
 setting_toggle :: proc(app: ^App, s: Setting_Switch) {
 	switch s {
@@ -233,6 +267,12 @@ settings_click :: proc(app: ^App, x, y: f32) -> bool {
 	for s in Setting_Switch {
 		if in_rect(p.switches[s], x, y) {
 			setting_toggle(app, s)
+			return true
+		}
+	}
+	for c in Setting_Choice {
+		if in_rect(p.choices[c], x, y) {
+			setting_next(app, c)
 			return true
 		}
 	}
@@ -304,6 +344,9 @@ draw_settings :: proc(app: ^App, content: Rect) {
 		.Low_Latency   = "Low latency",
 		.Follow_Raids  = "Follow raids to the raided channel",
 	}
+	choice_labels := [Setting_Choice]string {
+		.Start_View = "Start page",
+	}
 	lists := [Setting_List]struct {
 		label, hint, none: string,
 	} {
@@ -315,12 +358,13 @@ draw_settings :: proc(app: ^App, content: Rect) {
 	Section :: struct {
 		title:    string,
 		switches: []Setting_Switch,
+		choices:  []Setting_Choice,
 		lists:    []Setting_List,
 		// The text size, the language and the account rows.
 		text_size, language, account: bool,
 	}
 	sections := [?]Section {
-		{title = "General", switches = {.Notifications, .Update_Checks}, text_size = true},
+		{title = "General", switches = {.Notifications, .Update_Checks}, choices = {.Start_View}, text_size = true},
 		{title = "Streams", switches = {.Low_Latency, .Follow_Raids}, language = true},
 		{title = "Chat", lists = {.Highlights, .Ignored}},
 		{title = "Blocked", lists = {.Blocked_Channels, .Blocked_Categories}},
@@ -331,7 +375,7 @@ draw_settings :: proc(app: ^App, content: Rect) {
 	total_h := pad
 	for s in sections {
 		total_h += lh + row_gap
-		total_h += f32(len(s.switches) + int(s.text_size) + int(s.language) + int(s.account)) * (row_h + row_gap)
+		total_h += f32(len(s.switches) + len(s.choices) + int(s.text_size) + int(s.language) + int(s.account)) * (row_h + row_gap)
 		for list in s.lists {
 			n := len(settings_entries(app, list))
 			total_h += row_h + row_gap + (f32(n) * (entry_h + row_gap) if n > 0 else lh_text + row_gap)
@@ -344,6 +388,7 @@ draw_settings :: proc(app: ^App, content: Rect) {
 	scroll^ = clamp(scroll^, 0, b.max_scroll[.Settings])
 
 	p.switches = {}
+	p.choices = {}
 	p.smaller, p.larger = {}, {}
 	// The language menu opens below it (browse_click, draw_language_menu).
 	b.language_button = {}
@@ -367,6 +412,21 @@ draw_settings :: proc(app: ^App, content: Rect) {
 			rect := draw_switch(app, row.x + row.w - row_pad, row.y + row.h / 2, setting_on(app, sw))
 			if visible(row, rest) {
 				p.switches[sw] = rect
+			}
+		}
+
+		for c in s.choices {
+			row := Rect{x, y, list_w, row_h}
+			y += row_h + row_gap
+			draw_rect(r, row, BROWSE_PLACEHOLDER)
+			draw_text(r, .Regular, name_size, row.x + row_pad, row.y + (row.h - lh_name) / 2, choice_labels[c], BROWSE_TEXT)
+			value := setting_value(app, c)
+			vw := text_width(r, .Regular, text_size, value)
+			button := Rect{row.x + row.w - row_pad - vw, row.y + (row.h - lh_text) / 2, vw, lh_text}
+			hovered := in_rect(button, app.mouse.x, app.mouse.y)
+			draw_text(r, .Regular, text_size, button.x, button.y, value, BROWSE_TEXT if hovered else BROWSE_ACCENT)
+			if visible(row, rest) {
+				p.choices[c] = button
 			}
 		}
 
