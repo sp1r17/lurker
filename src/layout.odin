@@ -30,6 +30,15 @@ Layout :: struct {
 	raids_off:   bool,
 	// The stream stats show over the video (stream_stats.odin).
 	stats:       bool,
+	// The live chat is held back to match the stream's latency (chat_delay.odin).
+	chat_sync:   bool,
+	// With low latency: how much video mpv keeps in hand, in ms, against the
+	// stream arriving unevenly (LOW_LATENCY_BUFFERS).
+	latency_buffer_ms: int,
+	// The highest quality to play, by height (MAX_HEIGHTS); 0 for no limit.
+	max_height:  int,
+	// Not playing the next clip when one ends (vod.odin).
+	next_clip_off: bool,
 	// How stream lists are ordered, and the tab the browse screen opens on.
 	stream_sort: Stream_Sort,
 	start_view:  Browse_View,
@@ -97,6 +106,10 @@ parse_layout :: proc(data: []byte, l: ^Layout) -> bool {
 		low_latency: bool,
 		raids_off:   bool,
 		stats:       bool,
+		chat_sync:   bool,
+		latency_buffer_ms: int,
+		max_height:  int,
+		next_clip_off: bool,
 		stream_sort: Stream_Sort,
 		start_view:  Browse_View,
 		hide_chat:   bool,
@@ -123,6 +136,19 @@ parse_layout :: proc(data: []byte, l: ^Layout) -> bool {
 	l.low_latency = saved.low_latency
 	l.raids_off = saved.raids_off
 	l.stats = saved.stats
+	l.chat_sync = saved.chat_sync
+	l.next_clip_off = saved.next_clip_off
+	// Only the values offered, so a hand-edited file can't set another.
+	for ms in LOW_LATENCY_BUFFERS {
+		if saved.latency_buffer_ms == ms {
+			l.latency_buffer_ms = ms
+		}
+	}
+	for h in MAX_HEIGHTS {
+		if saved.max_height == h {
+			l.max_height = h
+		}
+	}
 	l.stream_sort = saved.stream_sort
 	// Only a tab.
 	for view in START_VIEWS {
@@ -184,6 +210,10 @@ layout_save :: proc(l: ^Layout) {
 		low_latency: bool,
 		raids_off:   bool,
 		stats:       bool,
+		chat_sync:   bool,
+		latency_buffer_ms: int,
+		max_height:  int,
+		next_clip_off: bool,
 		stream_sort: Stream_Sort,
 		start_view:  Browse_View,
 		hide_chat:   bool,
@@ -195,7 +225,7 @@ layout_save :: proc(l: ^Layout) {
 		skipped_version:   string,
 		language:          string,
 		language_hide:     bool,
-	}{LAYOUT_VERSION, l.splits, l.volume, l.muted, quality_name(l.quality), l.low_latency, l.raids_off, l.stats, l.stream_sort, l.start_view, l.hide_chat, l.text_size, l.notifications_off, l.chat.highlights[:], l.chat.ignored[:], l.update_checks_off, l.skipped_version, l.language, l.language_hide}
+	}{LAYOUT_VERSION, l.splits, l.volume, l.muted, quality_name(l.quality), l.low_latency, l.raids_off, l.stats, l.chat_sync, l.latency_buffer_ms, l.max_height, l.next_clip_off, l.stream_sort, l.start_view, l.hide_chat, l.text_size, l.notifications_off, l.chat.highlights[:], l.chat.ignored[:], l.update_checks_off, l.skipped_version, l.language, l.language_hide}
 	data, err := json.marshal(saved, {pretty = true, use_enum_names = true}, context.temp_allocator)
 	if err != nil {
 		return

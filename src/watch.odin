@@ -71,6 +71,8 @@ Watch :: struct {
 	has_info:         bool,
 	info_at:          int,
 	info_pending:     bool,
+	// The channel was live at the last lookup (stream_info_tick).
+	live_now:         bool,
 	// Until when (Assets.now_ms) the volume bar shows.
 	volume_osd_until: int,
 	// Until when the video's controls show; the quality menu is open.
@@ -307,16 +309,16 @@ start_stream :: proc(app: ^App, signed: bool) {
 	qualities_request(app, fmt.tprintf("https://twitch.tv/%s", w.channel))
 	w.started_blind = !renditions_known(w.qualities)
 	if signed {
-		s, ok = streamlink_start(w.channel, l.quality, w.qualities, l.low_latency, app.client_id, app.auth.access_token)
+		s, ok = streamlink_start(w.channel, watch_quality(app), w.qualities, l.low_latency, app.client_id, app.auth.access_token)
 	} else {
-		s, ok = streamlink_start(w.channel, l.quality, w.qualities, l.low_latency)
+		s, ok = streamlink_start(w.channel, watch_quality(app), w.qualities, l.low_latency)
 	}
 	if !ok {
 		w.status = .Failed
 		return
 	}
 	w.streamlink = s
-	player_load(&app.player, streamlink_url(&w.streamlink), l.low_latency)
+	player_load(&app.player, streamlink_url(&w.streamlink), l.low_latency, l.latency_buffer_ms)
 }
 
 // Switches the stream to `q` (restarting it) and remembers it for every channel.
@@ -326,7 +328,7 @@ watch_set_quality :: proc(app: ^App, q: Quality) {
 	if q == app.layout.quality {
 		return
 	}
-	was := quality_playing(app.layout.quality, w.qualities)
+	was := quality_playing(watch_quality(app), w.qualities)
 	app.layout.quality = q
 	layout_save(&app.layout)
 	// Source, say, may be the rendition already playing.
@@ -343,7 +345,7 @@ watch_renditions_found :: proc(app: ^App) {
 		return
 	}
 	w.started_blind = false
-	q := app.layout.quality
+	q := watch_quality(app)
 	if quality_blind(q, w.qualities) != quality_playing(q, w.qualities) {
 		restart_stream(app)
 	}
@@ -505,7 +507,7 @@ draw_controls :: proc(app: ^App) {
 	scale := app.scale
 	size := BROWSE_CARD_TEXT_SIZE * scale
 	pad := 12 * scale
-	playing := quality_playing(app.layout.quality, w.qualities)
+	playing := quality_playing(watch_quality(app), w.qualities)
 	label := quality_label(playing)
 	lh := line_height(r, .Bold, size)
 	// A chevron after the label, drawn: Noto Sans has no "▼".
@@ -534,14 +536,15 @@ draw_controls :: proc(app: ^App) {
 	// Grows with the text size, to fit its labels.
 	item_h := MENU_ITEM_HEIGHT * scale * r.text_scale
 	divider := 9 * scale
-	choices, items := quality_choices(app.layout.quality, w.qualities)
+	choices, items := quality_choices(watch_quality(app), w.qualities)
 	w.quality_choices = choices
 	labels: [len(choices)]string
 	menu_w := max(MENU_WIDTH * scale * r.text_scale, bw)
 	for c, i in choices[:items] {
 		labels[i] = quality_label(quality_playing(c, w.qualities))
 		if c.kind == .Source && renditions_known(w.qualities) {
-			labels[i] = fmt.tprintf("%s (Source)", labels[i])
+			// Unless the highest allowed left Source out.
+			labels[i] = fmt.tprintf("%s (%s)", labels[i], "highest allowed" if w.qualities.capped else "Source")
 		}
 		// Room for the check mark too (draw_menu_item).
 		lh_regular := line_height(r, .Regular, size)
@@ -632,7 +635,7 @@ watch_stream_ended :: proc(app: ^App) -> bool {
 				return false
 			}
 			w.ended_at = 0
-			player_load(&app.player, streamlink_url(&w.streamlink), app.layout.low_latency)
+			player_load(&app.player, streamlink_url(&w.streamlink), app.layout.low_latency, app.layout.latency_buffer_ms)
 			return true
 		}
 		if !done && w.status == .Playing {
@@ -656,6 +659,8 @@ watch_stream_ended :: proc(app: ^App) -> bool {
 			// The live stream ended while watching it, or a check found it still
 			// offline.
 			stream_retry_later(app)
+		} else if outcome == .Ended && watch_play_next_clip(app) {
+			return true
 		} else {
 			w.status = .Offline if outcome == .Offline else .Ended
 		}
@@ -765,6 +770,9 @@ watch_key :: proc(app: ^App, key: sdl.KeyboardEvent) -> bool {
 		set_volume(app, app.layout.volume - VOLUME_STEP, app.layout.muted)
 	case sdl.K_C:
 		watch_show_chat(app, !w.show_chat)
+	case sdl.K_R:
+		// A frozen or stuttering stream, started again; a video, from where it is.
+		restart_stream(app)
 	case sdl.K_I:
 		watch_toggle_stats(app)
 	case sdl.K_RETURN, sdl.K_KP_ENTER:
@@ -976,7 +984,7 @@ draw_watch :: proc(app: ^App) {
 	text_size := BROWSE_CARD_TEXT_SIZE * app.scale
 	switch w.status {
 	case .Playing:
-		if quality_playing(app.layout.quality, w.qualities).kind == .Audio {
+		if quality_playing(watch_quality(app), w.qualities).kind == .Audio {
 			draw_centered(&a.renderer, .Regular, text_size, video, fmt.tprintf("Audio only · %s", w.channel), BROWSE_DIM_TEXT)
 		} else {
 			draw_image(&a.renderer, app.player.texture, video)

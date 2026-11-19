@@ -104,6 +104,7 @@ streamlink_vod_url :: proc(
 	vod_id: string,
 	kind: Video_Kind,
 	quality: Quality,
+	max_height: int,
 	client_id := "",
 	token := "",
 	allocator := context.allocator,
@@ -121,7 +122,7 @@ streamlink_vod_url :: proc(
 	for name in streams {
 		append(&names, name)
 	}
-	renditions = renditions_from_streams(names[:])
+	renditions = renditions_capped(renditions_from_streams(names[:]), max_height)
 	playing := quality_playing(quality, renditions)
 	name := "best"
 	switch playing.kind {

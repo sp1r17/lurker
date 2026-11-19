@@ -10,10 +10,14 @@ Setting_Switch :: enum {
 	Update_Checks,
 	Low_Latency,
 	Follow_Raids,
+	Chat_Sync,
+	Next_Clip,
 }
 
 // Settings with a few values, shown as the value; a click moves to the next.
 Setting_Choice :: enum {
+	Latency_Buffer,
+	Max_Quality,
 	Start_View,
 }
 
@@ -203,6 +207,10 @@ setting_on :: proc(app: ^App, s: Setting_Switch) -> bool {
 		return l.low_latency
 	case .Follow_Raids:
 		return !l.raids_off
+	case .Chat_Sync:
+		return l.chat_sync
+	case .Next_Clip:
+		return !l.next_clip_off
 	}
 	return false
 }
@@ -210,7 +218,18 @@ setting_on :: proc(app: ^App, s: Setting_Switch) -> bool {
 // The choice's value, as shown.
 @(private = "file")
 setting_value :: proc(app: ^App, c: Setting_Choice) -> string {
+	l := &app.layout
 	switch c {
+	case .Latency_Buffer:
+		if l.latency_buffer_ms == 0 {
+			return "None"
+		}
+		return fmt.tprintf("%d s", l.latency_buffer_ms / 1000)
+	case .Max_Quality:
+		if l.max_height == 0 {
+			return "No limit"
+		}
+		return fmt.tprintf("%dp", l.max_height)
 	case .Start_View:
 		return BROWSE_TAB_LABELS[app.layout.start_view]
 	}
@@ -220,8 +239,22 @@ setting_value :: proc(app: ^App, c: Setting_Choice) -> string {
 // Moves the choice on to its next value, after the last back to the first.
 @(private = "file")
 setting_next :: proc(app: ^App, c: Setting_Choice) {
+	next :: proc(values: []int, current: int) -> int {
+		for v, i in values {
+			if v == current {
+				return values[(i + 1) % len(values)]
+			}
+		}
+		return values[0]
+	}
 	l := &app.layout
 	switch c {
+	case .Latency_Buffer:
+		buffers := LOW_LATENCY_BUFFERS
+		l.latency_buffer_ms = next(buffers[:], l.latency_buffer_ms)
+	case .Max_Quality:
+		heights := MAX_HEIGHTS
+		l.max_height = next(heights[:], l.max_height)
 	case .Start_View:
 		views := START_VIEWS
 		at := 0
@@ -232,6 +265,7 @@ setting_next :: proc(app: ^App, c: Setting_Choice) {
 		}
 		l.start_view = views[(at + 1) % len(views)]
 	}
+	// Nothing is playing while browsing: the next stream picks it up.
 	layout_save(l)
 }
 
@@ -250,6 +284,12 @@ setting_toggle :: proc(app: ^App, s: Setting_Switch) {
 		app.layout.raids_off = !app.layout.raids_off
 		layout_save(&app.layout)
 		watch_listen_for_raids(app)
+	case .Chat_Sync:
+		app.layout.chat_sync = !app.layout.chat_sync
+		layout_save(&app.layout)
+	case .Next_Clip:
+		app.layout.next_clip_off = !app.layout.next_clip_off
+		layout_save(&app.layout)
 	}
 }
 
@@ -343,9 +383,13 @@ draw_settings :: proc(app: ^App, content: Rect) {
 		.Update_Checks = "Check for new versions",
 		.Low_Latency   = "Low latency",
 		.Follow_Raids  = "Follow raids to the raided channel",
+		.Chat_Sync     = "Delay chat to match the stream",
+		.Next_Clip     = "Play the next clip when one ends",
 	}
 	choice_labels := [Setting_Choice]string {
-		.Start_View = "Start page",
+		.Latency_Buffer = "Low latency buffer",
+		.Max_Quality    = "Highest quality",
+		.Start_View     = "Start page",
 	}
 	lists := [Setting_List]struct {
 		label, hint, none: string,
@@ -365,8 +409,8 @@ draw_settings :: proc(app: ^App, content: Rect) {
 	}
 	sections := [?]Section {
 		{title = "General", switches = {.Notifications, .Update_Checks}, choices = {.Start_View}, text_size = true},
-		{title = "Streams", switches = {.Low_Latency, .Follow_Raids}, language = true},
-		{title = "Chat", lists = {.Highlights, .Ignored}},
+		{title = "Streams", switches = {.Low_Latency, .Follow_Raids, .Next_Clip}, choices = {.Latency_Buffer, .Max_Quality}, language = true},
+		{title = "Chat", switches = {.Chat_Sync}, lists = {.Highlights, .Ignored}},
 		{title = "Blocked", lists = {.Blocked_Channels, .Blocked_Categories}},
 		{title = "Account", account = true},
 	}

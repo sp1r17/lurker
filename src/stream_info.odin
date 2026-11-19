@@ -86,6 +86,9 @@ finish_stream_info_job :: proc(app: ^App, p: ^Stream_Info_Job) {
 	w.info_pending = false
 	// Even a failed lookup waits for the next refresh, rather than retrying at once.
 	w.info_at = max(app.assets.now_ms, 1)
+	if p.ok {
+		w.live_now = p.live
+	}
 	if p.ok && p.live {
 		watch_set_info(app, p.stream)
 	}
@@ -177,12 +180,15 @@ draw_stream_info :: proc(app: ^App) {
 	if follow_left := draw_follow_button(app, right, bar.y + pad + name_h / 2); follow_left < right {
 		right = follow_left - 16 * scale
 	}
-	// "From the start" while live, "Go live" while watching from the start.
+	// "From the start" while live, "Go live" while watching from the start, and
+	// "Live now" while watching an older video of a channel that's live.
 	w.live_button = {}
 	live_label := ""
 	switch {
 	case w.playing_vod && w.vod.recording:
 		live_label = "Go live"
+	case w.playing_vod && w.live_now:
+		live_label = "Live now"
 	case !w.playing_vod && w.status == .Playing:
 		live_label = "Looking for the start..." if w.rewinding else "From the start"
 	}

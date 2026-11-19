@@ -45,6 +45,8 @@ Vod_Url_Job :: struct {
 	// Still being recorded: played from a snapshot of its playlist.
 	recording: bool,
 	quality:   Quality,
+	// The highest quality allowed (Layout.max_height).
+	max_height: int,
 	client_id: string,
 	token:     string,
 	// Where to start, in seconds.
@@ -221,6 +223,7 @@ watch_play_vod :: proc(app: ^App, start: f64 = -1) {
 		kind      = w.vod.kind,
 		recording = w.vod.recording,
 		quality = app.layout.quality,
+		max_height = app.layout.max_height,
 		start   = start,
 		session = app.session,
 	}
@@ -234,7 +237,7 @@ watch_play_vod :: proc(app: ^App, start: f64 = -1) {
 @(private = "file")
 run_vod_url_job :: proc(job: ^Job) {
 	p := &job.payload.(Vod_Url_Job)
-	p.url, p.renditions, p.ok = streamlink_vod_url(p.vod_id, p.kind, p.quality, p.client_id, p.token)
+	p.url, p.renditions, p.ok = streamlink_vod_url(p.vod_id, p.kind, p.quality, p.max_height, p.client_id, p.token)
 	if p.ok && p.recording {
 		snapshot: string
 		snapshot, p.ok = snapshot_recording(p.url)
@@ -518,4 +521,30 @@ draw_vod_seek :: proc(app: ^App, right: f32) {
 	if !w.chapter_menu {
 		draw_seek_preview(app, track, duration)
 	}
+}
+
+// When a clip ends: plays the one after it in the channel's clips as the Videos
+// page lists them, unless that's turned off (Layout.next_clip_off). False if
+// there's none to play.
+watch_play_next_clip :: proc(app: ^App) -> bool {
+	w := &app.watch
+	if !w.playing_vod || w.vod.kind != .Clip || app.layout.next_clip_off {
+		return false
+	}
+	v := &app.browse.videos
+	if v.login != w.vod.login {
+		return false
+	}
+	clips := v.lists[.Clip].videos[:]
+	for c, i in clips {
+		if c.id == w.vod.id && i + 1 < len(clips) {
+			next := clone_vod(clips[i + 1])
+			destroy_vod(w.vod)
+			w.vod = next
+			w.vod_state = .Found
+			watch_play_vod(app, 0)
+			return true
+		}
+	}
+	return false
 }
