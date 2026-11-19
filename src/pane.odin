@@ -18,6 +18,9 @@ Chat_Pane :: struct {
 	channel:       string,
 	chat:          ^Chat,
 	view:          Chat_View,
+	// Messages held back to match the stream (chat_delay.odin), oldest first.
+	// Owned.
+	delayed:       [dynamic]Chat_Message,
 	// The channel's own emotes and badges.
 	emotes:        Emotes,
 	// The channel's user ID, once the chat has joined.
@@ -105,6 +108,7 @@ pane_destroy :: proc(app: ^App, p: ^Chat_Pane) {
 		free(p.chat)
 	}
 	chat_view_destroy(&p.view)
+	chat_delay_destroy(p)
 	emotes_destroy(&p.emotes)
 	for &ti in p.boxes {
 		input_destroy(&ti)
@@ -133,6 +137,7 @@ pane_chat_arrived :: proc(app: ^App, p: ^Chat_Pane) {
 		}
 		clear(&arrived)
 	}
+	chat_delay_hold(app, p, &arrived)
 	if len(arrived) > 0 {
 		added := chat_view_add(&p.view, &app.assets, app.scale, pane_text_width(app, p), arrived[:], app.auth.login if app.signed_in else "")
 		if !pane_seen(app, p) {
