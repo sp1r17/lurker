@@ -1,6 +1,6 @@
 # Roadmap to 1.0
 
-Lurker 0.10.0 covers almost everything people do on Twitch as viewers: browsing,
+Lurker 0.11.0 covers almost everything people do on Twitch as viewers: browsing,
 live streams, past broadcasts and clips, chat with third-party emotes, and basic
 moderation. Lurker is for Twitch only. Every feature planned for 1.0 lands
 before it, since 1.0 starts with a feature freeze; after that, 1.0 is about being
@@ -49,22 +49,26 @@ README, and rely on.
   release. No live notifications there: they need an app signed with an Apple
   Developer ID, which Lurker won't have
 
-## 0.11: Distribution
+## 0.11: Distribution (released)
 
-- Host a Flatpak repository for Lurker (on GitHub Pages, say) with a
-  `.flatpakrepo` file, so installing once is enough and `flatpak update` picks
-  up new releases, instead of downloading each release's bundle (done; live
-  with the next release)
+- A Flatpak repository on GitHub Pages: installing once is enough, and
+  `flatpak update` picks up new releases. The release's bundle installs from it
+  too
+- Tested on X11 and Sway: Lurker now quits when the compositor or X server goes
+  away, and window dragging on Wayland survives the mouse reconnecting
+- x86-64 only on Linux and Windows for 1.0
+
+## 0.12: Missing viewer features
+
+Left over from 0.11:
+
 - Sign the Windows installer and executable, through SignPath Foundation's free
   signing for open-source projects
-- Test and fix X11 (the Flatpak allows it as a fallback, but it's untested), and
-  more than KDE on Wayland (GNOME, Sway/Hyprland)
-- Decide on aarch64 (done: x86-64 only on Linux and Windows for 1.0, said in
-  the README)
+- Test window moving, resizing and fullscreen on GNOME (it starts and plays)
 - More testing on Windows, and taking the "new and hasn't had much testing"
   note out of the README once it's earned
 
-## 0.12: Missing viewer features
+New:
 
 - Pinned chat messages, and polls and predictions shown above the chat
 - Channel points balance and claiming the bonus

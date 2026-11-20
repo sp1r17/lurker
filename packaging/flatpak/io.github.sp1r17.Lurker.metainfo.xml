@@ -49,6 +49,11 @@
     <category>Video</category>
   </categories>
   <releases>
+    <release version="0.11.0" date="2026-11-20">
+      <description>
+        <p>Lurker has its own Flatpak repository: install it once from sp1r17.github.io/lurker and flatpak update or your software center keeps it up to date, and the release's Flatpak file now gets updates from it too. Lurker quits when the compositor or X server goes away, instead of running on unseen with the stream still playing. On Wayland, dragging the window by the video or header keeps working after the mouse is disconnected and connected again, or when Lurker started without one.</p>
+      </description>
+    </release>
     <release version="0.10.0" date="2026-11-19">
       <description>
         <p>Watching past broadcasts no longer uses more and more memory: the seek bar's preview images were never freed, so scrubbing through videos could take Lurker past a gigabyte and a half. When something doesn't load from Twitch, Lurker now says why, telling a change to Twitch's API apart from Twitch being unreachable, and the offline channels you follow, your own emotes, videos opened from History and chat replay say so too instead of showing nothing. Settings has a Bug reports section that copies Lurker's log, including the run before for when it crashed, and opens the log folder. Live notifications are no longer offered on macOS, where they'd need an app signed by Apple.</p>
