@@ -81,8 +81,15 @@ software center) keeps Lurker up to date. Each
 [release](https://github.com/sp1r17/lurker/releases/latest) also has a
 `lurker-<version>-x86_64.flatpak` file, which installs the same way
 (`flatpak install --user lurker-<version>-x86_64.flatpak`) and gets updates from
-the repository too. If you installed 0.10.0 or older from a file, install once
-more to start getting updates.
+the repository too.
+
+If you installed 0.10.0 or older from a file, Flatpak won't install over it from
+the repository. Uninstall it first; your settings and sign-in are kept:
+
+```sh
+flatpak uninstall --user io.github.sp1r17.Lurker
+flatpak install --user https://sp1r17.github.io/lurker/lurker.flatpakref
+```
 
 To build and install it yourself instead:
 
