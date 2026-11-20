@@ -2,8 +2,10 @@
 
 Lurker 0.10.0 covers almost everything people do on Twitch as viewers: browsing,
 live streams, past broadcasts and clips, chat with third-party emotes, and basic
-moderation. Lurker is for Twitch only. 1.0 is less about new features than about being something people can
-install from the usual places, set up without reading the README, and rely on.
+moderation. Lurker is for Twitch only. Every feature planned for 1.0 lands
+before it, since 1.0 starts with a feature freeze; after that, 1.0 is about being
+something people can install from the usual places, set up without reading the
+README, and rely on.
 
 ## What 1.0 means
 
@@ -64,13 +66,19 @@ install from the usual places, set up without reading the README, and rely on.
 
 ## 0.12: Missing viewer features
 
-Pick what's worth doing before 1.0; everything else can come after.
-
 - Pinned chat messages, and polls and predictions shown above the chat
 - Channel points balance and claiming the bonus
 - Whispers
-- Picture-in-picture or a mini player while browsing
 - Keyboard shortcut list in the app (`?`)
+
+## 0.13: Bigger features
+
+- Multistream: two to four streams at once, side by side or one large with the
+  others small, choosing which one is heard
+- A mini player while browsing: the stream being watched keeps playing in a
+  small window or a live thumbnail
+- A preview of a stream when hovering its card
+- Themes
 
 ## 1.0: Release candidate
 
@@ -85,8 +93,3 @@ Pick what's worth doing before 1.0; everything else can come after.
 - Try submitting to Flathub
 - Intel Macs and older macOS versions
 - ARM Linux and Windows
-- Themes
-- Multistream: two to four streams at once, side by side or one large with the
-  others small, choosing which one is heard
-- A preview of a stream when hovering its card
-- The stream being watched kept playing as a live thumbnail while browsing
