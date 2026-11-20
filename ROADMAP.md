@@ -68,11 +68,31 @@ Left over from 0.11:
 - More testing on Windows, and taking the "new and hasn't had much testing"
   note out of the README once it's earned
 
-New:
+Channel points and drops. Watching in Lurker earns none today: Twitch counts
+watch time from reports its own player sends, and streamlink sends none.
+
+- Report each minute a live stream plays, as Twitch's player does, so watching
+  earns channel points and drop progress. Paused or buffering minutes don't
+  count, and if Twitch changes how this works, only this stops
+- The channel points balance, and claiming the bonus automatically
+- Claiming finished drops automatically
+
+Chat:
 
 - Pinned chat messages, and polls and predictions shown above the chat
-- Channel points balance and claiming the bonus
+- Shared Chat: show which channel each message came from
+- Chat over the video in fullscreen, with its position, size and background
+  adjustable
+- More chat options: hiding badges, highlighting bits and your own messages,
+  lines between messages, the viewer or chatter count above the chat, and still
+  emotes instead of animated ones
 - Whispers
+
+Playback and notifications:
+
+- Lower the quality when the stream keeps buffering
+- Muted parts of past broadcasts shown on the seek bar
+- Notify when a followed channel changes its title or category
 - Keyboard shortcut list in the app (`?`)
 
 ## 0.13: Bigger features
