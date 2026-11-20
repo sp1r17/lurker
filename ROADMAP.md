@@ -51,7 +51,8 @@ install from the usual places, set up without reading the README, and rely on.
 
 - Host a Flatpak repository for Lurker (on GitHub Pages, say) with a
   `.flatpakrepo` file, so installing once is enough and `flatpak update` picks
-  up new releases, instead of downloading each release's bundle
+  up new releases, instead of downloading each release's bundle (done; live
+  with the next release)
 - Sign the Windows installer and executable
 - Test and fix X11 (the Flatpak allows it as a fallback, but it's untested), and
   more than KDE on Wayland (GNOME, Sway/Hyprland)
