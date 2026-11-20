@@ -52,6 +52,18 @@ Settings_Page :: struct {
 	choices:    [Setting_Choice]Rect,
 	smaller:    Rect,
 	larger:     Rect,
+	copy_log:   Rect,
+	log_folder: Rect,
+	// When the Copy log button goes back from saying "Copied", in assets.now_ms.
+	copied_until: int,
+}
+
+LOG_COPIED_MS :: 2000
+
+// When the "Copied" on the Copy log button is due to go, for the main loop.
+settings_wait :: proc(app: ^App) -> int {
+	left := app.browse.settings.copied_until - app.assets.now_ms
+	return left if left > 0 else -1
 }
 
 settings_page_destroy :: proc(p: ^Settings_Page) {
@@ -363,6 +375,16 @@ settings_click :: proc(app: ^App, x, y: f32) -> bool {
 			return true
 		}
 	}
+	if in_rect(p.copy_log, x, y) {
+		if log_copy() {
+			p.copied_until = app.assets.now_ms + LOG_COPIED_MS
+		}
+		return true
+	}
+	if in_rect(p.log_folder, x, y) {
+		log_open_folder()
+		return true
+	}
 	if in_rect(p.smaller, x, y) {
 		set_text_size(app, app.layout.text_size - TEXT_SIZE_STEP)
 		return true
@@ -460,8 +482,8 @@ draw_settings :: proc(app: ^App, content: Rect) {
 		switches: []Setting_Switch,
 		choices:  []Setting_Choice,
 		lists:    []Setting_List,
-		// The text size, the language and the account rows.
-		text_size, language, account: bool,
+		// The text size, the language, the account and the log rows.
+		text_size, language, account, log: bool,
 	}
 	sections := [?]Section {
 		{title = "General", switches = {.Notifications, .Update_Checks}, choices = {.Start_View}, text_size = true},
@@ -470,13 +492,14 @@ draw_settings :: proc(app: ^App, content: Rect) {
 		{title = "Chat", switches = {.Chat_Sync, .Chat_Timestamps, .Chat_Highlight_Staff, .Chat_Hide_Bots, .Chat_Alternate_Lines}, lists = {.Highlights, .Ignored}},
 		{title = "Blocked", lists = {.Blocked_Channels, .Blocked_Categories}},
 		{title = "Account", account = true},
+		{title = "Bug reports", log = true},
 	}
 
 	// The height first, for scrolling.
 	total_h := pad
 	for s in sections {
 		total_h += lh + row_gap
-		total_h += f32(len(s.switches) + len(s.choices) + int(s.text_size) + int(s.language) + int(s.account)) * (row_h + row_gap)
+		total_h += f32(len(s.switches) + len(s.choices) + int(s.text_size) + int(s.language) + int(s.account) + int(s.log)) * (row_h + row_gap)
 		for list in s.lists {
 			n := len(settings_entries(app, list))
 			total_h += row_h + row_gap + (f32(n) * (entry_h + row_gap) if n > 0 else lh_text + row_gap)
@@ -491,6 +514,7 @@ draw_settings :: proc(app: ^App, content: Rect) {
 	p.switches = {}
 	p.choices = {}
 	p.smaller, p.larger = {}, {}
+	p.copy_log, p.log_folder = {}, {}
 	// The language menu opens below it (browse_click, draw_language_menu).
 	b.language_button = {}
 	app.sign_in.sign_out = {}
@@ -615,6 +639,25 @@ draw_settings :: proc(app: ^App, content: Rect) {
 			draw_centered(r, .Bold, text_size, button, "Sign out", BROWSE_TEXT)
 			if visible(row, rest) {
 				app.sign_in.sign_out = button
+			}
+		}
+		if s.log {
+			row := Rect{x, y, list_w, row_h}
+			y += row_h + row_gap
+			draw_rect(r, row, BROWSE_PLACEHOLDER)
+			draw_text(r, .Regular, name_size, row.x + row_pad, row.y + (row.h - lh_name) / 2, fmt.tprintf("Lurker %s's log", APP_VERSION), BROWSE_TEXT)
+			copy_label := "Copied" if app.assets.now_ms < p.copied_until else "Copy log"
+			folder := remove_button(app, row, "Open log folder")
+			// As wide as it is with "Copy log", so it doesn't jump on "Copied".
+			copy_w := remove_button(app, row, "Copy log").w
+			copy := Rect{folder.x - 8 * scale - copy_w, folder.y, copy_w, folder.h}
+			for button, i in ([2]Rect{copy, folder}) {
+				hovered := in_rect(button, app.mouse.x, app.mouse.y)
+				draw_rect(r, button, SIGN_IN_BUTTON_HOVER if hovered else SIGN_IN_BUTTON)
+				draw_centered(r, .Bold, text_size, button, copy_label if i == 0 else "Open log folder", BROWSE_TEXT)
+			}
+			if visible(row, rest) {
+				p.copy_log, p.log_folder = copy, folder
 			}
 		}
 		y += section_gap
