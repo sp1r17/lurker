@@ -96,6 +96,8 @@ BROWSE_TAB_LABELS := [Browse_View]string {
 // one category's.
 Stream_List :: struct {
 	state:         Browse_State,
+	// Why the last refresh failed.
+	err:           Twitch_Error,
 	// Owned. Most viewers first.
 	streams:       [dynamic]Stream,
 	// Owned; each stream's thumbnail URL at the time it was fetched.
@@ -121,6 +123,9 @@ Browse :: struct {
 	category:             Stream_List,
 	// Owned; each most viewers first.
 	categories_state:     Browse_State,
+	categories_err:       Twitch_Error,
+	// Why the followed ones alone didn't load, when the top ones did.
+	followed_categories_err: Twitch_Error,
 	categories_refreshed: int,
 	followed_categories:  [dynamic]Category,
 	top_categories:       [dynamic]Category,
@@ -137,6 +142,7 @@ Browse :: struct {
 	search_edited:        int,
 	search_query:         string,
 	search_state:         Browse_State,
+	search_err:           Twitch_Error,
 	// What the search is for, set when it starts from the view shown.
 	search_kind:          Search_Kind,
 	// Owned; channels or categories, as search_kind says.
@@ -166,6 +172,9 @@ Browse :: struct {
 	// The History tab's buttons, from the last draw.
 	history_remove:       [dynamic]Rect,
 	history_clear:        Rect,
+	// Why the video or clip opened last didn't play, shown on the History page
+	// until another is opened: "" when it did.
+	link_failure:         string,
 	// The header's sort order, on the stream lists.
 	sort_button:          Rect,
 	unfollow_armed:       int,
@@ -215,6 +224,7 @@ browse_destroy :: proc(b: ^Browse) {
 	delete(b.category_results)
 	input_destroy(&b.search)
 	delete(b.search_query)
+	delete(b.link_failure)
 	for c in b.results {
 		destroy_channel(c)
 	}
@@ -405,6 +415,7 @@ Streams_Job :: struct {
 	// Only streams in this language, if it isn't "".
 	language:  string,
 	ok:        bool,
+	err:       Twitch_Error,
 	// Owned.
 	streams:   [dynamic]Stream,
 }
@@ -431,6 +442,7 @@ run_streams_job :: proc(job: ^Job) {
 	}
 	p.check = .Valid
 	streams, err := fetch(p)
+	defer p.err = err
 	if err == .Unauthorized {
 		p.check = refresh_auth(p.client_id, &p.auth)
 		if p.check != .Refreshed {
@@ -462,6 +474,7 @@ finish_streams_job :: proc(app: ^App, p: ^Streams_Job) {
 	}
 	l.last_refresh = app.assets.now_ms
 	if !p.ok {
+		l.err = p.err
 		l.state = .Failed if len(l.streams) == 0 else .Loaded
 		return
 	}
@@ -493,6 +506,8 @@ Categories_Job :: struct {
 	check:     Auth_Check,
 	after:     string,
 	ok:        bool,
+	err:       Twitch_Error,
+	followed_err: Twitch_Error,
 	// Owned.
 	followed:  [dynamic]Category,
 	top:       [dynamic]Category,
@@ -518,13 +533,14 @@ destroy_categories_job :: proc(p: ^Categories_Job) {
 run_categories_job :: proc(job: ^Job) {
 	p := &job.payload.(Categories_Job)
 	p.check = .Valid
-	followed, top, next, err := get_categories(p.client_id, p.auth.access_token, p.after)
+	followed, top, next, err, followed_err := get_categories(p.client_id, p.auth.access_token, p.after)
+	defer p.err, p.followed_err = err, followed_err
 	if err == .Unauthorized {
 		p.check = refresh_auth(p.client_id, &p.auth)
 		if p.check != .Refreshed {
 			return
 		}
-		followed, top, next, err = get_categories(p.client_id, p.auth.access_token, p.after)
+		followed, top, next, err, followed_err = get_categories(p.client_id, p.auth.access_token, p.after)
 	}
 	if err != .None {
 		return
@@ -548,6 +564,7 @@ finish_categories_job :: proc(app: ^App, p: ^Categories_Job) {
 	}
 	b.categories_refreshed = app.assets.now_ms
 	if !p.ok {
+		b.categories_err = p.err
 		has_any := len(b.followed_categories) + len(b.top_categories) > 0
 		b.categories_state = .Loaded if has_any else .Failed
 		return
@@ -567,6 +584,7 @@ finish_categories_job :: proc(app: ^App, p: ^Categories_Job) {
 	categories_drop_blocked(app, &b.followed_categories)
 	categories_drop_blocked(app, &b.top_categories)
 	b.categories_state = .Loaded
+	b.followed_categories_err = p.followed_err
 }
 
 // Fetches the next page of top categories, once scrolling nears the end.
@@ -650,6 +668,7 @@ Search_Job :: struct {
 	kind:       Search_Kind,
 	query:      string,
 	ok:         bool,
+	err:        Twitch_Error,
 	// Owned; as `kind` says.
 	channels:   [dynamic]Channel,
 	categories: [dynamic]Category,
@@ -707,6 +726,7 @@ run_search_job :: proc(job: ^Job) {
 		err = search(p)
 	}
 	p.ok = err == .None
+	p.err = err
 }
 
 // On the main thread: shows the results, unless the search has moved on since.
@@ -716,6 +736,7 @@ finish_search_job :: proc(app: ^App, p: ^Search_Job) {
 		return
 	}
 	if !p.ok {
+		b.search_err = p.err
 		b.search_state = .Failed
 		return
 	}
@@ -1188,11 +1209,11 @@ draw_browse :: proc(app: ^App, screen: Rect) {
 			&b.following,
 			content,
 			"None of the channels you follow are live.",
-			"Couldn't load the channels you follow. Press R to try again.",
+			failed_message(b.following.err, "the channels you follow"),
 			&b.offline,
 		)
 	case .Top:
-		draw_stream_list(app, &b.top, content, "Nobody is live right now.", "Couldn't load the top streams. Press R to try again.")
+		draw_stream_list(app, &b.top, content, "Nobody is live right now.", failed_message(b.top.err, "the top streams"))
 	case .Category:
 		draw_category(app, content)
 	case .Categories, .Followed_Categories:
@@ -1320,7 +1341,8 @@ draw_stream_list :: proc(app: ^App, l: ^Stream_List, content: Rect, empty_messag
 		message = empty_message
 	}
 	// The offline channels go below the live ones, or the message.
-	has_offline := offline != nil && len(offline.channels) > 0
+	// Their failure too, unless the live ones failed as well: once is enough.
+	has_offline := offline != nil && (len(offline.channels) > 0 || (offline.state == .Failed && l.state != .Failed))
 	if message != "" && !has_offline {
 		draw_centered(r, .Regular, text_size, content, message, BROWSE_DIM_TEXT)
 		return
@@ -1530,7 +1552,7 @@ draw_category :: proc(app: ^App, content: Rect) {
 		&b.category,
 		rest,
 		fmt.tprintf("Nobody is streaming %s right now.", b.category_name),
-		"Couldn't load this category's streams. Press R to try again.",
+		failed_message(b.category.err, "this category's streams"),
 	)
 }
 
@@ -1569,7 +1591,9 @@ draw_categories :: proc(app: ^App, content: Rect) {
 		message := "Loading..."
 		switch {
 		case b.categories_state == .Failed:
-			message = "Couldn't load categories. Press R to try again."
+			message = failed_message(b.categories_err, "categories")
+		case b.categories_state == .Loaded && followed && b.followed_categories_err != .None:
+			message = failed_message(b.followed_categories_err, "the categories you follow")
 		case b.categories_state == .Loaded && followed:
 			message = "You don't follow any categories."
 		case b.categories_state == .Loaded:
@@ -1725,7 +1749,7 @@ draw_search :: proc(app: ^App, content: Rect) {
 	status := ""
 	switch {
 	case b.search_state == .Failed:
-		status = "Search failed. Press R to try again."
+		status = failed_message(b.search_err, "the results")
 	case b.search_state == .Loaded && found == 0 && b.search_query == strings.trim_space(input_text(&b.search)):
 		status = "No channels found." if b.search_kind == .Channels else "No categories found."
 	case found == 0:

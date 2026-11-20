@@ -14,6 +14,7 @@ OFFLINE_AVATAR :: 44
 // tab, most recently live first.
 Offline_Follows :: struct {
 	state:     Browse_State,
+	err:       Twitch_Error,
 	// Owned.
 	channels:  [dynamic]Followed_Channel,
 	refreshed: int,
@@ -43,6 +44,7 @@ Offline_Follows_Job :: struct {
 	auth:      Auth,
 	check:     Auth_Check,
 	ok:        bool,
+	err:       Twitch_Error,
 	// Owned.
 	channels:  [dynamic]Followed_Channel,
 }
@@ -83,6 +85,7 @@ run_offline_follows_job :: proc(job: ^Job) {
 	}
 	p.check = .Valid
 	channels, err := fetch(p)
+	defer p.err = err
 	if err == .Unauthorized {
 		p.check = refresh_auth(p.client_id, &p.auth)
 		if p.check != .Refreshed {
@@ -118,6 +121,7 @@ finish_offline_follows_job :: proc(app: ^App, p: ^Offline_Follows_Job) {
 	o := &app.browse.offline
 	o.refreshed = app.assets.now_ms
 	if !p.ok || !app.signed_in {
+		o.err = p.err
 		o.state = .Failed if len(o.channels) == 0 else .Loaded
 		return
 	}
@@ -171,10 +175,13 @@ format_last_live :: proc(started_at: string, now: time.Time) -> string {
 // The height draw_offline_section takes for `width`, to scroll by.
 offline_section_height :: proc(app: ^App, width: f32) -> f32 {
 	o := &app.browse.offline
+	heading_h, tile_h, columns := offline_metrics(app, width)
+	if o.state == .Failed {
+		return heading_h + line_height(&app.assets.renderer, .Regular, BROWSE_CARD_TEXT_SIZE * app.scale)
+	}
 	if len(o.channels) == 0 {
 		return 0
 	}
-	heading_h, tile_h, columns := offline_metrics(app, width)
 	rows := (len(o.channels) + columns - 1) / columns
 	gap := BROWSE_GAP * app.scale
 	return heading_h + f32(rows) * (tile_h + gap)
@@ -196,6 +203,16 @@ offline_metrics :: proc(app: ^App, width: f32) -> (heading_h, tile_h: f32, colum
 // added to Browse.cards after the live streams' cards.
 draw_offline_section :: proc(app: ^App, x, y, width: f32, content: Rect) {
 	o := &app.browse.offline
+	if o.state == .Failed {
+		// Said here, not left out: the live channels above did load.
+		r := &app.assets.renderer
+		heading_h, _, _ := offline_metrics(app, width)
+		draw_text(r, .Bold, BROWSE_TAB_SIZE * app.scale, x, y, "Offline", BROWSE_DIM_TEXT)
+		message := failed_message(o.err, "the offline channels you follow")
+		size := BROWSE_CARD_TEXT_SIZE * app.scale
+		draw_text(r, .Regular, size, x, y + heading_h, fit_text(r, .Regular, size, message, width), BROWSE_DIM_TEXT)
+		return
+	}
 	if len(o.channels) == 0 {
 		return
 	}
