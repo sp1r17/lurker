@@ -41,7 +41,7 @@ install from the usual places, set up without reading the README, and rely on.
 Left over from 0.8 and 0.9:
 
 - Handle GraphQL failures per feature: hide or disable what didn't load, and
-  say why, instead of showing empty lists
+  say why, instead of showing empty lists (done)
 - A "Copy log" or "Open log folder" action, for bug reports (done)
 - Issue templates asking for the version, platform and log (done)
 
