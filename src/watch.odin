@@ -240,7 +240,7 @@ watch_stop :: proc(app: ^App) {
 	latency_reset(&w.latency)
 	destroy_vod(w.vod)
 	replay_destroy(&w.replay)
-	vod_extras_clear(w)
+	vod_extras_clear(app)
 	delete(w.chapter_items)
 	w^ = {}
 	app.session += 1
