@@ -19,6 +19,15 @@ Storyboard :: struct {
 	sheets:        [dynamic]string,
 }
 
+// Frees the sheets' images too, which nothing else would: they aren't in the
+// disk cache, so images_evict leaves them.
+storyboard_release :: proc(images: ^Images, s: ^Storyboard) {
+	for url in s.sheets {
+		image_release(images, url)
+	}
+	storyboard_destroy(s)
+}
+
 storyboard_destroy :: proc(s: ^Storyboard) {
 	for url in s.sheets {
 		delete(url)
@@ -124,7 +133,7 @@ vod_extras_request :: proc(app: ^App) {
 		return
 	}
 	chapters_destroy(&w.chapters)
-	storyboard_destroy(&w.storyboard)
+	storyboard_release(&app.assets.images, &w.storyboard)
 	delete(w.extras_id)
 	w.extras_id = strings.clone(w.vod.id)
 	jobs_add(
@@ -162,14 +171,15 @@ finish_vod_extras_job :: proc(app: ^App, p: ^Vod_Extras_Job) {
 	}
 	chapters_destroy(&w.chapters)
 	w.chapters, p.chapters = p.chapters, nil
-	storyboard_destroy(&w.storyboard)
+	storyboard_release(&app.assets.images, &w.storyboard)
 	w.storyboard, p.storyboard = p.storyboard, {}
 }
 
 // Forgets the chapters and storyboard (leaving the watch).
-vod_extras_clear :: proc(w: ^Watch) {
+vod_extras_clear :: proc(app: ^App) {
+	w := &app.watch
 	chapters_destroy(&w.chapters)
-	storyboard_destroy(&w.storyboard)
+	storyboard_release(&app.assets.images, &w.storyboard)
 	delete(w.extras_id)
 	w.extras_id = ""
 }
