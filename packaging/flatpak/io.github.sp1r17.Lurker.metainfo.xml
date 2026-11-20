@@ -49,6 +49,11 @@
     <category>Video</category>
   </categories>
   <releases>
+    <release version="0.11.1" date="2026-11-20">
+      <description>
+        <p>Signed in, watching a live stream in Lurker now earns channel points, as it does on Twitch's site: Lurker tells Twitch each minute the stream plays, leaving out time paused or buffering. It can be switched off in Settings.</p>
+      </description>
+    </release>
     <release version="0.11.0" date="2026-11-20">
       <description>
         <p>Lurker has its own Flatpak repository: install it once from sp1r17.github.io/lurker and flatpak update or your software center keeps it up to date, and the release's Flatpak file now gets updates from it too. Lurker quits when the compositor or X server goes away, instead of running on unseen with the stream still playing. On Wayland, dragging the window by the video or header keeps working after the mouse is disconnected and connected again, or when Lurker started without one.</p>
