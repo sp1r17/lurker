@@ -61,6 +61,11 @@ pre-roll or mid-roll ads.
 - Tells you when a new version is out (turn it off in Settings); on Windows, it
   updates itself
 
+## Install
+
+Lurker runs on Linux and Windows on x86-64, and on Macs with Apple silicon.
+There are no ARM builds for Linux or Windows.
+
 ## Flatpak
 
 The Flatpak bundles everything Lurker needs, including mpv and streamlink.
