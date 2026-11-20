@@ -1,0 +1,44 @@
+name: Bug report
+description: Something doesn't work, crashes or freezes
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead. The channel or link helps, if it only happens on one.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Lurker version
+      description: Shown in Settings → Bug reports.
+      placeholder: "0.9.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How you installed it
+      options:
+        - Flatpak
+        - Windows installer
+        - macOS disk image
+        - Built from source
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      description: The operating system and version, and on Linux the desktop and whether it's Wayland or X11.
+      placeholder: "Fedora 45, KDE Plasma on Wayland"
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: Settings → Bug reports → Copy log, then paste it here. It includes the run before, for when Lurker crashed.
+      render: text
