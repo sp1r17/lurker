@@ -49,6 +49,11 @@
     <category>Video</category>
   </categories>
   <releases>
+    <release version="0.10.0" date="2026-11-19">
+      <description>
+        <p>Watching past broadcasts no longer uses more and more memory: the seek bar's preview images were never freed, so scrubbing through videos could take Lurker past a gigabyte and a half. When something doesn't load from Twitch, Lurker now says why, telling a change to Twitch's API apart from Twitch being unreachable, and the offline channels you follow, your own emotes, videos opened from History and chat replay say so too instead of showing nothing. Settings has a Bug reports section that copies Lurker's log, including the run before for when it crashed, and opens the log folder. Live notifications are no longer offered on macOS, where they'd need an app signed by Apple.</p>
+      </description>
+    </release>
     <release version="0.9.0" date="2026-11-19">
       <description>
         <p>The quality menu lists each stream's own qualities, such as 936p, and a highest quality can be set. Press I for stream stats: resolution, bitrate, network speed, buffer, dropped frames, ping to Twitch and latency to the broadcaster. Chat can be delayed to match the stream, and low latency can keep a small buffer. Live cards show uptime; stream lists can be sorted; a History tab lists what you've watched; the start page can be chosen; and clips can be limited to the last day, week or month. Right-click a card to follow its channel or category, mute its notifications or copy its link, or choose to be notified only for some channels. Chat can show timestamps, highlight the streamer and moderators, hide bots and alternate backgrounds. R restarts a stuck stream, a Live now button appears on a live channel's older videos, and the next clip plays when one ends. Still-live broadcasts show the stream's current frame, and the screenshots are new.</p>
