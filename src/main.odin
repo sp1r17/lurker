@@ -215,6 +215,7 @@ run :: proc(channels: []string, config: Config, video: Maybe(Twitch_Link) = nil)
 
 	app: App
 	app.window = window
+	display_watch(window)
 	// Without a border, the window moves by dragging the video and resizes from its
 	// edges.
 	app.wayland_drag_ok = wayland_drag_init(&app.wayland_drag, window)
