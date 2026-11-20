@@ -1,10 +1,10 @@
 package app
 
-// Not done yet on macOS: notifications are dropped. Notification Center needs a
-// signed app bundle (UNUserNotificationCenter).
+// No notifications on macOS (see NOTIFICATIONS_SUPPORTED): Notification Center
+// needs an app signed with an Apple Developer ID.
 
 Notifications :: struct {
-	// Never pushed, until clicks can arrive.
+	// Never pushed.
 	click_event: u32,
 }
 
