@@ -115,6 +115,10 @@ cache_prune :: proc(limit: i64 = CACHE_LIMIT_BYTES) {
 			}
 			continue
 		}
+		// lurker.log and lurker.old.log (log_file.odin) aren't downloads.
+		if filepath.ext(f.name) == ".log" {
+			continue
+		}
 		append(&kept, f)
 		total += f.size
 	}
