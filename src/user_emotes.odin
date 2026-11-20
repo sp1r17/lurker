@@ -49,6 +49,7 @@ User_Emotes_Job :: struct {
 	auth:      Auth,
 	check:     Auth_Check,
 	ok:        bool,
+	err:       Twitch_Error,
 	// Owned, moved into Assets.user_emotes when the job finishes.
 	emotes:    User_Emotes,
 }
@@ -77,6 +78,7 @@ run_user_emotes_job :: proc(job: ^Job) {
 	p := &job.payload.(User_Emotes_Job)
 	p.check = .Valid
 	emotes, err := get_user_emotes(p.client_id, p.auth.access_token)
+	defer p.err = err
 	if err == .Unauthorized {
 		p.check = refresh_auth(p.client_id, &p.auth)
 		if p.check != .Refreshed {
@@ -111,9 +113,14 @@ run_user_emotes_job :: proc(job: ^Job) {
 finish_user_emotes_job :: proc(app: ^App, p: ^User_Emotes_Job) {
 	apply_auth_check(app, p.check, p.auth)
 	// Signed out meanwhile: they're someone else's now.
-	if !p.ok || !app.signed_in {
+	if !app.signed_in {
 		return
 	}
+	if !p.ok {
+		app.assets.user_emotes_err = p.err
+		return
+	}
+	app.assets.user_emotes_err = .None
 	user_emotes_destroy(&app.assets.user_emotes)
 	app.assets.user_emotes, p.emotes = p.emotes, {}
 	app.assets.user_emotes_generation += 1

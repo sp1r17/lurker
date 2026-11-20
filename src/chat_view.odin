@@ -56,6 +56,8 @@ Assets :: struct {
 	user_emotes:   User_Emotes,
 	// Bumped when they load.
 	user_emotes_generation: int,
+	// Why they last failed to load, or .None.
+	user_emotes_err: Twitch_Error,
 	emoji:         Emoji_Table,
 	// Milliseconds since startup, for animations.
 	now_ms:        int,

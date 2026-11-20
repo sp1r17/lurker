@@ -25,6 +25,7 @@ VIDEO_KIND_NAMES := [Video_Kind]string {
 // One kind of a channel's videos, a page at a time.
 Video_List :: struct {
 	state:   Browse_State,
+	err:     Twitch_Error,
 	// Owned.
 	videos:  [dynamic]Vod,
 	// The cursor for the next page ("" at the end), and whether it's being fetched.
@@ -136,6 +137,7 @@ Videos_Job :: struct {
 	period:    Clip_Period,
 	check:     Auth_Check,
 	ok:        bool,
+	err:       Twitch_Error,
 	// Owned.
 	videos:    [dynamic]Vod,
 	next:      string,
@@ -180,6 +182,7 @@ run_videos_job :: proc(job: ^Job) {
 	p := &job.payload.(Videos_Job)
 	p.check = .Valid
 	videos, next, err := get_channel_videos(p.client_id, p.auth.access_token, p.login, p.kind, p.cursor, p.period)
+	defer p.err = err
 	if err == .Unauthorized && p.auth.refresh_token != "" {
 		p.check = refresh_auth(p.client_id, &p.auth)
 		if p.check != .Refreshed {
@@ -212,6 +215,7 @@ finish_videos_job :: proc(app: ^App, p: ^Videos_Job) {
 	if !p.ok {
 		if p.cursor == "" {
 			l.state = .Failed
+			l.err = p.err
 		}
 		// A later page that failed isn't tried again until the list is reopened.
 		delete(l.next)
@@ -332,7 +336,7 @@ draw_videos :: proc(app: ^App, content: Rect) {
 	case l.state == .Empty || (l.state == .Loading && len(l.videos) == 0):
 		message = "Loading..."
 	case l.state == .Failed:
-		message = "Couldn't load the videos. Press R to try again."
+		message = failed_message(l.err, "the videos")
 	case len(l.videos) == 0:
 		message = fmt.tprintf("%s has no %s.", v.name, strings.to_lower(VIDEO_KIND_LABELS[v.kind], context.temp_allocator))
 	}

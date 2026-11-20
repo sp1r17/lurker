@@ -1,5 +1,6 @@
 package app
 
+import "core:fmt"
 import "core:log"
 import "core:strings"
 
@@ -96,6 +97,7 @@ Link_Job :: struct {
 	id:        string,
 	start:     int,
 	ok:        bool,
+	err:       Twitch_Error,
 	// Owned, if found.
 	vod:       Vod,
 }
@@ -134,6 +136,7 @@ run_link_job :: proc(job: ^Job) {
 	case .Clip:
 		vod, found, err = get_clip(p.client_id, p.auth.access_token, p.id)
 	}
+	p.err = err
 	if err == .None && found {
 		p.ok = true
 		p.vod = clone_vod(vod)
@@ -141,10 +144,20 @@ run_link_job :: proc(job: ^Job) {
 }
 
 finish_link_job :: proc(app: ^App, p: ^Link_Job) {
+	what := "clip" if p.kind == .Clip else "video"
 	if !p.ok {
 		log.errorf("can't find %v %s", p.kind, p.id)
+		// Not static: the text and the reason are put together here.
+		delete(app.browse.link_failure)
+		if p.err == .None {
+			app.browse.link_failure = fmt.aprintf("That %s no longer exists.", what)
+		} else {
+			app.browse.link_failure = fmt.aprintf("Couldn't open that %s: %s.", what, failure_reason(p.err))
+		}
 		return
 	}
+	delete(app.browse.link_failure)
+	app.browse.link_failure = ""
 	// A link's time is where to start; without one, where the user left off.
 	watch_start_vod(app, p.vod, f64(p.start) if p.start > 0 else -1)
 }

@@ -65,6 +65,44 @@ Twitch_Error :: enum {
 	Unauthorized,
 	Bad_Status,
 	Bad_Json,
+	// GraphQL said the query asks for something it doesn't have: Twitch changed
+	// its API (see graphql_error).
+	Api_Changed,
+}
+
+// Why something didn't load, to finish "Couldn't load X: ...".
+failure_reason :: proc(err: Twitch_Error) -> string {
+	switch err {
+	case .None, .Request_Failed:
+		return "Twitch couldn't be reached"
+	case .Unauthorized:
+		return "Twitch didn't accept the sign-in"
+	case .Bad_Status:
+		return "Twitch had a problem"
+	case .Bad_Json, .Api_Changed:
+		return "Twitch changed something Lurker uses"
+	}
+	return ""
+}
+
+// "Couldn't load `what`: why. Press R to try again.", with the temp allocator.
+// Trying again won't help once Twitch has changed its API: a newer Lurker might.
+failed_message :: proc(err: Twitch_Error, what: string) -> string {
+	next := "A newer Lurker may fix it." if err == .Api_Changed || err == .Bad_Json else "Press R to try again."
+	return fmt.tprintf("Couldn't load %s: %s. %s", what, failure_reason(err), next)
+}
+
+// The error for a GraphQL error message: a query Twitch's schema no longer
+// accepts, or a problem on Twitch's side (a timeout, say) that may pass.
+graphql_error :: proc(message: string) -> Twitch_Error {
+	log.warnf("GraphQL error: %s", message)
+	changed := []string{"Cannot query field", "Unknown argument", "Unknown type", "is not defined", "of required type", "Expected type", "PersistedQueryNotFound"}
+	for c in changed {
+		if strings.contains(message, c) {
+			return .Api_Changed
+		}
+	}
+	return .Bad_Status
 }
 
 parse_token_response :: proc(body: []byte) -> (token: string, err: Twitch_Error) {
@@ -271,13 +309,13 @@ category_fields :: proc() -> string {
 
 // A page of the most watched categories, after `after` ("" for the first page,
 // which also brings the user's followed categories).
-categories_query :: proc(after: string) -> string {
+categories_query :: proc(after: string, followed := true) -> string {
 	fields := category_fields()
 	games := strings.concatenate(
 		{" games(first: 100, after: $after) { edges { cursor node { ", fields, " } } pageInfo { hasNextPage } }"},
 		context.temp_allocator,
 	)
-	if after != "" {
+	if after != "" || !followed {
 		return strings.concatenate({"query($after: Cursor) {", games, " }"}, context.temp_allocator)
 	}
 	return strings.concatenate(
@@ -288,7 +326,9 @@ categories_query :: proc(after: string) -> string {
 
 // Categories, most viewers first: the user's followed ones (first page only) and a
 // page of the most watched, with the cursor for the next page ("" if it's the
-// last). Allocated with the temp allocator.
+// last). If Twitch changed how followed categories are asked for, the top ones
+// still come, with `followed_err` saying why the followed ones didn't. Allocated
+// with the temp allocator.
 get_categories :: proc(
 	client_id, token: string,
 	after := "",
@@ -296,13 +336,28 @@ get_categories :: proc(
 	followed, top: []Category,
 	next: string,
 	err: Twitch_Error,
+	followed_err: Twitch_Error,
 ) {
 	variables := make(map[string]string, context.temp_allocator)
 	if after != "" {
 		variables["after"] = after
 	}
-	body := gql_post(client_id, token, categories_query(after), variables) or_return
-	return parse_categories_response(body)
+	body: []byte
+	body, err = gql_post(client_id, token, categories_query(after), variables)
+	if err != .None {
+		return
+	}
+	followed, top, next, err = parse_categories_response(body)
+	if after != "" || (err != .Api_Changed && err != .Bad_Json) {
+		return
+	}
+	followed_err = err
+	body, err = gql_post(client_id, token, categories_query(after, followed = false), variables)
+	if err != .None {
+		return
+	}
+	followed, top, next, err = parse_categories_response(body)
+	return
 }
 
 parse_categories_response :: proc(body: []byte) -> (followed, top: []Category, next: string, err: Twitch_Error) {
@@ -332,8 +387,7 @@ parse_categories_response :: proc(body: []byte) -> (followed, top: []Category, n
 		return nil, nil, "", .Bad_Json
 	}
 	if len(r.errors) > 0 {
-		log.warnf("GraphQL error: %s", r.errors[0].message)
-		return nil, nil, "", .Bad_Status
+		return nil, nil, "", graphql_error(r.errors[0].message)
 	}
 	f := make([dynamic]Category, context.temp_allocator)
 	for n in r.data.currentUser.followedGames.nodes {
@@ -383,8 +437,7 @@ parse_category_search_response :: proc(body: []byte) -> (categories: []Category,
 		return nil, .Bad_Json
 	}
 	if len(r.errors) > 0 {
-		log.warnf("GraphQL error: %s", r.errors[0].message)
-		return nil, .Bad_Status
+		return nil, graphql_error(r.errors[0].message)
 	}
 	found := make([dynamic]Category, context.temp_allocator)
 	for e in r.data.searchCategories.edges {
@@ -499,8 +552,7 @@ parse_follow_response :: proc(body: []byte) -> (user_id: string, following: bool
 		return "", false, .Bad_Json
 	}
 	if len(r.errors) > 0 {
-		log.warnf("GraphQL error: %s", r.errors[0].message)
-		return "", false, .Bad_Status
+		return "", false, graphql_error(r.errors[0].message)
 	}
 	user, found := r.data.user.?
 	if !found {
@@ -552,8 +604,7 @@ parse_follows_response :: proc(body: []byte) -> (followed: map[string]bool, err:
 		return nil, .Bad_Json
 	}
 	if len(r.errors) > 0 {
-		log.warnf("GraphQL error: %s", r.errors[0].message)
-		return nil, .Bad_Status
+		return nil, graphql_error(r.errors[0].message)
 	}
 	followed = make(map[string]bool, context.temp_allocator)
 	for maybe_user in r.data.users {
@@ -591,8 +642,7 @@ parse_set_follow_response :: proc(body: []byte) -> Twitch_Error {
 		return .Bad_Json
 	}
 	if len(r.errors) > 0 {
-		log.warnf("GraphQL error: %s", r.errors[0].message)
-		return .Bad_Status
+		return graphql_error(r.errors[0].message)
 	}
 	if e, failed := r.data.followUser.error.?; failed {
 		log.warnf("following failed: %s", e.code)
@@ -757,8 +807,7 @@ parse_user_emotes_response :: proc(body: []byte) -> (emotes: []Twitch_User_Emote
 		return nil, .Bad_Json
 	}
 	if len(r.errors) > 0 {
-		log.warnf("GraphQL error: %s", r.errors[0].message)
-		return nil, .Bad_Status
+		return nil, graphql_error(r.errors[0].message)
 	}
 	user, found := r.data.currentUser.?
 	if !found {
@@ -913,8 +962,7 @@ parse_channel_status_response :: proc(body: []byte) -> (channels: []Followed_Cha
 		return nil, .Bad_Json
 	}
 	if len(r.errors) > 0 {
-		log.warnf("GraphQL error: %s", r.errors[0].message)
-		return nil, .Bad_Status
+		return nil, graphql_error(r.errors[0].message)
 	}
 	list := make([dynamic]Followed_Channel, context.temp_allocator)
 	for maybe_user in r.data.users {
@@ -1144,8 +1192,7 @@ Graphql_Errors :: []struct {
 @(private = "file")
 check_errors :: proc(errors: Graphql_Errors) -> Twitch_Error {
 	if len(errors) > 0 {
-		log.warnf("GraphQL error: %s", errors[0].message)
-		return .Bad_Status
+		return graphql_error(errors[0].message)
 	}
 	return .None
 }
@@ -1454,8 +1501,7 @@ parse_vod_comments_response :: proc(body: []byte) -> (messages: [dynamic]Replay_
 		return nil, "", .Bad_Json
 	}
 	if len(r.errors) > 0 {
-		log.warnf("GraphQL error: %s", r.errors[0].message)
-		return nil, "", .Bad_Status
+		return nil, "", graphql_error(r.errors[0].message)
 	}
 	video, has_video := r.data.video.?
 	if !has_video {

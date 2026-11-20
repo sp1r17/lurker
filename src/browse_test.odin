@@ -86,6 +86,20 @@ categories_read_followed_and_top :: proc(t: ^testing.T) {
 	testing.expect_value(t, gql_err, Twitch_Error.Bad_Status)
 }
 
+// A query the schema no longer has is Twitch changing its API; anything else
+// may pass.
+@(test)
+graphql_errors_tell_changes_apart :: proc(t: ^testing.T) {
+	changed := `{"errors":[{"message":"Cannot query field \"followedGames\" on type \"User\".","locations":[{"line":1,"column":20}]}]}`
+	_, _, _, err := parse_categories_response(transmute([]byte)changed)
+	testing.expect_value(t, err, Twitch_Error.Api_Changed)
+	testing.expect_value(t, graphql_error(`Unknown argument "sort" on field "videos" of type "User".`), Twitch_Error.Api_Changed)
+	testing.expect_value(t, graphql_error("service timeout"), Twitch_Error.Bad_Status)
+	for e in Twitch_Error {
+		testing.expect(t, failure_reason(e) != "")
+	}
+}
+
 @(test)
 category_search_keeps_twitch_order :: proc(t: ^testing.T) {
 	defer free_all(context.temp_allocator)

@@ -1,5 +1,6 @@
 package app
 
+import "core:fmt"
 import "core:strings"
 
 // How far ahead of the video the next batch of chat is fetched, in seconds.
@@ -57,6 +58,7 @@ Vod_Chat_Job :: struct {
 	generation: int,
 	check:      Auth_Check,
 	ok:         bool,
+	err:        Twitch_Error,
 	// Owned.
 	messages:   [dynamic]Replay_Message,
 	next:       string,
@@ -149,6 +151,7 @@ run_vod_chat_job :: proc(job: ^Job) {
 	p := &job.payload.(Vod_Chat_Job)
 	p.check = .Valid
 	messages, next, err := get_vod_comments(p.client_id, p.auth.access_token, p.vod_id, p.offset, p.cursor)
+	defer p.err = err
 	if err == .Unauthorized && p.auth.refresh_token != "" {
 		p.check = refresh_auth(p.client_id, &p.auth)
 		if p.check != .Refreshed {
@@ -177,7 +180,14 @@ finish_vod_chat_job :: proc(app: ^App, p: ^Vod_Chat_Job) {
 	if !p.ok {
 		if !r.failed {
 			r.failed = true
-			replay_notice(app, "Chat replay isn't available for this clip." if w.vod.kind == .Clip else "Chat replay isn't available for this broadcast.")
+			what := "clip" if w.vod.kind == .Clip else "broadcast"
+			switch p.err {
+			case .Request_Failed, .Bad_Json, .Api_Changed:
+				replay_notice(app, fmt.tprintf("Couldn't load this %s's chat replay: %s.", what, failure_reason(p.err)))
+			case .None, .Unauthorized, .Bad_Status:
+				// Twitch refuses some (a deleted or private chat, say).
+				replay_notice(app, fmt.tprintf("Chat replay isn't available for this %s.", what))
+			}
 		}
 		return
 	}
