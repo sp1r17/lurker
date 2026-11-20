@@ -53,12 +53,14 @@ README, and rely on.
 
 - Host a Flatpak repository for Lurker (on GitHub Pages, say) with a
   `.flatpakrepo` file, so installing once is enough and `flatpak update` picks
-  up new releases, instead of downloading each release's bundle
-- Sign the Windows installer and executable
+  up new releases, instead of downloading each release's bundle (done; live
+  with the next release)
+- Sign the Windows installer and executable, through SignPath Foundation's free
+  signing for open-source projects
 - Test and fix X11 (the Flatpak allows it as a fallback, but it's untested), and
   more than KDE on Wayland (GNOME, Sway/Hyprland)
-- Decide on aarch64: drop `odin-x86-only.patch` and build for ARM, or state it
-  isn't supported
+- Decide on aarch64 (done: x86-64 only on Linux and Windows for 1.0, said in
+  the README)
 - More testing on Windows, and taking the "new and hasn't had much testing"
   note out of the README once it's earned
 
@@ -90,3 +92,4 @@ README, and rely on.
 
 - Try submitting to Flathub
 - Intel Macs and older macOS versions
+- ARM Linux and Windows
