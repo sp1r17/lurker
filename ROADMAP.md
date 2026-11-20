@@ -1,6 +1,6 @@
 # Roadmap to 1.0
 
-Lurker 0.9.0 covers almost everything people do on Twitch as viewers: browsing,
+Lurker 0.10.0 covers almost everything people do on Twitch as viewers: browsing,
 live streams, past broadcasts and clips, chat with third-party emotes, and basic
 moderation. Lurker is for Twitch only. 1.0 is less about new features than about being something people can
 install from the usual places, set up without reading the README, and rely on.
@@ -36,20 +36,16 @@ install from the usual places, set up without reading the README, and rely on.
   alternating backgrounds
 - New screenshots
 
-## 0.10: Robustness and macOS
+## 0.10: Robustness and macOS (released)
 
-Left over from 0.8 and 0.9:
-
-- Handle GraphQL failures per feature: hide or disable what didn't load, and
-  say why, instead of showing empty lists (done)
-- A "Copy log" or "Open log folder" action, for bug reports (done)
-- Issue templates asking for the version, platform and log (done)
-
-New:
-
-- macOS on Apple silicon: build and test it in CI, and publish the disk image
-  with each release (both done). No live notifications there: they need an
-  app signed with an Apple Developer ID, which Lurker won't have
+- GraphQL failures handled per feature: what didn't load says why, telling an
+  API change apart from Twitch being unreachable
+- Copy log and Open log folder in Settings, and issue templates asking for the
+  version, platform and log
+- A memory leak fixed: the seek bar's preview images
+- macOS on Apple silicon, built and tested in CI with a disk image in each
+  release. No live notifications there: they need an app signed with an Apple
+  Developer ID, which Lurker won't have
 
 ## 0.11: Distribution
 
