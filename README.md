@@ -213,6 +213,15 @@ Some features use Twitch's internal GraphQL API, which Twitch can change without
 notice: following, followed categories, offline channels, past broadcasts and
 chat replay, and your own Twitch emotes in the picker.
 
+## Reporting bugs
+
+Please [open an issue](https://github.com/sp1r17/lurker/issues/new/choose) with
+Lurker's log: Settings → Bug reports → Copy log copies it, along with the log of
+the run before, for when Lurker crashed. The logs are `lurker.log` and
+`lurker.old.log` in `~/.cache/lurker` (in the Flatpak,
+`~/.var/app/io.github.sp1r17.Lurker/cache/lurker`), `%LOCALAPPDATA%\lurker` on
+Windows and `~/Library/Caches/lurker` on macOS.
+
 ## License
 
 Copyright © 2026 spirit. Lurker is free software, released under the
