@@ -19,8 +19,8 @@ Storyboard :: struct {
 	sheets:        [dynamic]string,
 }
 
-// Frees the sheets' images too, which nothing else would: they aren't in the
-// disk cache, so images_evict leaves them.
+// Frees the sheets' images too: images_evict only frees idle ones, and a
+// growing live broadcast's last sheet isn't in the disk cache, so never.
 storyboard_release :: proc(images: ^Images, s: ^Storyboard) {
 	for url in s.sheets {
 		image_release(images, url)
@@ -357,7 +357,10 @@ draw_seek_preview :: proc(app: ^App, track: Rect, duration: f64) {
 	draw_rect(r, box, USER_CARD_BACKGROUND)
 	if frame_h > 0 {
 		frame := Rect{box.x + (box.w - frame_w) / 2, box.y + pad, frame_w, frame_h}
-		image := image_get(&a.images, &a.jobs, w.storyboard.sheets[sheet], 1, cache = false)
+		// Kept on disk, so idle sheets are evicted like emotes once scrubbing
+		// stops; except the last sheet of a broadcast still live, which grows.
+		growing := w.vod.recording && sheet == len(w.storyboard.sheets) - 1
+		image := image_get(&a.images, &a.jobs, w.storyboard.sheets[sheet], 1, cache = !growing)
 		if image.state == .Ready {
 			texture, _ := image_frame(image, a.now_ms)
 			draw_image_part(r, texture, frame, uv)
