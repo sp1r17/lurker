@@ -21,6 +21,8 @@ MAX_LOGINS_PER_REQUEST :: 100
 
 // A live stream, as Helix describes it.
 Stream :: struct {
+	// The broadcast's ID (Helix's stream id).
+	id:            string,
 	user_id:       string,
 	user_login:    string,
 	user_name:     string,
@@ -36,6 +38,7 @@ Stream :: struct {
 
 clone_stream :: proc(s: Stream) -> Stream {
 	return {
+		id = strings.clone(s.id),
 		user_id = strings.clone(s.user_id),
 		user_login = strings.clone(s.user_login),
 		user_name = strings.clone(s.user_name),
@@ -49,6 +52,7 @@ clone_stream :: proc(s: Stream) -> Stream {
 }
 
 destroy_stream :: proc(s: Stream) {
+	delete(s.id)
 	delete(s.user_id)
 	delete(s.user_login)
 	delete(s.user_name)

@@ -48,6 +48,7 @@ Job_Payload :: union {
 	Category_Follow_Job,
 	Ping_Job,
 	Latency_Job,
+	Points_Job,
 }
 
 Jobs :: struct {
@@ -200,6 +201,8 @@ destroy_job :: proc(job: ^Job) {
 	case Ping_Job:
 	case Latency_Job:
 		destroy_latency_job(&p)
+	case Points_Job:
+		destroy_points_job(&p)
 	}
 	free(job)
 }
