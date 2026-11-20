@@ -53,6 +53,9 @@ pre-roll or mid-roll ads.
   categories are grayed out or hidden
 - Follows the channel you're watching when it raids another (switch it off in
   Settings or the quality menu)
+- Signed in, watching a live stream earns channel points, as on Twitch's site:
+  Lurker tells Twitch each minute you watch (not while paused or buffering).
+  Switch it off in Settings
 - On Linux and Windows, a desktop notification when a channel you follow goes
   live, while Lurker is open, with its picture; click it to watch. Mute
   channels, or only notify for the ones you choose, in Settings or by

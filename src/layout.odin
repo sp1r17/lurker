@@ -39,6 +39,8 @@ Layout :: struct {
 	max_height:  int,
 	// Not playing the next clip when one ends (vod.odin).
 	next_clip_off: bool,
+	// Not reporting watch time to Twitch for channel points (points.odin).
+	points_off:  bool,
 	// How stream lists are ordered, and the tab the browse screen opens on.
 	stream_sort: Stream_Sort,
 	start_view:  Browse_View,
@@ -121,6 +123,7 @@ parse_layout :: proc(data: []byte, l: ^Layout) -> bool {
 		latency_buffer_ms: int,
 		max_height:  int,
 		next_clip_off: bool,
+		points_off:  bool,
 		stream_sort: Stream_Sort,
 		start_view:  Browse_View,
 		hide_chat:   bool,
@@ -156,6 +159,7 @@ parse_layout :: proc(data: []byte, l: ^Layout) -> bool {
 	l.stats = saved.stats
 	l.chat_sync = saved.chat_sync
 	l.next_clip_off = saved.next_clip_off
+	l.points_off = saved.points_off
 	// Only the values offered, so a hand-edited file can't set another.
 	for ms in LOW_LATENCY_BUFFERS {
 		if saved.latency_buffer_ms == ms {
@@ -247,6 +251,7 @@ layout_save :: proc(l: ^Layout) {
 		latency_buffer_ms: int,
 		max_height:  int,
 		next_clip_off: bool,
+		points_off:  bool,
 		stream_sort: Stream_Sort,
 		start_view:  Browse_View,
 		hide_chat:   bool,
@@ -265,7 +270,7 @@ layout_save :: proc(l: ^Layout) {
 		skipped_version:   string,
 		language:          string,
 		language_hide:     bool,
-	}{LAYOUT_VERSION, l.splits, l.volume, l.muted, quality_name(l.quality), l.low_latency, l.raids_off, l.stats, l.chat_sync, l.latency_buffer_ms, l.max_height, l.next_clip_off, l.stream_sort, l.start_view, l.hide_chat, l.text_size, l.notifications_off, l.notify_only, l.notify_muted[:], l.notify_chosen[:], l.chat.highlights[:], l.chat.ignored[:], l.chat.timestamps, l.chat.highlight_staff, l.chat.hide_bots, l.chat.alternate_lines, l.update_checks_off, l.skipped_version, l.language, l.language_hide}
+	}{LAYOUT_VERSION, l.splits, l.volume, l.muted, quality_name(l.quality), l.low_latency, l.raids_off, l.stats, l.chat_sync, l.latency_buffer_ms, l.max_height, l.next_clip_off, l.points_off, l.stream_sort, l.start_view, l.hide_chat, l.text_size, l.notifications_off, l.notify_only, l.notify_muted[:], l.notify_chosen[:], l.chat.highlights[:], l.chat.ignored[:], l.chat.timestamps, l.chat.highlight_staff, l.chat.hide_bots, l.chat.alternate_lines, l.update_checks_off, l.skipped_version, l.language, l.language_hide}
 	data, err := json.marshal(saved, {pretty = true, use_enum_names = true}, context.temp_allocator)
 	if err != nil {
 		return
