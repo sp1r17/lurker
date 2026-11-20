@@ -155,11 +155,17 @@ registry_listener := Registry_Listener {
 seat_listener := Seat_Listener {
 	capabilities = proc "c" (data: rawptr, seat: ^wl_proxy, caps: u32) {
 		d := (^Wayland_Drag)(data)
-		if d.pointer != nil || caps & WL_SEAT_CAPABILITY_POINTER == 0 {
-			return
+		has_pointer := caps & WL_SEAT_CAPABILITY_POINTER != 0
+		switch {
+		case has_pointer && d.pointer == nil:
+			d.pointer = wl_proxy_marshal_flags(seat, WL_SEAT_GET_POINTER, &wl_pointer_interface, wl_proxy_get_version(seat), 0, rawptr(nil))
+			wl_proxy_add_listener(d.pointer, &pointer_listener, d)
+		case !has_pointer && d.pointer != nil:
+			// The last mouse went (unplugged, or a Bluetooth one asleep); the old
+			// pointer gets no more events, so the next mouse needs a new one.
+			wl_proxy_destroy(d.pointer)
+			d.pointer, d.press = nil, 0
 		}
-		d.pointer = wl_proxy_marshal_flags(seat, WL_SEAT_GET_POINTER, &wl_pointer_interface, wl_proxy_get_version(seat), 0, rawptr(nil))
-		wl_proxy_add_listener(d.pointer, &pointer_listener, d)
 	},
 	name = proc "c" (data: rawptr, seat: ^wl_proxy, name: cstring) {},
 }
@@ -177,8 +183,8 @@ pointer_listener := Pointer_Listener {
 	axis = proc "c" (data: rawptr, pointer: ^wl_proxy, time: u32, axis: u32, value: i32) {},
 }
 
-// Sets up dragging for `window`. False if it isn't a Wayland window or the seat
-// has no pointer; the caller falls back to SDL's hit test then.
+// Sets up dragging for `window`. False if it isn't a Wayland window or there's no
+// seat; the caller falls back to SDL's hit test then.
 wayland_drag_init :: proc(d: ^Wayland_Drag, window: ^sdl.Window) -> bool {
 	props := sdl.GetWindowProperties(window)
 	d.display = (^wl_proxy)(sdl.GetPointerProperty(props, sdl.PROP_WINDOW_WAYLAND_DISPLAY_POINTER, nil))
@@ -195,11 +201,12 @@ wayland_drag_init :: proc(d: ^Wayland_Drag, window: ^sdl.Window) -> bool {
 	d.registry = wl_proxy_marshal_flags(wrapper, WL_DISPLAY_GET_REGISTRY, &wl_registry_interface, wl_proxy_get_version(wrapper), 0, rawptr(nil))
 	wl_proxy_wrapper_destroy(wrapper)
 	wl_proxy_add_listener(d.registry, &registry_listener, d)
-	// One round trip for the seat, one for its capabilities.
+	// One round trip for the seat, one for its capabilities. A seat without a
+	// pointer yet gets one when a mouse is connected.
 	wl_display_roundtrip_queue(d.display, d.queue)
 	wl_display_roundtrip_queue(d.display, d.queue)
-	if d.pointer == nil {
-		log.warn("no Wayland pointer; dragging falls back to SDL")
+	if d.seat == nil {
+		log.warn("no Wayland seat; dragging falls back to SDL")
 		wayland_drag_destroy(d)
 		return false
 	}
