@@ -251,6 +251,11 @@ draw_history :: proc(app: ^App, content: Rect) {
 	y := content.y + pad - scroll^
 	draw_text(r, .Bold, BROWSE_TAB_SIZE * scale, x, y + (heading_h - lh_name) / 2 - pad / 2, fmt.tprintf("Watched (%d)", len(h.entries)), BROWSE_DIM_TEXT)
 	b.history_clear = button(app, x + width, y + heading_h / 2 - pad / 2, "Clear history")
+	if b.link_failure != "" {
+		left := x + text_width(r, .Bold, BROWSE_TAB_SIZE * scale, fmt.tprintf("Watched (%d)", len(h.entries))) + 2 * pad
+		tw := b.history_clear.x - pad - left
+		draw_text(r, .Regular, text_size, left, y + (heading_h - lh_text) / 2 - pad / 2, fit_text(r, .Regular, text_size, b.link_failure, tw), MENTION_BADGE)
+	}
 	y += heading_h
 	now := time.to_unix_seconds(time.now())
 	for e, i in h.entries {

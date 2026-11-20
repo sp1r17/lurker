@@ -1,5 +1,6 @@
 package app
 
+import "core:fmt"
 import "core:slice"
 import "core:strings"
 
@@ -408,8 +409,13 @@ draw_emote_panel :: proc(app: ^App, p: ^Chat_Pane) {
 	}
 	clip_end(r)
 
+	foot := list.y + list_h + pad / 2
 	if hover_name != "" {
 		text := strings.concatenate({hover_name, "  ·  ", hover_label}, context.temp_allocator)
-		draw_text(r, .Regular, small, panel.x + pad, list.y + list_h + pad / 2, fit_text(r, .Regular, small, text, panel.w - 2 * pad), CHAT_TEXT)
+		draw_text(r, .Regular, small, panel.x + pad, foot, fit_text(r, .Regular, small, text, panel.w - 2 * pad), CHAT_TEXT)
+	} else if a.user_emotes_err != .None {
+		// Only the third-party ones are shown, then.
+		text := fmt.tprintf("Your Twitch emotes didn't load: %s", failure_reason(a.user_emotes_err))
+		draw_text(r, .Regular, small, panel.x + pad, foot, fit_text(r, .Regular, small, text, panel.w - 2 * pad), CHAT_SYSTEM_TEXT)
 	}
 }
