@@ -48,8 +48,8 @@ Left over from 0.8 and 0.9:
 New:
 
 - macOS on Apple silicon: build and test it in CI, and publish the disk image
-  with each release (both done); get notifications working, which needs a
-  signed app bundle
+  with each release (both done). No live notifications there: they need an
+  app signed with an Apple Developer ID, which Lurker won't have
 
 ## 0.11: Distribution
 

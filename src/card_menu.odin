@@ -322,7 +322,7 @@ draw_card_menu :: proc(app: ^App, screen: Rect) {
 		verb := "Unfollow" if m.follows.category == .Following else "Follow"
 		add(m, &labels, .Follow_Category, fmt.tprintf("%s %s", verb, m.category))
 	}
-	if m.login != "" {
+	if m.login != "" && NOTIFICATIONS_SUPPORTED {
 		l := &app.layout
 		label: string
 		switch {
@@ -336,6 +336,8 @@ draw_card_menu :: proc(app: ^App, screen: Rect) {
 			label = fmt.tprintf("Unmute %s's live notifications", m.channel_name)
 		}
 		add(m, &labels, .Notify_Channel, label)
+	}
+	if m.login != "" {
 		add(m, &labels, .Copy_Link, "Copy link")
 	}
 	follow_items := m.count

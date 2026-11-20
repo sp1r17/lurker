@@ -462,14 +462,23 @@ draw_settings :: proc(app: ^App, content: Rect) {
 		lists:    []Setting_List,
 		// The text size, the language and the account rows.
 		text_size, language, account: bool,
+		// Shown only where there are notifications (NOTIFICATIONS_SUPPORTED).
+		notifications: bool,
 	}
-	sections := [?]Section {
-		{title = "General", switches = {.Notifications, .Update_Checks}, choices = {.Start_View}, text_size = true},
+	general_switches := []Setting_Switch{.Notifications, .Update_Checks} if NOTIFICATIONS_SUPPORTED else []Setting_Switch{.Update_Checks}
+	all_sections := [?]Section {
+		{title = "General", switches = general_switches, choices = {.Start_View}, text_size = true},
 		{title = "Streams", switches = {.Low_Latency, .Follow_Raids, .Next_Clip}, choices = {.Latency_Buffer, .Max_Quality}, language = true},
-		{title = "Live notifications", choices = {.Notify_For}, lists = {.Notify_Channels}},
+		{title = "Live notifications", choices = {.Notify_For}, lists = {.Notify_Channels}, notifications = true},
 		{title = "Chat", switches = {.Chat_Sync, .Chat_Timestamps, .Chat_Highlight_Staff, .Chat_Hide_Bots, .Chat_Alternate_Lines}, lists = {.Highlights, .Ignored}},
 		{title = "Blocked", lists = {.Blocked_Channels, .Blocked_Categories}},
 		{title = "Account", account = true},
+	}
+	sections := make([dynamic]Section, context.temp_allocator)
+	for s in all_sections {
+		if NOTIFICATIONS_SUPPORTED || !s.notifications {
+			append(&sections, s)
+		}
 	}
 
 	// The height first, for scrolling.

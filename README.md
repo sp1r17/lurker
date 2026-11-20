@@ -53,9 +53,10 @@ pre-roll or mid-roll ads.
   categories are grayed out or hidden
 - Follows the channel you're watching when it raids another (switch it off in
   Settings or the quality menu)
-- A desktop notification when a channel you follow goes live, while Lurker is
-  open, with its picture; click it to watch. Mute channels, or only notify for
-  the ones you choose, in Settings or by right-clicking
+- On Linux and Windows, a desktop notification when a channel you follow goes
+  live, while Lurker is open, with its picture; click it to watch. Mute
+  channels, or only notify for the ones you choose, in Settings or by
+  right-clicking
 - Remembers volume, quality, splits, chat visibility, text size and language
 - Tells you when a new version is out (turn it off in Settings); on Windows, it
   updates itself
@@ -108,7 +109,7 @@ drag Lurker to Applications. It includes mpv and streamlink.
 It needs a Mac with Apple silicon (M1 and later) and macOS 26 or later; there's
 no Intel version. The app isn't signed by Apple, so macOS won't open it the first
 time: after trying, click Open Anyway in System Settings → Privacy & Security.
-Live notifications don't work on macOS yet.
+There are no live notifications on macOS: they'd need the app signed by Apple.
 
 The macOS version is new and hasn't had much testing yet. If something doesn't
 work, please [open an issue](https://github.com/sp1r17/lurker/issues).

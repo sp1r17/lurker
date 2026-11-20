@@ -88,9 +88,18 @@ live_notifier_seen :: proc(n: ^Live_Notifier, user_id: string, now: int) {
 
 // Keeps the followed channels' list fresh while it's not shown, for
 // notifications. Returns ms until it's next due, for the main loop's wait.
+// No live notifications on macOS: Notification Center needs an app signed with
+// an Apple Developer ID. Their settings and menu items are hidden there.
+NOTIFICATIONS_SUPPORTED :: ODIN_OS != .Darwin
+
+// Whether to watch for channels going live and announce them.
+notifications_on :: proc(app: ^App) -> bool {
+	return NOTIFICATIONS_SUPPORTED && !app.layout.notifications_off
+}
+
 live_poll_tick :: proc(app: ^App) -> (wait_ms: int) {
 	l := &app.browse.following
-	if !app.signed_in || app.layout.notifications_off || l.state == .Loading {
+	if !app.signed_in || !notifications_on(app) || l.state == .Loading {
 		return -1
 	}
 	due := l.last_refresh + LIVE_POLL_MS
@@ -105,7 +114,7 @@ live_poll_tick :: proc(app: ^App) -> (wait_ms: int) {
 // On the main thread, with each new list of the followed channels that are live:
 // announces the ones that have just gone live, except one being watched.
 live_notify :: proc(app: ^App, streams: []Stream) {
-	if app.layout.notifications_off {
+	if !notifications_on(app) {
 		return
 	}
 	went_live := live_notifier_update(&app.live, streams, app.assets.now_ms)
@@ -207,7 +216,7 @@ run_notify_job :: proc(job: ^Job) {
 // notifications were turned off (or the user signed out) meanwhile.
 finish_notify_job :: proc(app: ^App, p: ^Notify_Job) {
 	apply_auth_check(app, p.check, p.auth)
-	if !app.signed_in || app.layout.notifications_off {
+	if !app.signed_in || !notifications_on(app) {
 		return
 	}
 	for n in p.notifications {
