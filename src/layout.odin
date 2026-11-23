@@ -38,7 +38,7 @@ Layout :: struct {
 	latency_buffer_ms: int,
 	// The highest quality to play, by height (MAX_HEIGHTS); 0 for no limit.
 	max_height:  int,
-	// What mpv does to the picture: debanding, sharper scaling, upscaling.
+	// What mpv does to the picture: debanding and sharper scaling.
 	video_enhancement: Video_Enhancement,
 	// Not playing the next clip when one ends (vod.odin).
 	next_clip_off: bool,

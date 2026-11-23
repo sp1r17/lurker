@@ -67,15 +67,3 @@ stats_rows_describe_playback :: proc(t: ^testing.T) {
 	testing.expect_value(t, get(stats_rows({}, {}, nil, "", 0, now), "Live for"), "(none)")
 	testing.expect_value(t, get(stats_rows({hwdec = "no", height = 720}, {}, nil, "", 0, now), "Video"), "720p · software decoding")
 }
-
-@(test)
-upscaling_text_tells_running_from_idle :: proc(t: ^testing.T) {
-	defer free_all(context.temp_allocator)
-	testing.expect_value(t, upscaling_text(false, {1280, 720}, {2560, 1440}), "Off")
-	// 720p in 1440p: twice its size, so the shader runs.
-	testing.expect_value(t, upscaling_text(true, {1280, 720}, {2560, 1440}), "On · 720p to 1440p (2.0×)")
-	// 1080p beside the chat on a 1440p screen: fitted to the narrower width.
-	testing.expect_value(t, upscaling_text(true, {1920, 1080}, {2220, 1400}), "Idle · drawn at 1.16×, needs over 1.3×")
-	// Nothing known yet.
-	testing.expect_value(t, upscaling_text(true, {0, 0}, {2560, 1440}), "On")
-}
