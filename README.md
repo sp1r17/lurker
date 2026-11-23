@@ -261,5 +261,8 @@ unchanged, can keep both.
 
 Text is set in [Noto Sans](https://fonts.google.com/noto/specimen/Noto+Sans),
 licensed under the SIL Open Font License (`assets/fonts/noto_sans/OFL.txt`).
+The Upscale video setting uses igv's
+[FSRCNNX](https://github.com/igv/FSRCNN-TensorFlow) shader, licensed under the
+GNU LGPL, version 3 or later (`assets/shaders/FSRCNNX_x2_8-0-4-1.glsl`).
 
 Lurker is not affiliated with or endorsed by Twitch.

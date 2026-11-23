@@ -74,3 +74,20 @@ layout_volume_defaults_when_missing :: proc(t: ^testing.T) {
 	testing.expect_value(t, loud.volume, MAX_VOLUME)
 	testing.expect_value(t, loud.text_size, MAX_TEXT_SIZE)
 }
+
+@(test)
+layout_reads_video_enhancement :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	l: Layout
+	defer layout_destroy(&l)
+	testing.expect(t, parse_layout(transmute([]byte)string(`{"splits":{},"video_enhancement":"Upscale"}`), &l))
+	testing.expect_value(t, l.video_enhancement, Video_Enhancement.Upscale)
+	// A name from a newer version: the file is still read, with the default.
+	newer: Layout
+	defer layout_destroy(&newer)
+	testing.expect(t, parse_layout(transmute([]byte)string(`{"splits":{},"video_enhancement":"Sharpest","volume":40}`), &newer))
+	testing.expect_value(t, newer.video_enhancement, Video_Enhancement.Off)
+	testing.expect_value(t, newer.volume, 40)
+	testing.expect_value(t, video_options(.Off), "")
+	testing.expect(t, video_options(.Balanced) != "")
+}
