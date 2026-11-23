@@ -99,7 +99,7 @@ Playback and notifications:
 - Audio normalization, evening out loud and quiet streamers and sudden alerts
   (done)
 - Choosing the audio output device, and an audio delay for Bluetooth
-  headphones
+  headphones (done)
 - Screenshots of the video, without Lurker's UI, at the stream's resolution
 - Stepping frame by frame through past broadcasts and clips (`,` and `.`)
 - Notify when a followed channel changes its title or category

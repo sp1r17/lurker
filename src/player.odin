@@ -1,5 +1,6 @@
 package app
 
+import "core:encoding/json"
 import "core:fmt"
 import "core:log"
 import "core:strings"
@@ -31,6 +32,55 @@ Player :: struct {
 	paused:        bool,
 	// For the stream stats (stream_stats.odin).
 	stats:         Player_Stats,
+	// The audio outputs there are to choose from (audio-device-list), as mpv
+	// last reported them. Owned.
+	audio_devices: [dynamic]Audio_Device,
+}
+
+// An audio output: mpv's name for it, and the name people know it by. Owned.
+Audio_Device :: struct {
+	name:        string,
+	description: string,
+}
+
+// The outputs in mpv's audio-device-list (JSON) that Lurker's audio output can
+// use, replacing those in `list`: on Linux only PulseAudio's (ao=pulse), as
+// mpv lists each device under PipeWire too. "auto", the system's own choice,
+// isn't one: it's the setting's default.
+parse_audio_devices :: proc(text: string, list: ^[dynamic]Audio_Device) {
+	audio_devices_clear(list)
+	devices: []struct {
+		name, description: string,
+	}
+	if json.unmarshal_string(text, &devices, allocator = context.temp_allocator) != nil {
+		return
+	}
+	for d in devices {
+		if d.name == "auto" || (ODIN_OS == .Linux && !strings.has_prefix(d.name, "pulse/")) {
+			continue
+		}
+		append(list, Audio_Device{strings.clone(d.name), strings.clone(d.description if d.description != "" else d.name)})
+	}
+}
+
+audio_devices_clear :: proc(list: ^[dynamic]Audio_Device) {
+	for d in list {
+		delete(d.name)
+		delete(d.description)
+	}
+	clear(list)
+}
+
+// Plays sound through `name` (an Audio_Device's), or the system's choice for
+// "". A device that isn't there now leaves it to the system too.
+player_set_audio_device :: proc(p: ^Player, name: string) {
+	player_command(p, {"set", "audio-device", strings.clone_to_cstring(name if name != "" else "auto", context.temp_allocator)})
+}
+
+// Shows the video `ms` later than the sound would have it, for headphones that
+// play it late (Bluetooth): mpv's audio-delay, negative for the video's.
+player_set_audio_delay :: proc(p: ^Player, ms: int) {
+	player_command(p, {"set", "audio-delay", fmt.ctprintf("%.3f", -f64(ms) / 1000)})
 }
 
 // How playback is going, as mpv last reported it, for the stream stats. Reset
@@ -136,6 +186,7 @@ player_init :: proc(p: ^Player) -> Player_Error {
 	mpv.observe_property(p.handle, 0, "time-pos", .Double)
 	mpv.observe_property(p.handle, 0, "duration", .Double)
 	mpv.observe_property(p.handle, 0, "pause", .Flag)
+	mpv.observe_property(p.handle, 0, "audio-device-list", .String)
 	for prop in STATS_PROPERTIES {
 		mpv.observe_property(p.handle, 0, prop.name, prop.format)
 	}
@@ -158,6 +209,8 @@ player_destroy :: proc(p: ^Player) {
 	mpv.render_context_free(p.render)
 	mpv.terminate_destroy(p.handle)
 	stats_reset(&p.stats)
+	audio_devices_clear(&p.audio_devices)
+	delete(p.audio_devices)
 	gl.DeleteFramebuffers(1, &p.fbo)
 	gl.DeleteTextures(1, &p.texture)
 }
@@ -315,6 +368,8 @@ property_changed :: proc(p: ^Player, prop: ^mpv.Event_Property) {
 		p.position = number
 	case "duration":
 		p.duration = number
+	case "audio-device-list":
+		parse_audio_devices(text, &p.audio_devices)
 	case "pause":
 		p.paused = prop.format == .Flag && (^i32)(prop.data)^ != 0
 	}

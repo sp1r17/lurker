@@ -26,6 +26,8 @@ Setting_Choice :: enum {
 	Latency_Buffer,
 	Max_Quality,
 	Video_Enhancement,
+	Audio_Device,
+	Audio_Delay,
 	Notify_For,
 	Start_View,
 }
@@ -283,6 +285,18 @@ setting_value :: proc(app: ^App, c: Setting_Choice) -> string {
 	case .Video_Enhancement:
 		labels := VIDEO_ENHANCEMENT_LABELS
 		return labels[l.video_enhancement]
+	case .Audio_Device:
+		if l.audio_device == "" {
+			return "System default"
+		}
+		for d in app.player.audio_devices {
+			if d.name == l.audio_device {
+				return d.description
+			}
+		}
+		return "Not connected: system default for now"
+	case .Audio_Delay:
+		return "None" if l.audio_delay_ms == 0 else fmt.tprintf("%d ms", l.audio_delay_ms)
 	case .Notify_For:
 		return "Only channels you choose" if app.layout.notify_only else "All followed channels"
 	case .Start_View:
@@ -312,6 +326,27 @@ setting_next :: proc(app: ^App, c: Setting_Choice) {
 		l.max_height = next(heights[:], l.max_height)
 	case .Video_Enhancement:
 		l.video_enhancement = Video_Enhancement((int(l.video_enhancement) + 1) % len(Video_Enhancement))
+	case .Audio_Device:
+		// The system's choice, then each output; one no longer there goes back to
+		// the system's.
+		names := make([dynamic]string, context.temp_allocator)
+		append(&names, "")
+		for d in app.player.audio_devices {
+			append(&names, d.name)
+		}
+		next_name := ""
+		for name, i in names {
+			if name == l.audio_device {
+				next_name = names[(i + 1) % len(names)]
+			}
+		}
+		delete(l.audio_device)
+		l.audio_device = strings.clone(next_name)
+		player_set_audio_device(&app.player, l.audio_device)
+	case .Audio_Delay:
+		delays := AUDIO_DELAYS
+		l.audio_delay_ms = next(delays[:], l.audio_delay_ms)
+		player_set_audio_delay(&app.player, l.audio_delay_ms)
 	case .Notify_For:
 		l.notify_only = !l.notify_only
 	case .Start_View:
@@ -484,6 +519,8 @@ draw_settings :: proc(app: ^App, content: Rect) {
 		.Latency_Buffer = "Low latency buffer",
 		.Max_Quality    = "Highest quality",
 		.Video_Enhancement = "Video enhancement",
+		.Audio_Device   = "Sound output",
+		.Audio_Delay    = "Show the video later, for Bluetooth headphones",
 		.Notify_For     = "Notify for",
 		.Start_View     = "Start page",
 	}
@@ -512,7 +549,7 @@ draw_settings :: proc(app: ^App, content: Rect) {
 	general_switches := []Setting_Switch{.Notifications, .Update_Checks} if NOTIFICATIONS_SUPPORTED else []Setting_Switch{.Update_Checks}
 	all_sections := [?]Section {
 		{title = "General", switches = general_switches, choices = {.Start_View}, text_size = true},
-		{title = "Streams", switches = {.Low_Latency, .Normalize_Audio, .Follow_Raids, .Next_Clip, .Watch_Points}, choices = {.Latency_Buffer, .Max_Quality, .Video_Enhancement}, language = true},
+		{title = "Streams", switches = {.Low_Latency, .Normalize_Audio, .Follow_Raids, .Next_Clip, .Watch_Points}, choices = {.Latency_Buffer, .Max_Quality, .Video_Enhancement, .Audio_Device, .Audio_Delay}, language = true},
 		{title = "Live notifications", choices = {.Notify_For}, lists = {.Notify_Channels}, notifications = true},
 		{title = "Chat", switches = {.Chat_Sync, .Chat_Timestamps, .Chat_Highlight_Staff, .Chat_Hide_Bots, .Chat_Alternate_Lines}, lists = {.Highlights, .Ignored}},
 		{title = "Blocked", lists = {.Blocked_Channels, .Blocked_Categories}},
@@ -576,7 +613,9 @@ draw_settings :: proc(app: ^App, content: Rect) {
 			y += row_h + row_gap
 			draw_rect(r, row, BROWSE_PLACEHOLDER)
 			draw_text(r, .Regular, name_size, row.x + row_pad, row.y + (row.h - lh_name) / 2, choice_labels[c], BROWSE_TEXT)
-			value := setting_value(app, c)
+			// A long value (a sound output's name) is cut short before the label.
+			label_w := text_width(r, .Regular, name_size, choice_labels[c])
+			value := fit_text(r, .Regular, text_size, setting_value(app, c), max(row.w - label_w - 2 * row_pad - 24 * scale, 0))
 			vw := text_width(r, .Regular, text_size, value)
 			button := Rect{row.x + row.w - row_pad - vw, row.y + (row.h - lh_text) / 2, vw, lh_text}
 			hovered := in_rect(button, app.mouse.x, app.mouse.y)
