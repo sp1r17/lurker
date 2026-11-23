@@ -18,6 +18,7 @@ Setting_Switch :: enum {
 	Chat_Sync,
 	Next_Clip,
 	Watch_Points,
+	Normalize_Audio,
 }
 
 // Settings with a few values, shown as the value; a click moves to the next.
@@ -258,6 +259,8 @@ setting_on :: proc(app: ^App, s: Setting_Switch) -> bool {
 		return !l.next_clip_off
 	case .Watch_Points:
 		return !l.points_off
+	case .Normalize_Audio:
+		return l.normalize_audio
 	}
 	return false
 }
@@ -357,6 +360,10 @@ setting_toggle :: proc(app: ^App, s: Setting_Switch) {
 		layout_save(&app.layout)
 	case .Next_Clip:
 		app.layout.next_clip_off = !app.layout.next_clip_off
+		layout_save(&app.layout)
+	case .Normalize_Audio:
+		app.layout.normalize_audio = !app.layout.normalize_audio
+		player_set_normalize(&app.player, app.layout.normalize_audio)
 		layout_save(&app.layout)
 	case .Watch_Points:
 		app.layout.points_off = !app.layout.points_off
@@ -471,6 +478,7 @@ draw_settings :: proc(app: ^App, content: Rect) {
 		.Chat_Sync     = "Delay chat to match the stream",
 		.Next_Clip     = "Play the next clip when one ends",
 		.Watch_Points  = "Earn channel points from watch time",
+		.Normalize_Audio = "Even out loudness between streams and alerts",
 	}
 	choice_labels := [Setting_Choice]string {
 		.Latency_Buffer = "Low latency buffer",
@@ -504,7 +512,7 @@ draw_settings :: proc(app: ^App, content: Rect) {
 	general_switches := []Setting_Switch{.Notifications, .Update_Checks} if NOTIFICATIONS_SUPPORTED else []Setting_Switch{.Update_Checks}
 	all_sections := [?]Section {
 		{title = "General", switches = general_switches, choices = {.Start_View}, text_size = true},
-		{title = "Streams", switches = {.Low_Latency, .Follow_Raids, .Next_Clip, .Watch_Points}, choices = {.Latency_Buffer, .Max_Quality, .Video_Enhancement}, language = true},
+		{title = "Streams", switches = {.Low_Latency, .Normalize_Audio, .Follow_Raids, .Next_Clip, .Watch_Points}, choices = {.Latency_Buffer, .Max_Quality, .Video_Enhancement}, language = true},
 		{title = "Live notifications", choices = {.Notify_For}, lists = {.Notify_Channels}, notifications = true},
 		{title = "Chat", switches = {.Chat_Sync, .Chat_Timestamps, .Chat_Highlight_Staff, .Chat_Hide_Bots, .Chat_Alternate_Lines}, lists = {.Highlights, .Ignored}},
 		{title = "Blocked", lists = {.Blocked_Channels, .Blocked_Categories}},

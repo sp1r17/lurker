@@ -265,6 +265,7 @@ run :: proc(channels: []string, config: Config, video: Maybe(Twitch_Link) = nil)
 	app.layout = layout_load()
 	app.assets.rules = &app.layout.chat
 	apply_volume(&app)
+	player_set_normalize(&app.player, app.layout.normalize_audio)
 	a.renderer.text_scale = f32(app.layout.text_size) / 100
 	defer layout_destroy(&app.layout)
 	app.watched = watched_load()

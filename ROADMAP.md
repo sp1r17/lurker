@@ -98,6 +98,7 @@ Playback and notifications:
   neural upscaler (FSRCNNX or RAVU) when the window is bigger than the video
   (done, with FSRCNNX)
 - Audio normalization, evening out loud and quiet streamers and sudden alerts
+  (done)
 - Choosing the audio output device, and an audio delay for Bluetooth
   headphones
 - Screenshots of the video, without Lurker's UI, at the stream's resolution

@@ -95,3 +95,16 @@ layout_reads_video_enhancement :: proc(t: ^testing.T) {
 	testing.expect(t, balanced != "")
 	testing.expect(t, !balanced_upscales)
 }
+
+@(test)
+layout_reads_normalize_audio :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	l: Layout
+	defer layout_destroy(&l)
+	testing.expect(t, parse_layout(transmute([]byte)string(`{"splits":{},"normalize_audio":true}`), &l))
+	testing.expect(t, l.normalize_audio)
+	old: Layout
+	defer layout_destroy(&old)
+	testing.expect(t, parse_layout(transmute([]byte)string(`{"splits":{}}`), &old))
+	testing.expect(t, !old.normalize_audio)
+}

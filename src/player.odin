@@ -412,6 +412,19 @@ property_changed :: proc(p: ^Player, prop: ^mpv.Event_Property) {
 	}
 }
 
+// FFmpeg's dynaudnorm: raises quiet stretches and lowers loud ones, a frame
+// (`f`, ms) at a time, smoothed over `g` frames; at most `m` times louder, so
+// silence doesn't turn into hiss. mpv keeps it in sync with the video, but it
+// holds back about f × g ms of sound, which adds that much latency (measured
+// with low latency: +2.8 s at its f=250:g=11, +15.8 s at its defaults). Half a
+// second is too little to measure against how latency varies between runs.
+NORMALIZE_FILTER :: "lavfi=[dynaudnorm=f=100:g=5:m=5]"
+
+// Turns loudness normalization on or off, for what's playing and what's next.
+player_set_normalize :: proc(p: ^Player, on: bool) {
+	player_command(p, {"set", "af", NORMALIZE_FILTER if on else ""})
+}
+
 player_command :: proc(p: ^Player, args: []cstring) {
 	argv := make([]cstring, len(args) + 1, context.temp_allocator)
 	copy(argv, args)
