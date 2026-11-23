@@ -205,8 +205,26 @@ VIDEO_ENHANCEMENT_LABELS :: [Video_Enhancement]string {
 // github.com/igv/FSRCNN-TensorFlow: the smaller and faster of its two models.
 @(private = "file")
 UPSCALE_SHADER :: #load("../assets/shaders/FSRCNNX_x2_8-0-4-1.glsl")
+// The file mpv reads, in the cache: UPSCALE_COPY_PASS, then the shader. A
+// copy already there is used as is, so the name changes with what's in it.
 @(private = "file")
-UPSCALE_SHADER_NAME :: "FSRCNNX_x2_8-0-4-1.glsl"
+UPSCALE_SHADER_NAME :: "FSRCNNX_x2_8-0-4-1-lurker.glsl"
+// A pass that draws the luma into a texture of mpv's own, for FSRCNNX to read.
+// Reading the hardware decoder's texture straight (NVDEC, measured) turns the
+// picture into black and white blotches. Debanding happens to make this copy,
+// so it only showed when U turned upscaling on with the setting Off. The same
+// condition as FSRCNNX's, so it costs nothing while upscaling is idle.
+@(private = "file")
+UPSCALE_COPY_PASS :: `//!HOOK LUMA
+//!BIND HOOKED
+//!DESC copy the decoder's luma for FSRCNNX
+//!WHEN OUTPUT.w LUMA.w / 1.300 > OUTPUT.h LUMA.h / 1.300 > *
+
+vec4 hook() {
+	return HOOKED_texOff(0);
+}
+
+`
 
 // Debanding with mpv's default strength, and its sharpest scaler for both the
 // picture and its colour, which Twitch sends at half the resolution.
@@ -263,7 +281,7 @@ upscale_shader_path :: proc() -> (path: string, ok: bool) {
 		return "", false
 	}
 	if !os.exists(joined) {
-		cache_store(joined, UPSCALE_SHADER)
+		cache_store(joined, transmute([]byte)strings.concatenate({UPSCALE_COPY_PASS, string(UPSCALE_SHADER)}, context.temp_allocator))
 	}
 	if !os.exists(joined) {
 		log.warn("can't write the upscaling shader: upscaling is off")
