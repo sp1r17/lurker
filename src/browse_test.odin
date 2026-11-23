@@ -468,3 +468,19 @@ channel_points_are_read :: proc(t: ^testing.T) {
 	testing.expect_value(t, err, Twitch_Error.None)
 	testing.expect_value(t, balance, 0)
 }
+
+@(test)
+finished_drops_are_found :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	body := `{"data":{"currentUser":{"inventory":{"dropCampaignsInProgress":[` +
+		`{"game":{"name":"Cyberpunk 2077"},"timeBasedDrops":[` +
+		`{"name":"Quadra Paintjobs","self":{"dropInstanceID":null,"isClaimed":false}},` +
+		`{"name":"Jacket","self":{"dropInstanceID":"1#2#3","isClaimed":false}},` +
+		`{"name":"Hat","self":{"dropInstanceID":"1#2#4","isClaimed":true}}]}]}}}}`
+	drops, err := parse_finished_drops_response(transmute([]byte)body)
+	testing.expect_value(t, err, Twitch_Error.None)
+	testing.expect_value(t, len(drops), 1)
+	testing.expect_value(t, drops[0], Finished_Drop{"1#2#3", "Jacket", "Cyberpunk 2077"})
+	none, _ := parse_finished_drops_response(transmute([]byte)string(`{"data":{"currentUser":null}}`))
+	testing.expect_value(t, len(none), 0)
+}

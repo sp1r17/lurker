@@ -75,8 +75,10 @@ Watch :: struct {
 	live_now:         bool,
 	// Until when (Assets.now_ms) the volume bar shows.
 	volume_osd_until: int,
-	// The channel points balance, and asking for it (bonus.odin).
+	// The channel points balance, and asking for it (bonus.odin); and checking
+	// for finished drops (drops.odin).
 	bonus:            Bonus,
+	drops:            Drops,
 	// Stalls of the live stream, and the quality it was lowered to for them
 	// (buffering.odin); nil for the saved one.
 	buffering:        Buffering,

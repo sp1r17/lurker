@@ -27,6 +27,7 @@ Setting_Switch :: enum {
 	Notify_Changes,
 	Auto_Quality,
 	Claim_Bonus,
+	Claim_Drops,
 }
 
 // Settings with a few values, shown as the value; a click moves to the next.
@@ -287,6 +288,8 @@ setting_on :: proc(app: ^App, s: Setting_Switch) -> bool {
 		return !l.auto_quality_off
 	case .Claim_Bonus:
 		return !l.bonus_off
+	case .Claim_Drops:
+		return !l.drops_off
 	}
 	return false
 }
@@ -435,6 +438,9 @@ setting_toggle :: proc(app: ^App, s: Setting_Switch) {
 	case .Next_Clip:
 		app.layout.next_clip_off = !app.layout.next_clip_off
 		layout_save(&app.layout)
+	case .Claim_Drops:
+		app.layout.drops_off = !app.layout.drops_off
+		layout_save(&app.layout)
 	case .Claim_Bonus:
 		app.layout.bonus_off = !app.layout.bonus_off
 		layout_save(&app.layout)
@@ -570,6 +576,7 @@ draw_settings :: proc(app: ^App, content: Rect) {
 		.Notify_Changes  = "Also when a live channel changes its title or category",
 		.Auto_Quality    = "Lower the quality when the stream keeps buffering",
 		.Claim_Bonus     = "Claim channel point bonuses automatically",
+		.Claim_Drops     = "Claim finished drops automatically",
 	}
 	choice_labels := [Setting_Choice]string {
 		.Latency_Buffer = "Low latency buffer",
@@ -605,7 +612,7 @@ draw_settings :: proc(app: ^App, content: Rect) {
 	general_switches := []Setting_Switch{.Notifications, .Update_Checks} if NOTIFICATIONS_SUPPORTED else []Setting_Switch{.Update_Checks}
 	all_sections := [?]Section {
 		{title = "General", switches = general_switches, choices = {.Start_View}, text_size = true},
-		{title = "Streams", switches = {.Low_Latency, .Auto_Quality, .Normalize_Audio, .Follow_Raids, .Next_Clip, .Watch_Points, .Claim_Bonus}, choices = {.Latency_Buffer, .Max_Quality, .Video_Enhancement, .Audio_Device, .Audio_Delay}, language = true},
+		{title = "Streams", switches = {.Low_Latency, .Auto_Quality, .Normalize_Audio, .Follow_Raids, .Next_Clip, .Watch_Points, .Claim_Bonus, .Claim_Drops}, choices = {.Latency_Buffer, .Max_Quality, .Video_Enhancement, .Audio_Device, .Audio_Delay}, language = true},
 		{title = "Live notifications", switches = {.Notify_Changes}, choices = {.Notify_For}, lists = {.Notify_Channels}, notifications = true},
 		{title = "Chat", switches = {.Chat_Sync, .Chat_Timestamps, .Chat_Highlight_Staff, .Chat_Highlight_Own, .Chat_Hide_Bots, .Chat_Hide_Badges, .Chat_Alternate_Lines, .Chat_Separators, .Chat_Still_Emotes, .Chat_Viewer_Count}, lists = {.Highlights, .Ignored}},
 		{title = "Blocked", lists = {.Blocked_Channels, .Blocked_Categories}},

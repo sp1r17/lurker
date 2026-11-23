@@ -1513,6 +1513,99 @@ claim_channel_points :: proc(client_id, token, channel_id, claim_id: string) -> 
 	return result.currentPoints, .None
 }
 
+// A drop finished but not yet claimed: its instance (what claiming takes) and
+// name, and its game's. Allocated with the temp allocator.
+Finished_Drop :: struct {
+	instance_id, name, game: string,
+}
+
+// The signed-in user's drops that are finished and waiting to be claimed, from
+// their campaigns in progress. Twitch's site internals, not a documented API.
+get_finished_drops :: proc(client_id, token: string) -> (drops: []Finished_Drop, err: Twitch_Error) {
+	body := gql_post(client_id, token, "query { currentUser { inventory { dropCampaignsInProgress { game { name } timeBasedDrops { name self { dropInstanceID isClaimed } } } } } }") or_return
+	return parse_finished_drops_response(body)
+}
+
+parse_finished_drops_response :: proc(body: []byte) -> (drops: []Finished_Drop, err: Twitch_Error) {
+	r: struct {
+		data:   struct {
+			currentUser: Maybe(struct {
+				inventory: Maybe(struct {
+					dropCampaignsInProgress: []struct {
+						game:           Maybe(struct {
+							name: string,
+						}),
+						timeBasedDrops: []struct {
+							name: string,
+							self: Maybe(struct {
+								dropInstanceID: Maybe(string),
+								isClaimed:      bool,
+							}),
+						},
+					},
+				}),
+			}),
+		},
+		errors: Graphql_Errors,
+	}
+	if json.unmarshal(body, &r, allocator = context.temp_allocator) != nil {
+		return nil, .Bad_Json
+	}
+	check_errors(r.errors) or_return
+	user, has_user := r.data.currentUser.?
+	if !has_user {
+		return nil, .None
+	}
+	inventory := user.inventory.? or_else {}
+	list := make([dynamic]Finished_Drop, context.temp_allocator)
+	for c in inventory.dropCampaignsInProgress {
+		game := c.game.? or_else {}
+		for d in c.timeBasedDrops {
+			self := d.self.? or_else {}
+			if id, finished := self.dropInstanceID.?; finished && id != "" && !self.isClaimed {
+				append(&list, Finished_Drop{id, d.name, game.name})
+			}
+		}
+	}
+	return list[:], .None
+}
+
+// Claims finished drop `instance_id` for the signed-in user. The ID goes into
+// the query itself (the mutation takes an object), so only IDs of letters,
+// digits, dashes and "#" (it joins the user's, campaign's and drop's IDs) are
+// sent.
+claim_drop :: proc(client_id, token, instance_id: string) -> Twitch_Error {
+	for c in instance_id {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '#') {
+			return .Bad_Json
+		}
+	}
+	if instance_id == "" {
+		return .Bad_Json
+	}
+	query := fmt.tprintf(`mutation { claimDropRewards(input: {dropInstanceID: "%s"}) { status } }`, instance_id)
+	body := gql_post(client_id, token, query) or_return
+	r: struct {
+		data:   struct {
+			claimDropRewards: Maybe(struct {
+				status: string,
+			}),
+		},
+		errors: Graphql_Errors,
+	}
+	if json.unmarshal(body, &r, allocator = context.temp_allocator) != nil {
+		return .Bad_Json
+	}
+	if len(r.errors) > 0 {
+		log.warnf("claiming a drop failed: %s", r.errors[0].message)
+	}
+	check_errors(r.errors) or_return
+	if _, ok := r.data.claimDropRewards.?; !ok {
+		return .Bad_Json
+	}
+	return .None
+}
+
 // A stretch of a past broadcast with its sound muted (for copyrighted music), in
 // seconds.
 Muted_Segment :: struct {

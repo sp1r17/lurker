@@ -48,8 +48,10 @@ Layout :: struct {
 	normalize_audio: bool,
 	// Not lowering a live stream's quality when it keeps buffering (buffering.odin).
 	auto_quality_off: bool,
-	// Not claiming channel point bonuses (bonus.odin).
+	// Not claiming channel point bonuses (bonus.odin), or finished drops
+	// (drops.odin).
 	bonus_off:        bool,
+	drops_off:        bool,
 	// The audio output, by mpv's name ("" for the system's choice; owned), and
 	// how much later the video shows for headphones that play sound late
 	// (AUDIO_DELAYS, in ms).
@@ -152,6 +154,7 @@ parse_layout :: proc(data: []byte, l: ^Layout) -> bool {
 		normalize_audio: bool,
 		auto_quality_off: bool,
 		bonus_off:        bool,
+		drops_off:        bool,
 		audio_device:    string,
 		audio_delay_ms:  int,
 		stream_sort: Stream_Sort,
@@ -199,6 +202,7 @@ parse_layout :: proc(data: []byte, l: ^Layout) -> bool {
 	l.normalize_audio = saved.normalize_audio
 	l.auto_quality_off = saved.auto_quality_off
 	l.bonus_off = saved.bonus_off
+	l.drops_off = saved.drops_off
 	if saved.audio_device != "" {
 		delete(l.audio_device)
 		l.audio_device = strings.clone(saved.audio_device)
@@ -315,6 +319,7 @@ layout_save :: proc(l: ^Layout) {
 		normalize_audio: bool,
 		auto_quality_off: bool,
 		bonus_off:        bool,
+		drops_off:        bool,
 		audio_device:    string,
 		audio_delay_ms:  int,
 		stream_sort: Stream_Sort,
@@ -341,7 +346,7 @@ layout_save :: proc(l: ^Layout) {
 		skipped_version:   string,
 		language:          string,
 		language_hide:     bool,
-	}{LAYOUT_VERSION, l.splits, l.volume, l.muted, quality_name(l.quality), l.low_latency, l.raids_off, l.stats, l.chat_sync, l.latency_buffer_ms, l.max_height, fmt.tprint(l.video_enhancement), l.next_clip_off, l.points_off, l.normalize_audio, l.auto_quality_off, l.bonus_off, l.audio_device, l.audio_delay_ms, l.stream_sort, l.start_view, l.hide_chat, l.text_size, l.notifications_off, l.notify_only, l.notify_changes, l.notify_muted[:], l.notify_chosen[:], l.chat.highlights[:], l.chat.ignored[:], l.chat.timestamps, l.chat.highlight_staff, l.chat.hide_bots, l.chat.alternate_lines, l.chat.hide_badges, l.chat.highlight_own, l.chat.separators, l.chat.still_emotes, l.chat.viewer_count, l.update_checks_off, l.skipped_version, l.language, l.language_hide}
+	}{LAYOUT_VERSION, l.splits, l.volume, l.muted, quality_name(l.quality), l.low_latency, l.raids_off, l.stats, l.chat_sync, l.latency_buffer_ms, l.max_height, fmt.tprint(l.video_enhancement), l.next_clip_off, l.points_off, l.normalize_audio, l.auto_quality_off, l.bonus_off, l.drops_off, l.audio_device, l.audio_delay_ms, l.stream_sort, l.start_view, l.hide_chat, l.text_size, l.notifications_off, l.notify_only, l.notify_changes, l.notify_muted[:], l.notify_chosen[:], l.chat.highlights[:], l.chat.ignored[:], l.chat.timestamps, l.chat.highlight_staff, l.chat.hide_bots, l.chat.alternate_lines, l.chat.hide_badges, l.chat.highlight_own, l.chat.separators, l.chat.still_emotes, l.chat.viewer_count, l.update_checks_off, l.skipped_version, l.language, l.language_hide}
 	data, err := json.marshal(saved, {pretty = true, use_enum_names = true}, context.temp_allocator)
 	if err != nil {
 		return
