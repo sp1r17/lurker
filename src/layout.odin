@@ -63,6 +63,9 @@ Layout :: struct {
 	// Logins, owned.
 	notifications_off: bool,
 	notify_only:       bool,
+	// Also a notification when a followed live channel changes its title or
+	// category (live_notifier_info_changes).
+	notify_changes:    bool,
 	notify_muted:      [dynamic]string,
 	notify_chosen:     [dynamic]string,
 	// Highlight phrases and ignored people, for every chat.
@@ -151,6 +154,7 @@ parse_layout :: proc(data: []byte, l: ^Layout) -> bool {
 		text_size:   int,
 		notifications_off: bool,
 		notify_only:       bool,
+		notify_changes:    bool,
 		notify_muted:      []string,
 		notify_chosen:     []string,
 		highlights:  []string,
@@ -217,6 +221,7 @@ parse_layout :: proc(data: []byte, l: ^Layout) -> bool {
 	l.hide_chat = saved.hide_chat
 	l.notifications_off = saved.notifications_off
 	l.notify_only = saved.notify_only
+	l.notify_changes = saved.notify_changes
 	for login in saved.notify_muted {
 		if valid_login(login) {
 			rule_add(&l.notify_muted, login)
@@ -298,6 +303,7 @@ layout_save :: proc(l: ^Layout) {
 		text_size:   int,
 		notifications_off: bool,
 		notify_only:       bool,
+		notify_changes:    bool,
 		notify_muted:      []string,
 		notify_chosen:     []string,
 		highlights:  []string,
@@ -310,7 +316,7 @@ layout_save :: proc(l: ^Layout) {
 		skipped_version:   string,
 		language:          string,
 		language_hide:     bool,
-	}{LAYOUT_VERSION, l.splits, l.volume, l.muted, quality_name(l.quality), l.low_latency, l.raids_off, l.stats, l.chat_sync, l.latency_buffer_ms, l.max_height, fmt.tprint(l.video_enhancement), l.next_clip_off, l.points_off, l.normalize_audio, l.audio_device, l.audio_delay_ms, l.stream_sort, l.start_view, l.hide_chat, l.text_size, l.notifications_off, l.notify_only, l.notify_muted[:], l.notify_chosen[:], l.chat.highlights[:], l.chat.ignored[:], l.chat.timestamps, l.chat.highlight_staff, l.chat.hide_bots, l.chat.alternate_lines, l.update_checks_off, l.skipped_version, l.language, l.language_hide}
+	}{LAYOUT_VERSION, l.splits, l.volume, l.muted, quality_name(l.quality), l.low_latency, l.raids_off, l.stats, l.chat_sync, l.latency_buffer_ms, l.max_height, fmt.tprint(l.video_enhancement), l.next_clip_off, l.points_off, l.normalize_audio, l.audio_device, l.audio_delay_ms, l.stream_sort, l.start_view, l.hide_chat, l.text_size, l.notifications_off, l.notify_only, l.notify_changes, l.notify_muted[:], l.notify_chosen[:], l.chat.highlights[:], l.chat.ignored[:], l.chat.timestamps, l.chat.highlight_staff, l.chat.hide_bots, l.chat.alternate_lines, l.update_checks_off, l.skipped_version, l.language, l.language_hide}
 	data, err := json.marshal(saved, {pretty = true, use_enum_names = true}, context.temp_allocator)
 	if err != nil {
 		return

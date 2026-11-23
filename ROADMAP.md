@@ -104,7 +104,7 @@ Playback and notifications:
   (done)
 - Stepping frame by frame through past broadcasts and clips (`,` and `.`)
   (done)
-- Notify when a followed channel changes its title or category
+- Notify when a followed channel changes its title or category (done)
 - Keyboard shortcut list in the app (`?`) (done)
 
 ## 0.13: Bigger features
