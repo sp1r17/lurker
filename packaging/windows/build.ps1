@@ -16,9 +16,10 @@ $out = "$root\build\windows"
 $deps = "$out\deps"
 $dist = "$out\dist"
 
-# libmpv from mpv-winbuild, and streamlink's portable build (with its own Python).
-$mpvUrl = "https://github.com/zhongfly/mpv-winbuild/releases/download/2026-10-23-3aecc359bb/mpv-dev-x86_64-20261023-git-3aecc359bb.7z"
-$mpvSha = "a25d0b6461dcd4fc6d7d1b1b7929a71ccf18fad0593fff1d10d65f83c532df27"
+# libmpv from mpv's own release (mpv-winbuild deletes its older nightlies), and
+# streamlink's portable build (with its own Python).
+$mpvUrl = "https://github.com/mpv-player/mpv/releases/download/v0.42.0/libmpv-v0.42.0-x86_64-w64-mingw32-gpl.zip"
+$mpvSha = "b99e0d183024ae479d1b36a93fa262c0297dfb025b99715b98da377ffb6c2913"
 $streamlinkUrl = "https://github.com/streamlink/windows-builds/releases/download/8.6.2-2/streamlink-8.6.2-2-py314-x86_64.zip"
 $streamlinkSha = "12e0c8e43b736f75ec67e44cd375ee05be301d7f25a5e2ec1aaa1f81c67ff2b3"
 
@@ -36,9 +37,9 @@ New-Item -ItemType Directory -Force $deps | Out-Null
 
 # libmpv: the DLL, and an import library the MSVC linker can use, made from the
 # DLL's exports (the package's libmpv.dll.a is MinGW's format).
-Get-Checked $mpvUrl $mpvSha "$deps\mpv-dev.7z"
+Get-Checked $mpvUrl $mpvSha "$deps\libmpv.zip"
 if (-not (Test-Path "$deps\mpv\libmpv-2.dll")) {
-	7z x "$deps\mpv-dev.7z" "-o$deps\mpv" -y | Out-Null
+	7z x "$deps\libmpv.zip" "-o$deps\mpv" -y | Out-Null
 }
 $exports = dumpbin /exports "$deps\mpv\libmpv-2.dll" | ForEach-Object {
 	if ($_ -match '^\s+\d+\s+[0-9A-F]+\s+[0-9A-F]+\s+(mpv_\w+)') { $Matches[1] }
