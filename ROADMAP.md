@@ -97,6 +97,7 @@ Playback and notifications:
   scaler at almost no cost (done; a neural upscaler, FSRCNNX, was tried and
   dropped: on Twitch's compressed streams it made no visible difference)
 - Audio normalization, evening out loud and quiet streamers and sudden alerts
+  (done)
 - Choosing the audio output device, and an audio delay for Bluetooth
   headphones
 - Screenshots of the video, without Lurker's UI, at the stream's resolution
