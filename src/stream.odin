@@ -322,6 +322,16 @@ finished_playlist :: proc(playlist, url: string) -> (out: string, ok: bool) {
 		case line != "" && !strings.has_prefix(line, "#") && !strings.contains(line, "://"):
 			strings.write_string(&sb, base)
 			strings.write_string(&sb, line)
+		// A tag naming a file, as the init segment of fragmented MP4 recordings
+		// (#EXT-X-MAP:URI="init-0.mp4"): relative to the recording too, not to
+		// where this copy is saved.
+		case strings.has_prefix(line, "#") && strings.contains(line, `URI="`):
+			at := strings.index(line, `URI="`) + len(`URI="`)
+			strings.write_string(&sb, line[:at])
+			if !strings.contains(line[at:], "://") {
+				strings.write_string(&sb, base)
+			}
+			strings.write_string(&sb, line[at:])
 		case:
 			strings.write_string(&sb, line)
 		}

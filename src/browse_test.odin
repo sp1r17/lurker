@@ -341,6 +341,10 @@ recording_playlist_is_finished :: proc(t: ^testing.T) {
 	)
 	_, ok = finished_playlist("<html>", "https://x/y")
 	testing.expect(t, !ok)
+	// Fragmented MP4: the init segment's address too.
+	fmp4, fmp4_ok := finished_playlist("#EXTM3U\n#EXT-X-MAP:URI=\"init-0.mp4\"\n#EXTINF:10.000,\n0.mp4\n", "https://cdn.example/abc/1080p60/index-dvr.m3u8")
+	testing.expect(t, fmp4_ok)
+	testing.expect_value(t, fmp4, "#EXTM3U\n#EXT-X-MAP:URI=\"https://cdn.example/abc/1080p60/init-0.mp4\"\n#EXTINF:10.000,\nhttps://cdn.example/abc/1080p60/0.mp4\n#EXT-X-ENDLIST\n")
 }
 
 @(test)
