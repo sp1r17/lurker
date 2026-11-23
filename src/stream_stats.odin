@@ -80,31 +80,11 @@ Stats_Row :: struct {
 	value: string,
 }
 
-// What upscaling is doing, for the stats and the U notice: off; running, with
-// the video's height before and as drawn; or on but idle, the video being drawn
-// at UPSCALE_MIN_FACTOR or less of its size in `area` (pixels). Allocated with
+// The stats' rows, from what mpv reports: the video, bitrates, network, buffer,
+// dropped frames; the ping to Twitch; for a live stream, the latency to the
+// broadcaster in seconds (nil until known); and how long the stream has been
+// live (`started_at`, "" for a video) and watched (`watched_s`). Allocated with
 // the temp allocator.
-upscaling_text :: proc(on: bool, video: [2]i64, area: [2]f32) -> string {
-	if !on {
-		return "Off"
-	}
-	if video.x <= 0 || video.y <= 0 || area.x <= 0 || area.y <= 0 {
-		return "On"
-	}
-	// mpv fits the video in the area, keeping its shape.
-	factor := min(area.x / f32(video.x), area.y / f32(video.y))
-	if factor > UPSCALE_MIN_FACTOR {
-		return fmt.tprintf("On · %dp to %dp (%.1f×)", video.y, int(f32(video.y) * factor + 0.5), factor)
-	}
-	return fmt.tprintf("Idle · drawn at %.2f×, needs over %.1f×", factor, UPSCALE_MIN_FACTOR)
-}
-
-// The stats' rows, from what mpv reports: the video, upscaling (`upscaling`,
-// with the video drawn in `area`), bitrates, network, buffer, dropped frames;
-// the ping to Twitch; for a live stream, the latency to the broadcaster in
-// seconds (nil until known); and how long the stream has been live
-// (`started_at`, "" for a video) and watched (`watched_s`). Allocated with the
-// temp allocator.
 stats_rows :: proc(
 	s: Player_Stats,
 	ping: Ping_Stats,
@@ -112,8 +92,6 @@ stats_rows :: proc(
 	started_at: string,
 	watched_s: int,
 	now: time.Time,
-	upscaling := false,
-	area := [2]f32{},
 ) -> []Stats_Row {
 	rows := make([dynamic]Stats_Row, context.temp_allocator)
 	unknown :: "—"
@@ -130,7 +108,6 @@ stats_rows :: proc(
 		video = strings.join(parts[:], " · ", context.temp_allocator)
 	}
 	append(&rows, Stats_Row{"Video", video})
-	append(&rows, Stats_Row{"Upscaling (U)", upscaling_text(upscaling, {s.width.? or_else 0, s.height.? or_else 0}, area)})
 
 	bitrate := unknown
 	if v, ok := s.video_bitrate.?; ok {
@@ -239,7 +216,7 @@ draw_stream_stats :: proc(app: ^App) {
 			latency = seconds
 		}
 	}
-	rows := stats_rows(app.player.stats, w.ping, latency, started_at, watched, now, app.player.upscaling, {w.video_rect.w, w.video_rect.h})
+	rows := stats_rows(app.player.stats, w.ping, latency, started_at, watched, now)
 
 	label_w, value_w: f32
 	for row in rows {

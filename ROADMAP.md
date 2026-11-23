@@ -93,10 +93,9 @@ Playback and notifications:
 
 - Lower the quality when the stream keeps buffering
 - Muted parts of past broadcasts shown on the seek bar
-- A video enhancement setting with three presets: Off; Balanced, with
-  debanding and a sharper scaler at almost no cost; and Upscale, which adds a
-  neural upscaler (FSRCNNX or RAVU) when the window is bigger than the video
-  (done, with FSRCNNX)
+- A video enhancement setting: Off, or Balanced, with debanding and a sharper
+  scaler at almost no cost (done; a neural upscaler, FSRCNNX, was tried and
+  dropped: on Twitch's compressed streams it made no visible difference)
 - Audio normalization, evening out loud and quiet streamers and sudden alerts
   (done)
 - Choosing the audio output device, and an audio delay for Bluetooth

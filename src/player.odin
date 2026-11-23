@@ -2,8 +2,6 @@ package app
 
 import "core:fmt"
 import "core:log"
-import "core:os"
-import "core:path/filepath"
 import "core:strings"
 import "core:time"
 import "mpv"
@@ -31,9 +29,6 @@ Player :: struct {
 	position:      Maybe(f64),
 	duration:      Maybe(f64),
 	paused:        bool,
-	// The upscaling shader is on for what's playing: from the Upscale setting,
-	// or switched with U (player_set_upscaling).
-	upscaling:     bool,
 	// For the stream stats (stream_stats.odin).
 	stats:         Player_Stats,
 }
@@ -41,7 +36,6 @@ Player :: struct {
 // How playback is going, as mpv last reported it, for the stream stats. Reset
 // with each file played; nil while mpv has no value.
 Player_Stats :: struct {
-	width:           Maybe(i64),
 	height:          Maybe(i64),
 	fps:             Maybe(f64),
 	// mpv's names ("h264"; "vaapi", "no"). Owned.
@@ -68,7 +62,6 @@ STATS_PROPERTIES := [?]struct {
 	name:   cstring,
 	format: mpv.Format,
 } {
-	{"video-params/w", .Int64},
 	{"video-params/h", .Int64},
 	{"estimated-vf-fps", .Double},
 	{"video-format", .String},
@@ -188,106 +181,27 @@ Video_Enhancement :: enum {
 	// Debanding, against the banding Twitch's compression leaves in skies and
 	// gradients, and sharper scaling than mpv's default.
 	Balanced,
-	// Balanced, and FSRCNNX: a small neural network that doubles the picture's
-	// size with more detail than scaling alone. It runs only when the video is
-	// drawn at 1.3 times its size or more (the shader's own condition), such as
-	// 720p in a 1440p window or 1080p in fullscreen at 4K.
-	Upscale,
 }
 
 VIDEO_ENHANCEMENT_LABELS :: [Video_Enhancement]string {
 	.Off      = "Off",
 	.Balanced = "Balanced",
-	.Upscale  = "Upscale",
 }
-
-// FSRCNNX_x2_8-0-4-1 by igv (LGPL 3.0 or later), from
-// github.com/igv/FSRCNN-TensorFlow: the smaller and faster of its two models.
-@(private = "file")
-UPSCALE_SHADER :: #load("../assets/shaders/FSRCNNX_x2_8-0-4-1.glsl")
-// The file mpv reads, in the cache: UPSCALE_COPY_PASS, then the shader. A
-// copy already there is used as is, so the name changes with what's in it.
-@(private = "file")
-UPSCALE_SHADER_NAME :: "FSRCNNX_x2_8-0-4-1-lurker.glsl"
-// A pass that draws the luma into a texture of mpv's own, for FSRCNNX to read.
-// Reading the hardware decoder's texture straight (NVDEC, measured) turns the
-// picture into black and white blotches. Debanding happens to make this copy,
-// so it only showed when U turned upscaling on with the setting Off. The same
-// condition as FSRCNNX's, so it costs nothing while upscaling is idle.
-@(private = "file")
-UPSCALE_COPY_PASS :: `//!HOOK LUMA
-//!BIND HOOKED
-//!DESC copy the decoder's luma for FSRCNNX
-//!WHEN OUTPUT.w LUMA.w / 1.300 > OUTPUT.h LUMA.h / 1.300 > *
-
-vec4 hook() {
-	return HOOKED_texOff(0);
-}
-
-`
 
 // Debanding with mpv's default strength, and its sharpest scaler for both the
 // picture and its colour, which Twitch sends at half the resolution.
 @(private = "file")
 BALANCED_OPTIONS :: "deband=yes,scale=ewa_lanczossharp,cscale=ewa_lanczossharp"
 
-// How much bigger than its size the video must be drawn for the upscaling
-// shader to run: the shader's own condition ("//!WHEN OUTPUT.w LUMA.w / 1.300 >"),
-// for the stats to tell when it's idle.
-UPSCALE_MIN_FACTOR :: 1.3
-
-// The options for `v`, for this file only ("" for none), and whether they
-// include the upscaling shader. Allocated with the temp allocator.
-video_options :: proc(v: Video_Enhancement) -> (options: string, upscaling: bool) {
+// The options for `v`, for this file only; "" for none.
+video_options :: proc(v: Video_Enhancement) -> string {
 	switch v {
 	case .Off:
-		return "", false
+		return ""
 	case .Balanced:
-		return BALANCED_OPTIONS, false
-	case .Upscale:
-		path, ok := upscale_shader_path()
-		if !ok {
-			return BALANCED_OPTIONS, false
-		}
-		// mpv's %length% quoting, should the path have a comma.
-		return fmt.tprintf("%s,glsl-shaders=%%%d%%%s", BALANCED_OPTIONS, len(path), path), true
+		return BALANCED_OPTIONS
 	}
-	return "", false
-}
-
-// Turns the upscaling shader on or off for what's playing, for comparing the
-// two on the same picture; the next file gets the setting's again. Returns
-// false if the shader can't be had.
-player_set_upscaling :: proc(p: ^Player, on: bool) -> bool {
-	if !on {
-		player_command(p, {"set", "glsl-shaders", ""})
-		p.upscaling = false
-		return true
-	}
-	path := upscale_shader_path() or_return
-	player_command(p, {"set", "glsl-shaders", strings.clone_to_cstring(path, context.temp_allocator)})
-	p.upscaling = true
-	return true
-}
-
-// The bundled upscaling shader, as a file in the cache for mpv to read, written
-// unless it's there already (cache pruning may have removed it). Allocated with
-// the temp allocator.
-@(private = "file")
-upscale_shader_path :: proc() -> (path: string, ok: bool) {
-	dir := cache_dir() or_return
-	joined, err := filepath.join({dir, UPSCALE_SHADER_NAME}, context.temp_allocator)
-	if err != nil {
-		return "", false
-	}
-	if !os.exists(joined) {
-		cache_store(joined, transmute([]byte)strings.concatenate({UPSCALE_COPY_PASS, string(UPSCALE_SHADER)}, context.temp_allocator))
-	}
-	if !os.exists(joined) {
-		log.warn("can't write the upscaling shader: upscaling is off")
-		return "", false
-	}
-	return joined, true
+	return ""
 }
 
 // Plays `url`. With `low_latency`, mpv buffers as little as it can, or
@@ -303,11 +217,9 @@ player_load :: proc(p: ^Player, url: string, low_latency := false, buffer_ms := 
 		}
 		append(&options, cache, LOW_LATENCY_OPTIONS)
 	}
-	v, upscaling := video_options(video)
-	if v != "" {
+	if v := video_options(video); v != "" {
 		append(&options, v)
 	}
-	p.upscaling = upscaling
 	load_with_options(p, url, options[:])
 }
 
@@ -323,11 +235,9 @@ player_load_at :: proc(p: ^Player, url: string, start: f64, online_segments := f
 		whitelist :: "protocol_whitelist=[file,http,https,tcp,tls,crypto]"
 		append(&options, fmt.tprintf("demuxer-lavf-o-add=%%%d%%%s", len(whitelist), whitelist))
 	}
-	v, upscaling := video_options(video)
-	if v != "" {
+	if v := video_options(video); v != "" {
 		append(&options, v)
 	}
-	p.upscaling = upscaling
 	load_with_options(p, url, options[:])
 }
 
@@ -373,8 +283,6 @@ property_changed :: proc(p: ^Player, prop: ^mpv.Event_Property) {
 	}
 	s := &p.stats
 	switch string(prop.name) {
-	case "video-params/w":
-		s.width = integer
 	case "video-params/h":
 		s.height = integer
 	case "estimated-vf-fps":
