@@ -31,6 +31,9 @@ Player :: struct {
 	position:      Maybe(f64),
 	duration:      Maybe(f64),
 	paused:        bool,
+	// The upscaling shader is on for what's playing: from the Upscale setting,
+	// or switched with U (player_set_upscaling).
+	upscaling:     bool,
 	// For the stream stats (stream_stats.odin).
 	stats:         Player_Stats,
 }
@@ -38,6 +41,7 @@ Player :: struct {
 // How playback is going, as mpv last reported it, for the stream stats. Reset
 // with each file played; nil while mpv has no value.
 Player_Stats :: struct {
+	width:           Maybe(i64),
 	height:          Maybe(i64),
 	fps:             Maybe(f64),
 	// mpv's names ("h264"; "vaapi", "no"). Owned.
@@ -64,6 +68,7 @@ STATS_PROPERTIES := [?]struct {
 	name:   cstring,
 	format: mpv.Format,
 } {
+	{"video-params/w", .Int64},
 	{"video-params/h", .Int64},
 	{"estimated-vf-fps", .Double},
 	{"video-format", .String},
@@ -208,23 +213,43 @@ UPSCALE_SHADER_NAME :: "FSRCNNX_x2_8-0-4-1.glsl"
 @(private = "file")
 BALANCED_OPTIONS :: "deband=yes,scale=ewa_lanczossharp,cscale=ewa_lanczossharp"
 
-// The options for `v`, for this file only; "" for none. Allocated with the
-// temp allocator.
-video_options :: proc(v: Video_Enhancement) -> string {
+// How much bigger than its size the video must be drawn for the upscaling
+// shader to run: the shader's own condition ("//!WHEN OUTPUT.w LUMA.w / 1.300 >"),
+// for the stats to tell when it's idle.
+UPSCALE_MIN_FACTOR :: 1.3
+
+// The options for `v`, for this file only ("" for none), and whether they
+// include the upscaling shader. Allocated with the temp allocator.
+video_options :: proc(v: Video_Enhancement) -> (options: string, upscaling: bool) {
 	switch v {
 	case .Off:
-		return ""
+		return "", false
 	case .Balanced:
-		return BALANCED_OPTIONS
+		return BALANCED_OPTIONS, false
 	case .Upscale:
 		path, ok := upscale_shader_path()
 		if !ok {
-			return BALANCED_OPTIONS
+			return BALANCED_OPTIONS, false
 		}
 		// mpv's %length% quoting, should the path have a comma.
-		return fmt.tprintf("%s,glsl-shaders=%%%d%%%s", BALANCED_OPTIONS, len(path), path)
+		return fmt.tprintf("%s,glsl-shaders=%%%d%%%s", BALANCED_OPTIONS, len(path), path), true
 	}
-	return ""
+	return "", false
+}
+
+// Turns the upscaling shader on or off for what's playing, for comparing the
+// two on the same picture; the next file gets the setting's again. Returns
+// false if the shader can't be had.
+player_set_upscaling :: proc(p: ^Player, on: bool) -> bool {
+	if !on {
+		player_command(p, {"set", "glsl-shaders", ""})
+		p.upscaling = false
+		return true
+	}
+	path := upscale_shader_path() or_return
+	player_command(p, {"set", "glsl-shaders", strings.clone_to_cstring(path, context.temp_allocator)})
+	p.upscaling = true
+	return true
 }
 
 // The bundled upscaling shader, as a file in the cache for mpv to read, written
@@ -260,9 +285,11 @@ player_load :: proc(p: ^Player, url: string, low_latency := false, buffer_ms := 
 		}
 		append(&options, cache, LOW_LATENCY_OPTIONS)
 	}
-	if v := video_options(video); v != "" {
+	v, upscaling := video_options(video)
+	if v != "" {
 		append(&options, v)
 	}
+	p.upscaling = upscaling
 	load_with_options(p, url, options[:])
 }
 
@@ -278,9 +305,11 @@ player_load_at :: proc(p: ^Player, url: string, start: f64, online_segments := f
 		whitelist :: "protocol_whitelist=[file,http,https,tcp,tls,crypto]"
 		append(&options, fmt.tprintf("demuxer-lavf-o-add=%%%d%%%s", len(whitelist), whitelist))
 	}
-	if v := video_options(video); v != "" {
+	v, upscaling := video_options(video)
+	if v != "" {
 		append(&options, v)
 	}
+	p.upscaling = upscaling
 	load_with_options(p, url, options[:])
 }
 
@@ -326,6 +355,8 @@ property_changed :: proc(p: ^Player, prop: ^mpv.Event_Property) {
 	}
 	s := &p.stats
 	switch string(prop.name) {
+	case "video-params/w":
+		s.width = integer
 	case "video-params/h":
 		s.height = integer
 	case "estimated-vf-fps":
