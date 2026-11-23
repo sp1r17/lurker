@@ -1,6 +1,7 @@
 package app
 
 import "core:encoding/json"
+import "core:fmt"
 import "core:strings"
 
 DEFAULT_VOLUME :: 100
@@ -37,6 +38,8 @@ Layout :: struct {
 	latency_buffer_ms: int,
 	// The highest quality to play, by height (MAX_HEIGHTS); 0 for no limit.
 	max_height:  int,
+	// What mpv does to the picture: debanding, sharper scaling, upscaling.
+	video_enhancement: Video_Enhancement,
 	// Not playing the next clip when one ends (vod.odin).
 	next_clip_off: bool,
 	// Not reporting watch time to Twitch for channel points (points.odin).
@@ -122,6 +125,9 @@ parse_layout :: proc(data: []byte, l: ^Layout) -> bool {
 		chat_sync:   bool,
 		latency_buffer_ms: int,
 		max_height:  int,
+		// By name, so a name this version doesn't know is ignored rather than
+		// making the whole file unreadable.
+		video_enhancement: string,
 		next_clip_off: bool,
 		points_off:  bool,
 		stream_sort: Stream_Sort,
@@ -169,6 +175,11 @@ parse_layout :: proc(data: []byte, l: ^Layout) -> bool {
 	for h in MAX_HEIGHTS {
 		if saved.max_height == h {
 			l.max_height = h
+		}
+	}
+	for v in Video_Enhancement {
+		if saved.video_enhancement == fmt.tprint(v) {
+			l.video_enhancement = v
 		}
 	}
 	l.stream_sort = saved.stream_sort
@@ -250,6 +261,7 @@ layout_save :: proc(l: ^Layout) {
 		chat_sync:   bool,
 		latency_buffer_ms: int,
 		max_height:  int,
+		video_enhancement: string,
 		next_clip_off: bool,
 		points_off:  bool,
 		stream_sort: Stream_Sort,
@@ -270,7 +282,7 @@ layout_save :: proc(l: ^Layout) {
 		skipped_version:   string,
 		language:          string,
 		language_hide:     bool,
-	}{LAYOUT_VERSION, l.splits, l.volume, l.muted, quality_name(l.quality), l.low_latency, l.raids_off, l.stats, l.chat_sync, l.latency_buffer_ms, l.max_height, l.next_clip_off, l.points_off, l.stream_sort, l.start_view, l.hide_chat, l.text_size, l.notifications_off, l.notify_only, l.notify_muted[:], l.notify_chosen[:], l.chat.highlights[:], l.chat.ignored[:], l.chat.timestamps, l.chat.highlight_staff, l.chat.hide_bots, l.chat.alternate_lines, l.update_checks_off, l.skipped_version, l.language, l.language_hide}
+	}{LAYOUT_VERSION, l.splits, l.volume, l.muted, quality_name(l.quality), l.low_latency, l.raids_off, l.stats, l.chat_sync, l.latency_buffer_ms, l.max_height, fmt.tprint(l.video_enhancement), l.next_clip_off, l.points_off, l.stream_sort, l.start_view, l.hide_chat, l.text_size, l.notifications_off, l.notify_only, l.notify_muted[:], l.notify_chosen[:], l.chat.highlights[:], l.chat.ignored[:], l.chat.timestamps, l.chat.highlight_staff, l.chat.hide_bots, l.chat.alternate_lines, l.update_checks_off, l.skipped_version, l.language, l.language_hide}
 	data, err := json.marshal(saved, {pretty = true, use_enum_names = true}, context.temp_allocator)
 	if err != nil {
 		return

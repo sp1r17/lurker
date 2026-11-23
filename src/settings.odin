@@ -24,6 +24,7 @@ Setting_Switch :: enum {
 Setting_Choice :: enum {
 	Latency_Buffer,
 	Max_Quality,
+	Video_Enhancement,
 	Notify_For,
 	Start_View,
 }
@@ -276,6 +277,9 @@ setting_value :: proc(app: ^App, c: Setting_Choice) -> string {
 			return "No limit"
 		}
 		return fmt.tprintf("%dp", l.max_height)
+	case .Video_Enhancement:
+		labels := VIDEO_ENHANCEMENT_LABELS
+		return labels[l.video_enhancement]
 	case .Notify_For:
 		return "Only channels you choose" if app.layout.notify_only else "All followed channels"
 	case .Start_View:
@@ -303,6 +307,8 @@ setting_next :: proc(app: ^App, c: Setting_Choice) {
 	case .Max_Quality:
 		heights := MAX_HEIGHTS
 		l.max_height = next(heights[:], l.max_height)
+	case .Video_Enhancement:
+		l.video_enhancement = Video_Enhancement((int(l.video_enhancement) + 1) % len(Video_Enhancement))
 	case .Notify_For:
 		l.notify_only = !l.notify_only
 	case .Start_View:
@@ -469,6 +475,7 @@ draw_settings :: proc(app: ^App, content: Rect) {
 	choice_labels := [Setting_Choice]string {
 		.Latency_Buffer = "Low latency buffer",
 		.Max_Quality    = "Highest quality",
+		.Video_Enhancement = "Video enhancement",
 		.Notify_For     = "Notify for",
 		.Start_View     = "Start page",
 	}
@@ -497,7 +504,7 @@ draw_settings :: proc(app: ^App, content: Rect) {
 	general_switches := []Setting_Switch{.Notifications, .Update_Checks} if NOTIFICATIONS_SUPPORTED else []Setting_Switch{.Update_Checks}
 	all_sections := [?]Section {
 		{title = "General", switches = general_switches, choices = {.Start_View}, text_size = true},
-		{title = "Streams", switches = {.Low_Latency, .Follow_Raids, .Next_Clip, .Watch_Points}, choices = {.Latency_Buffer, .Max_Quality}, language = true},
+		{title = "Streams", switches = {.Low_Latency, .Follow_Raids, .Next_Clip, .Watch_Points}, choices = {.Latency_Buffer, .Max_Quality, .Video_Enhancement}, language = true},
 		{title = "Live notifications", choices = {.Notify_For}, lists = {.Notify_Channels}, notifications = true},
 		{title = "Chat", switches = {.Chat_Sync, .Chat_Timestamps, .Chat_Highlight_Staff, .Chat_Hide_Bots, .Chat_Alternate_Lines}, lists = {.Highlights, .Ignored}},
 		{title = "Blocked", lists = {.Blocked_Channels, .Blocked_Categories}},

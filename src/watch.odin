@@ -318,7 +318,7 @@ start_stream :: proc(app: ^App, signed: bool) {
 		return
 	}
 	w.streamlink = s
-	player_load(&app.player, streamlink_url(&w.streamlink), l.low_latency, l.latency_buffer_ms)
+	player_load(&app.player, streamlink_url(&w.streamlink), l.low_latency, l.latency_buffer_ms, l.video_enhancement)
 }
 
 // Switches the stream to `q` (restarting it) and remembers it for every channel.
@@ -635,7 +635,7 @@ watch_stream_ended :: proc(app: ^App) -> bool {
 				return false
 			}
 			w.ended_at = 0
-			player_load(&app.player, streamlink_url(&w.streamlink), app.layout.low_latency, app.layout.latency_buffer_ms)
+			player_load(&app.player, streamlink_url(&w.streamlink), app.layout.low_latency, app.layout.latency_buffer_ms, app.layout.video_enhancement)
 			return true
 		}
 		if !done && w.status == .Playing {

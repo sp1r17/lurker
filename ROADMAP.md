@@ -96,6 +96,7 @@ Playback and notifications:
 - A video enhancement setting with three presets: Off; Balanced, with
   debanding and a sharper scaler at almost no cost; and Upscale, which adds a
   neural upscaler (FSRCNNX or RAVU) when the window is bigger than the video
+  (done, with FSRCNNX)
 - Audio normalization, evening out loud and quiet streamers and sudden alerts
 - Choosing the audio output device, and an audio delay for Bluetooth
   headphones

@@ -2,6 +2,8 @@ package app
 
 import "core:fmt"
 import "core:log"
+import "core:os"
+import "core:path/filepath"
 import "core:strings"
 import "core:time"
 import "mpv"
@@ -175,38 +177,123 @@ LOW_LATENCY_OPTIONS :: "audio-buffer=0,stream-buffer-size=4k,demuxer-lavf-o-add=
 // none, 2.5 s with 2 s, 3.5 s with 3 s).
 LOW_LATENCY_BUFFERS :: [?]int{0, 2000, 3000, 4000}
 
+// What mpv does to the picture (Layout.video_enhancement).
+Video_Enhancement :: enum {
+	Off,
+	// Debanding, against the banding Twitch's compression leaves in skies and
+	// gradients, and sharper scaling than mpv's default.
+	Balanced,
+	// Balanced, and FSRCNNX: a small neural network that doubles the picture's
+	// size with more detail than scaling alone. It runs only when the video is
+	// drawn at 1.3 times its size or more (the shader's own condition), such as
+	// 720p in a 1440p window or 1080p in fullscreen at 4K.
+	Upscale,
+}
+
+VIDEO_ENHANCEMENT_LABELS :: [Video_Enhancement]string {
+	.Off      = "Off",
+	.Balanced = "Balanced",
+	.Upscale  = "Upscale",
+}
+
+// FSRCNNX_x2_8-0-4-1 by igv (LGPL 3.0 or later), from
+// github.com/igv/FSRCNN-TensorFlow: the smaller and faster of its two models.
+@(private = "file")
+UPSCALE_SHADER :: #load("../assets/shaders/FSRCNNX_x2_8-0-4-1.glsl")
+@(private = "file")
+UPSCALE_SHADER_NAME :: "FSRCNNX_x2_8-0-4-1.glsl"
+
+// Debanding with mpv's default strength, and its sharpest scaler for both the
+// picture and its colour, which Twitch sends at half the resolution.
+@(private = "file")
+BALANCED_OPTIONS :: "deband=yes,scale=ewa_lanczossharp,cscale=ewa_lanczossharp"
+
+// The options for `v`, for this file only; "" for none. Allocated with the
+// temp allocator.
+video_options :: proc(v: Video_Enhancement) -> string {
+	switch v {
+	case .Off:
+		return ""
+	case .Balanced:
+		return BALANCED_OPTIONS
+	case .Upscale:
+		path, ok := upscale_shader_path()
+		if !ok {
+			return BALANCED_OPTIONS
+		}
+		// mpv's %length% quoting, should the path have a comma.
+		return fmt.tprintf("%s,glsl-shaders=%%%d%%%s", BALANCED_OPTIONS, len(path), path)
+	}
+	return ""
+}
+
+// The bundled upscaling shader, as a file in the cache for mpv to read, written
+// unless it's there already (cache pruning may have removed it). Allocated with
+// the temp allocator.
+@(private = "file")
+upscale_shader_path :: proc() -> (path: string, ok: bool) {
+	dir := cache_dir() or_return
+	joined, err := filepath.join({dir, UPSCALE_SHADER_NAME}, context.temp_allocator)
+	if err != nil {
+		return "", false
+	}
+	if !os.exists(joined) {
+		cache_store(joined, UPSCALE_SHADER)
+	}
+	if !os.exists(joined) {
+		log.warn("can't write the upscaling shader: upscaling is off")
+		return "", false
+	}
+	return joined, true
+}
+
 // Plays `url`. With `low_latency`, mpv buffers as little as it can, or
-// `buffer_ms` of video; the options apply to this file only, so they're gone
-// with the next.
-player_load :: proc(p: ^Player, url: string, low_latency := false, buffer_ms := 0) {
+// `buffer_ms` of video; `video` is what it does to the picture. The options
+// apply to this file only, so they're gone with the next.
+player_load :: proc(p: ^Player, url: string, low_latency := false, buffer_ms := 0, video := Video_Enhancement.Off) {
 	stats_reset(&p.stats)
-	curl := strings.clone_to_cstring(url, context.temp_allocator)
+	options := make([dynamic]string, context.temp_allocator)
 	if low_latency {
 		cache := "cache=no,cache-pause=no"
 		if buffer_ms > 0 {
 			cache = fmt.tprintf("cache=yes,cache-pause=yes,cache-pause-initial=yes,cache-pause-wait=%.1f", f64(buffer_ms) / 1000)
 		}
-		options := strings.clone_to_cstring(fmt.tprintf("%s,%s", cache, LOW_LATENCY_OPTIONS), context.temp_allocator)
-		player_command(p, {"loadfile", curl, "replace", "-1", options})
-	} else {
-		player_command(p, {"loadfile", curl})
+		append(&options, cache, LOW_LATENCY_OPTIONS)
 	}
+	if v := video_options(video); v != "" {
+		append(&options, v)
+	}
+	load_with_options(p, url, options[:])
 }
 
 // Plays `url` from `start` seconds in (for a past broadcast). With
 // `online_segments`, `url` is a local playlist whose segments are on the web,
 // which FFmpeg only fetches from a local playlist when told to.
-player_load_at :: proc(p: ^Player, url: string, start: f64, online_segments := false) {
+player_load_at :: proc(p: ^Player, url: string, start: f64, online_segments := false, video := Video_Enhancement.Off) {
 	stats_reset(&p.stats)
-	curl := strings.clone_to_cstring(url, context.temp_allocator)
-	options := fmt.tprintf("start=%.1f", start)
+	options := make([dynamic]string, context.temp_allocator)
+	append(&options, fmt.tprintf("start=%.1f", start))
 	if online_segments {
 		// mpv's %length% quoting, for the commas in the value.
 		whitelist :: "protocol_whitelist=[file,http,https,tcp,tls,crypto]"
-		options = fmt.tprintf("%s,demuxer-lavf-o-add=%%%d%%%s", options, len(whitelist), whitelist)
+		append(&options, fmt.tprintf("demuxer-lavf-o-add=%%%d%%%s", len(whitelist), whitelist))
 	}
-	coptions := strings.clone_to_cstring(options, context.temp_allocator)
-	player_command(p, {"loadfile", curl, "replace", "-1", coptions})
+	if v := video_options(video); v != "" {
+		append(&options, v)
+	}
+	load_with_options(p, url, options[:])
+}
+
+// loadfile with per-file options, joined with commas.
+@(private = "file")
+load_with_options :: proc(p: ^Player, url: string, options: []string) {
+	curl := strings.clone_to_cstring(url, context.temp_allocator)
+	if len(options) == 0 {
+		player_command(p, {"loadfile", curl})
+		return
+	}
+	joined := strings.join(options, ",", context.temp_allocator)
+	player_command(p, {"loadfile", curl, "replace", "-1", strings.clone_to_cstring(joined, context.temp_allocator)})
 }
 
 // Where playback is, in seconds, if anything's playing.
