@@ -93,6 +93,9 @@ Playback and notifications:
 
 - Lower the quality when the stream keeps buffering
 - Muted parts of past broadcasts shown on the seek bar
+- A video enhancement setting with three presets: Off; Balanced, with
+  debanding and a sharper scaler at almost no cost; and Upscale, which adds a
+  neural upscaler (FSRCNNX or RAVU) when the window is bigger than the video
 - Notify when a followed channel changes its title or category
 - Keyboard shortcut list in the app (`?`)
 
