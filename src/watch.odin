@@ -75,6 +75,11 @@ Watch :: struct {
 	live_now:         bool,
 	// Until when (Assets.now_ms) the volume bar shows.
 	volume_osd_until: int,
+	// When the notice from switching upscaling with U goes, in assets.now_ms.
+	upscale_osd_until: int,
+	// Where the stream stats end, for the volume bar and that notice to go
+	// below them; 0 while they're hidden. Set while drawing.
+	stats_bottom: f32,
 	// Until when the video's controls show; the quality menu is open.
 	controls_until:   int,
 	// When mpv reached the stream's end (Assets.now_ms), while streamlink is still
@@ -775,6 +780,8 @@ watch_key :: proc(app: ^App, key: sdl.KeyboardEvent) -> bool {
 		restart_stream(app)
 	case sdl.K_I:
 		watch_toggle_stats(app)
+	case sdl.K_U:
+		watch_toggle_upscaling(app)
 	case sdl.K_RETURN, sdl.K_KP_ENTER:
 		if (w.status == .Offline || w.status == .Ended) && w.vod_state == .Found {
 			watch_play_vod(app)
@@ -795,6 +802,8 @@ set_volume :: proc(app: ^App, volume: int, muted: bool) {
 	l.muted = muted
 	apply_volume(app)
 	app.watch.volume_osd_until = app.assets.now_ms + VOLUME_OSD_MS
+	// They show in the same place.
+	app.watch.upscale_osd_until = 0
 	layout_save(l)
 }
 
@@ -819,8 +828,7 @@ draw_volume :: proc(app: ^App) {
 	lh := line_height(r, .Bold, size)
 	label := "Muted" if app.layout.muted else fmt.tprintf("Volume %d%%", app.layout.volume)
 	bar_w := VOLUME_BAR_WIDTH * scale
-	// Below the stream info bar while that's showing.
-	top := w.video_rect.y + (stream_info_height(app) if controls_visible(app) else 0)
+	top := osd_top(app)
 	panel := Rect{w.video_rect.x + 16 * scale, top + 16 * scale, bar_w + 2 * pad, lh + 14 * scale + 2 * pad}
 	draw_rect(r, panel, CHAT_TOGGLE_BACKGROUND)
 	draw_text(r, .Bold, size, panel.x + pad, panel.y + pad, label, BROWSE_TEXT)
@@ -841,8 +849,55 @@ draw_volume :: proc(app: ^App) {
 
 // ms until the volume bar hides, for the main loop's wait; -1 if it isn't showing.
 volume_osd_wait :: proc(app: ^App) -> int {
-	left := app.watch.volume_osd_until - app.assets.now_ms
+	left := max(app.watch.volume_osd_until, app.watch.upscale_osd_until) - app.assets.now_ms
 	return left if app.screen == .Watch && left > 0 else -1
+}
+
+// Switches the upscaling shader on or off for what's playing, whatever the
+// setting, to compare the two on the same picture, and says which it is now.
+@(private = "file")
+watch_toggle_upscaling :: proc(app: ^App) {
+	w := &app.watch
+	if w.status != .Playing {
+		return
+	}
+	if !player_set_upscaling(&app.player, !app.player.upscaling) {
+		return
+	}
+	w.upscale_osd_until = app.assets.now_ms + VOLUME_OSD_MS
+	w.volume_osd_until = 0
+}
+
+// Where the volume bar and the U notice go, 16 px above their top: below the
+// stream info bar while that's showing, and below the stream stats.
+@(private = "file")
+osd_top :: proc(app: ^App) -> f32 {
+	w := &app.watch
+	top := w.video_rect.y + (stream_info_height(app) if controls_visible(app) else 0)
+	if w.stats_bottom > 0 {
+		top = max(top, w.stats_bottom - 8 * app.scale)
+	}
+	return top
+}
+
+// The notice from U, where the volume bar shows: what upscaling is doing now.
+@(private = "file")
+draw_upscale_osd :: proc(app: ^App) {
+	w := &app.watch
+	if app.assets.now_ms >= w.upscale_osd_until {
+		return
+	}
+	r := &app.assets.renderer
+	scale := app.scale
+	size := BROWSE_CARD_TEXT_SIZE * scale
+	pad := 10 * scale
+	lh := line_height(r, .Bold, size)
+	s := app.player.stats
+	label := fmt.tprintf("Upscaling: %s", upscaling_text(app.player.upscaling, {s.width.? or_else 0, s.height.? or_else 0}, {w.video_rect.w, w.video_rect.h}))
+	top := osd_top(app)
+	panel := Rect{w.video_rect.x + 16 * scale, top + 16 * scale, text_width(r, .Bold, size, label) + 2 * pad, lh + 2 * pad}
+	draw_rect(r, panel, CHAT_TOGGLE_BACKGROUND)
+	draw_text(r, .Bold, size, panel.x + pad, panel.y + pad, label, BROWSE_TEXT)
 }
 
 // Shows or hides the chats, and remembers it for every channel.
@@ -1020,9 +1075,10 @@ draw_watch :: proc(app: ^App) {
 		w.videos_button = {}
 	}
 	draw_stream_info(app)
-	draw_volume(app)
-	draw_resume_notice(app)
 	draw_stream_stats(app)
+	draw_volume(app)
+	draw_upscale_osd(app)
+	draw_resume_notice(app)
 	draw_controls(app)
 	w.hide_button = {}
 	w.show_tab = {}

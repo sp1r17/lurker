@@ -88,6 +88,10 @@ layout_reads_video_enhancement :: proc(t: ^testing.T) {
 	testing.expect(t, parse_layout(transmute([]byte)string(`{"splits":{},"video_enhancement":"Sharpest","volume":40}`), &newer))
 	testing.expect_value(t, newer.video_enhancement, Video_Enhancement.Off)
 	testing.expect_value(t, newer.volume, 40)
-	testing.expect_value(t, video_options(.Off), "")
-	testing.expect(t, video_options(.Balanced) != "")
+	off, off_upscales := video_options(.Off)
+	testing.expect_value(t, off, "")
+	testing.expect(t, !off_upscales)
+	balanced, balanced_upscales := video_options(.Balanced)
+	testing.expect(t, balanced != "")
+	testing.expect(t, !balanced_upscales)
 }
