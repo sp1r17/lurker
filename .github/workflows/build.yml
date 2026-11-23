@@ -17,6 +17,11 @@ jobs:
     container:
       image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-26.08
       options: --privileged
+      # The image's Flatpak installation on a volume, which Docker fills from the
+      # image: updating the SDK renames folders from the image's own layer, which
+      # overlayfs refuses on some runners ("Invalid cross-device link").
+      volumes:
+        - /var/lib/flatpak
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # Builds the Flatpak (with Odin, mpv and streamlink) and runs the tests.
