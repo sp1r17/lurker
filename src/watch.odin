@@ -75,6 +75,10 @@ Watch :: struct {
 	live_now:         bool,
 	// Until when (Assets.now_ms) the volume bar shows.
 	volume_osd_until: int,
+	// Stalls of the live stream, and the quality it was lowered to for them
+	// (buffering.odin); nil for the saved one.
+	buffering:        Buffering,
+	quality_override: Maybe(Quality),
 	// Until when the notice after a screenshot (S) shows, and whether it was
 	// saved (screenshot.odin).
 	screenshot_until: int,
@@ -334,10 +338,13 @@ start_stream :: proc(app: ^App, signed: bool) {
 watch_set_quality :: proc(app: ^App, q: Quality) {
 	w := &app.watch
 	w.quality_menu = false
-	if q == app.layout.quality {
+	was := quality_playing(watch_quality(app), w.qualities)
+	// Picking one undoes lowering it for buffering.
+	lowered := w.quality_override != nil
+	w.quality_override = nil
+	if q == app.layout.quality && !lowered {
 		return
 	}
-	was := quality_playing(watch_quality(app), w.qualities)
 	app.layout.quality = q
 	layout_save(&app.layout)
 	// Source, say, may be the rendition already playing.
@@ -368,7 +375,6 @@ watch_toggle_low_latency :: proc(app: ^App) {
 	restart_stream(app)
 }
 
-@(private = "file")
 restart_stream :: proc(app: ^App) {
 	if app.watch.playing_vod {
 		// Picks up where it was, in the new quality.

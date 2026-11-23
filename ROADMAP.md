@@ -91,7 +91,7 @@ Chat:
 
 Playback and notifications:
 
-- Lower the quality when the stream keeps buffering
+- Lower the quality when the stream keeps buffering (done)
 - Muted parts of past broadcasts shown on the seek bar (done)
 - A video enhancement setting: Off, or Balanced, with debanding and a sharper
   scaler at almost no cost (done; a neural upscaler, FSRCNNX, was tried and
