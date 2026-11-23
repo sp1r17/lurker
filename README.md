@@ -213,6 +213,7 @@ settings are stored in `~/.config/lurker` (`%APPDATA%\lurker` on Windows).
 | / | Search channels |
 | Ctrl+= / Ctrl+- / Ctrl+0, or Ctrl+scroll | Text size |
 | Esc, or the mouse's back button | Back |
+| ? | This list, in the app |
 | Q | Quit |
 
 On macOS, use Cmd instead of Ctrl, and Option+Left / Right to move by word.

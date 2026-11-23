@@ -156,6 +156,8 @@ App :: struct {
 	// Until when (Assets.now_ms) the text size shows after a change, and Ctrl+wheel
 	// scrolling not yet a whole step.
 	text_size_osd_until: int,
+	// The keyboard shortcut list (?) is showing (shortcuts.odin).
+	shortcuts_open:      bool,
 	text_size_wheel:     f32,
 	// Whether the window has the keyboard focus: mentions arriving without it
 	// count as unread.
@@ -408,6 +410,12 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 		}
 	case e.type == .KEY_DOWN && text_size_key(app, e.key):
 		redraw^ = true
+	case e.type == .KEY_DOWN && app.shortcuts_open:
+		shortcuts_key(app, e.key)
+		redraw^ = true
+	case e.type == .MOUSE_BUTTON_DOWN && app.shortcuts_open:
+		app.shortcuts_open = false
+		redraw^ = true
 	case e.type == .KEY_DOWN && app.screen == .Watch && is_typing(app):
 		// Typing: every key goes to the box.
 		pane_input_key(app, e.key)
@@ -417,6 +425,9 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 		redraw^ = true
 	case e.type == .KEY_DOWN && app.screen == .Browse && settings_typing(&app.browse):
 		settings_key(app, e.key)
+		redraw^ = true
+	case e.type == .KEY_DOWN && is_question_key(e.key):
+		app.shortcuts_open = true
 		redraw^ = true
 	case e.type == .KEY_DOWN:
 		switch e.key.key {
@@ -750,6 +761,7 @@ draw :: proc(app: ^App) {
 			draw_watch(app)
 		}
 		draw_text_size_osd(app, screen)
+		draw_shortcuts(app, screen)
 		app.mouse = mouse
 		settled := app.menu_rect_next == app.menu_rect
 		app.menu_rect = app.menu_rect_next
