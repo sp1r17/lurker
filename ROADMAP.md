@@ -92,7 +92,8 @@ Chat:
   lines between messages, the viewer or chatter count above the chat, and still
   emotes instead of animated ones (done; bits were already highlighted, and the
   count is viewers, which needs signing in)
-- Whispers
+- Whispers (done: received in the chat being watched, sent with `/w`; sending
+  not yet checked, as Twitch's answer to a test whisper to yourself was unclear)
 
 Playback and notifications:
 

@@ -156,6 +156,8 @@ App :: struct {
 	// Until when (Assets.now_ms) the text size shows after a change, and Ctrl+wheel
 	// scrolling not yet a whole step.
 	text_size_osd_until: int,
+	// Whispers received, shown in the chat (whispers.odin).
+	whispers:            Whispers,
 	// The keyboard shortcut list (?) is showing (shortcuts.odin).
 	shortcuts_open:      bool,
 	text_size_wheel:     f32,
@@ -247,6 +249,7 @@ run :: proc(channels: []string, config: Config, video: Maybe(Twitch_Link) = nil)
 	defer emotes_destroy(&a.emotes)
 	a.client_id = app.client_id
 	defer room_names_destroy(&a.rooms)
+	defer whispers_destroy(&app.whispers)
 	defer user_emotes_destroy(&a.user_emotes)
 	defer emoji_table_destroy(&a.emoji)
 	jobs_start(&a.jobs, sdl.RegisterEvents(1))
@@ -317,7 +320,7 @@ run :: proc(channels: []string, config: Config, video: Maybe(Twitch_Link) = nil)
 		// Wake up for the next animation frame, browse refresh or sign-in poll,
 		// whichever is due first.
 		wait := a.next_frame_ms if a.next_frame_ms >= 0 else -1
-		dues := []int{-1, -1, volume_osd_wait(&app), controls_wait(&app), stream_info_tick(&app), stream_end_tick(&app), stream_retry_tick(&app), text_size_osd_wait(&app), replay_tick(&app), watched_tick(&app), resume_notice_wait(&app), screenshot_notice_wait(&app), buffering_tick(&app), bonus_tick(&app), drops_tick(&app), chat_banner_tick(&app), live_poll_tick(&app), update_tick(&app), ping_tick(&app), latency_tick(&app), chat_delay_tick(&app), settings_wait(&app), points_tick(&app)}
+		dues := []int{-1, -1, volume_osd_wait(&app), controls_wait(&app), stream_info_tick(&app), stream_end_tick(&app), stream_retry_tick(&app), text_size_osd_wait(&app), replay_tick(&app), watched_tick(&app), resume_notice_wait(&app), screenshot_notice_wait(&app), buffering_tick(&app), bonus_tick(&app), drops_tick(&app), chat_banner_tick(&app), whispers_tick(&app), live_poll_tick(&app), update_tick(&app), ping_tick(&app), latency_tick(&app), chat_delay_tick(&app), settings_wait(&app), points_tick(&app)}
 		if app.screen == .Browse {
 			dues[0], dues[1] = browse_tick(&app), sign_in_tick(&app)
 		}
@@ -706,6 +709,10 @@ finish_jobs :: proc(app: ^App) {
 			finish_room_name_job(&app.assets, &p)
 		case Chat_Banner_Job:
 			finish_chat_banner_job(app, &p)
+		case Whispers_Job:
+			finish_whispers_job(app, &p)
+		case Whisper_Send_Job:
+			finish_whisper_send_job(app, &p)
 		}
 		destroy_job(job)
 	}
