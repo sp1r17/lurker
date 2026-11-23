@@ -103,6 +103,7 @@ Playback and notifications:
 - Screenshots of the video, without Lurker's UI, at the stream's resolution
   (done)
 - Stepping frame by frame through past broadcasts and clips (`,` and `.`)
+  (done)
 - Notify when a followed channel changes its title or category
 - Keyboard shortcut list in the app (`?`)
 

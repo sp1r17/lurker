@@ -197,6 +197,7 @@ settings are stored in `~/.config/lurker` (`%APPDATA%\lurker` on Windows).
 | Up / Down | Volume |
 | Left / Right | Seek 10 seconds (videos) |
 | [ / ] | Slower / faster (videos) |
+| , / . | A frame back / on, paused (videos) |
 | Page Up / Page Down | Previous / next chapter |
 | Home | Start a resumed video over |
 | F | Fullscreen |
