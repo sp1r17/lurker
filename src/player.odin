@@ -86,6 +86,7 @@ player_set_audio_delay :: proc(p: ^Player, ms: int) {
 // How playback is going, as mpv last reported it, for the stream stats. Reset
 // with each file played; nil while mpv has no value.
 Player_Stats :: struct {
+	width:           Maybe(i64),
 	height:          Maybe(i64),
 	fps:             Maybe(f64),
 	// mpv's names ("h264"; "vaapi", "no"). Owned.
@@ -112,6 +113,7 @@ STATS_PROPERTIES := [?]struct {
 	name:   cstring,
 	format: mpv.Format,
 } {
+	{"video-params/w", .Int64},
 	{"video-params/h", .Int64},
 	{"estimated-vf-fps", .Double},
 	{"video-format", .String},
@@ -336,6 +338,8 @@ property_changed :: proc(p: ^Player, prop: ^mpv.Event_Property) {
 	}
 	s := &p.stats
 	switch string(prop.name) {
+	case "video-params/w":
+		s.width = integer
 	case "video-params/h":
 		s.height = integer
 	case "estimated-vf-fps":
@@ -404,6 +408,46 @@ Player_Event :: enum {
 	// The stream reached its end, or failed (the reason is logged).
 	Ended,
 }
+
+// The video's current picture at its own size, without Lurker's UI: RGBA rows,
+// top first, opaque. mpv draws it again into a texture that size, and it's read
+// back; mpv's own screenshot command can't read a picture the hardware decoder
+// still holds (NVDEC: "cuda not supported by libswscale"). Must be called with
+// the window's OpenGL context current.
+player_capture :: proc(p: ^Player, allocator := context.allocator) -> (pixels: []u8, size: [2]i32, ok: bool) {
+	w := i32(p.stats.width.? or_else 0)
+	h := i32(p.stats.height.? or_else 0)
+	if w <= 0 || h <= 0 || p.render == nil {
+		return nil, {}, false
+	}
+	fbo, texture: u32
+	gl.GenFramebuffers(1, &fbo)
+	gl.GenTextures(1, &texture)
+	defer {
+		gl.DeleteFramebuffers(1, &fbo)
+		gl.DeleteTextures(1, &texture)
+	}
+	gl.BindTexture(gl.TEXTURE_2D, texture)
+	gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, nil)
+	gl.BindFramebuffer(gl.FRAMEBUFFER, fbo)
+	gl.FramebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0)
+	target := mpv.Opengl_Fbo{fbo = i32(fbo), w = w, h = h}
+	// As player_render: the first row read is the picture's top. And now,
+	// rather than when the frame is due.
+	flip_y: i32 = 0
+	block: i32 = 0
+	params := [?]mpv.Render_Param{{.Opengl_Fbo, &target}, {.Flip_Y, &flip_y}, {.Block_For_Target_Time, &block}, {}}
+	mpv.render_context_render(p.render, raw_data(params[:]))
+	pixels = make([]u8, int(w) * int(h) * 4, allocator)
+	gl.BindFramebuffer(gl.FRAMEBUFFER, fbo)
+	gl.PixelStorei(gl.PACK_ALIGNMENT, 1)
+	gl.ReadPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, raw_data(pixels))
+	gl.BindFramebuffer(gl.FRAMEBUFFER, 0)
+	for i := 3; i < len(pixels); i += 4 {
+		pixels[i] = 255
+	}
+	return pixels, {w, h}, true
+}
 Player_Events :: bit_set[Player_Event]
 
 // Handles mpv's waiting events, returning the ones the app acts on.
@@ -437,6 +481,7 @@ player_handle_events :: proc(p: ^Player) -> (events: Player_Events) {
 			if e.error < 0 {
 				log.warnf("mpv command failed: %s", mpv.error_string(e.error))
 			}
+
 		}
 	}
 }

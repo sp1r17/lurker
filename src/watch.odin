@@ -75,6 +75,10 @@ Watch :: struct {
 	live_now:         bool,
 	// Until when (Assets.now_ms) the volume bar shows.
 	volume_osd_until: int,
+	// Until when the notice after a screenshot (S) shows, and whether it was
+	// saved (screenshot.odin).
+	screenshot_until: int,
+	screenshot_saved: bool,
 	// Where the stream stats end, for the volume bar to go below them; 0 while
 	// they're hidden. Set while drawing.
 	stats_bottom:     f32,
@@ -778,6 +782,8 @@ watch_key :: proc(app: ^App, key: sdl.KeyboardEvent) -> bool {
 		restart_stream(app)
 	case sdl.K_I:
 		watch_toggle_stats(app)
+	case sdl.K_S:
+		watch_screenshot(app)
 	case sdl.K_RETURN, sdl.K_KP_ENTER:
 		if (w.status == .Offline || w.status == .Ended) && w.vod_state == .Found {
 			watch_play_vod(app)
@@ -1037,6 +1043,7 @@ draw_watch :: proc(app: ^App) {
 	draw_stream_stats(app)
 	draw_volume(app)
 	draw_resume_notice(app)
+	draw_screenshot_notice(app)
 	draw_controls(app)
 	w.hide_button = {}
 	w.show_tab = {}

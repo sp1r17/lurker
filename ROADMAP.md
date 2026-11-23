@@ -101,6 +101,7 @@ Playback and notifications:
 - Choosing the audio output device, and an audio delay for Bluetooth
   headphones (done)
 - Screenshots of the video, without Lurker's UI, at the stream's resolution
+  (done)
 - Stepping frame by frame through past broadcasts and clips (`,` and `.`)
 - Notify when a followed channel changes its title or category
 - Keyboard shortcut list in the app (`?`)

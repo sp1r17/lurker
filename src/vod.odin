@@ -333,7 +333,6 @@ draw_resume_notice :: proc(app: ^App) {
 
 // A one-line notice centred near the video's top, below the controls. Returns
 // where it is.
-@(private = "file")
 draw_notice :: proc(app: ^App, label: string) -> Rect {
 	w := &app.watch
 	r := &app.assets.renderer
