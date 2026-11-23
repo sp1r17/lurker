@@ -140,6 +140,8 @@ Watch :: struct {
 	// video they're for; the playback speed; the chapter list's state and, from
 	// the last draw, its button, items and the speed button.
 	chapters:         [dynamic]Chapter,
+	// The past broadcast's muted stretches (vod_extras.odin). Owned.
+	muted:            [dynamic]Muted_Segment,
 	storyboard:       Storyboard,
 	extras_id:        string,
 	speed:            f64,

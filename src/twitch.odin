@@ -1424,6 +1424,74 @@ parse_chapters_response :: proc(body: []byte) -> (chapters: []Chapter, err: Twit
 	return list, .None
 }
 
+// A stretch of a past broadcast with its sound muted (for copyrighted music), in
+// seconds.
+Muted_Segment :: struct {
+	start, length: int,
+}
+
+// The muted stretches of past broadcast `id`, in order, those that touch joined
+// into one. Allocated with the temp allocator.
+get_muted_segments :: proc(client_id, token, id: string) -> (segments: []Muted_Segment, err: Twitch_Error) {
+	variables := make(map[string]string, context.temp_allocator)
+	variables["id"] = id
+	body := gql_post(
+		client_id,
+		token,
+		"query($id: ID!) { video(id: $id) { muteInfo { mutedSegmentConnection { nodes { offset duration } } } } }",
+		variables,
+	) or_return
+	return parse_muted_segments_response(body)
+}
+
+parse_muted_segments_response :: proc(body: []byte) -> (segments: []Muted_Segment, err: Twitch_Error) {
+	r: struct {
+		data:   struct {
+			video: Maybe(struct {
+				muteInfo: Maybe(struct {
+					mutedSegmentConnection: Maybe(struct {
+						nodes: []struct {
+							offset:   int,
+							duration: int,
+						},
+					}),
+				}),
+			}),
+		},
+		errors: Graphql_Errors,
+	}
+	if json.unmarshal(body, &r, allocator = context.temp_allocator) != nil {
+		return nil, .Bad_Json
+	}
+	check_errors(r.errors) or_return
+	video, has_video := r.data.video.?
+	if !has_video {
+		return nil, .None
+	}
+	info := video.muteInfo.? or_else {}
+	connection := info.mutedSegmentConnection.? or_else {}
+	list := make([dynamic]Muted_Segment, context.temp_allocator)
+	for n in connection.nodes {
+		if n.duration <= 0 {
+			continue
+		}
+		append(&list, Muted_Segment{n.offset, n.duration})
+	}
+	slice.sort_by(list[:], proc(a, b: Muted_Segment) -> bool {return a.start < b.start})
+	joined := make([dynamic]Muted_Segment, context.temp_allocator)
+	for s in list {
+		if len(joined) > 0 {
+			last := &joined[len(joined) - 1]
+			if s.start <= last.start + last.length {
+				last.length = max(last.length, s.start + s.length - last.start)
+				continue
+			}
+		}
+		append(&joined, s)
+	}
+	return joined[:], .None
+}
+
 // A message from a past broadcast's chat, as a chat message, and when in the
 // broadcast it was sent.
 Replay_Message :: struct {

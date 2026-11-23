@@ -106,6 +106,7 @@ Vod_Extras_Job :: struct {
 	// Owned (with the chapters' titles).
 	chapters:     [dynamic]Chapter,
 	storyboard:   Storyboard,
+	muted:        [dynamic]Muted_Segment,
 }
 
 destroy_vod_extras_job :: proc(p: ^Vod_Extras_Job) {
@@ -115,6 +116,7 @@ destroy_vod_extras_job :: proc(p: ^Vod_Extras_Job) {
 	delete(p.previews_url)
 	chapters_destroy(&p.chapters)
 	storyboard_destroy(&p.storyboard)
+	delete(p.muted)
 }
 
 chapters_destroy :: proc(chapters: ^[dynamic]Chapter) {
@@ -134,6 +136,8 @@ vod_extras_request :: proc(app: ^App) {
 	}
 	chapters_destroy(&w.chapters)
 	storyboard_release(&app.assets.images, &w.storyboard)
+	delete(w.muted)
+	w.muted = nil
 	delete(w.extras_id)
 	w.extras_id = strings.clone(w.vod.id)
 	jobs_add(
@@ -157,6 +161,9 @@ run_vod_extras_job :: proc(job: ^Job) {
 			append(&p.chapters, Chapter{c.start, c.length, strings.clone(c.title)})
 		}
 	}
+	if muted, err := get_muted_segments(p.client_id, p.auth.access_token, p.vod_id); err == .None {
+		append(&p.muted, ..muted)
+	}
 	if p.previews_url != "" {
 		if res, ok := http_request(p.previews_url, allocator = context.temp_allocator); ok && res.status == 200 {
 			p.storyboard, _ = parse_storyboard(res.body, p.previews_url)
@@ -173,6 +180,8 @@ finish_vod_extras_job :: proc(app: ^App, p: ^Vod_Extras_Job) {
 	w.chapters, p.chapters = p.chapters, nil
 	storyboard_release(&app.assets.images, &w.storyboard)
 	w.storyboard, p.storyboard = p.storyboard, {}
+	delete(w.muted)
+	w.muted, p.muted = p.muted, nil
 }
 
 // Forgets the chapters and storyboard (leaving the watch).
@@ -180,6 +189,8 @@ vod_extras_clear :: proc(app: ^App) {
 	w := &app.watch
 	chapters_destroy(&w.chapters)
 	storyboard_release(&app.assets.images, &w.storyboard)
+	delete(w.muted)
+	w.muted = nil
 	delete(w.extras_id)
 	w.extras_id = ""
 }
@@ -373,6 +384,19 @@ draw_seek_preview :: proc(app: ^App, track: Rect, duration: f64) {
 }
 
 // Marks on the seek bar's track where each chapter after the first begins.
+// The muted stretches of the seek bar's track, in the volume boost's orange,
+// over what's been played too.
+draw_muted_segments :: proc(app: ^App, track: Rect, duration: f64) {
+	r := &app.assets.renderer
+	for s in app.watch.muted {
+		x := track.x + track.w * f32(f64(s.start) / duration)
+		end := track.x + track.w * f32(min(f64(s.start + s.length) / duration, 1))
+		if end > x {
+			draw_rect(r, {x, track.y, max(end - x, app.scale), track.h}, VOLUME_BOOST)
+		}
+	}
+}
+
 draw_chapter_marks :: proc(app: ^App, track: Rect, duration: f64) {
 	w := &app.watch
 	r := &app.assets.renderer

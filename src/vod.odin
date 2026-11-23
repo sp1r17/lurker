@@ -516,6 +516,7 @@ draw_vod_seek :: proc(app: ^App, right: f32) {
 	track := Rect{bar_x, panel.y + (panel.h - track_h) / 2, bar_w, track_h}
 	draw_rect(r, track, CHAT_TOGGLE_BACKGROUND)
 	draw_rect(r, {track.x, track.y, track.w * f32(pos / duration), track.h}, BROWSE_ACCENT)
+	draw_muted_segments(app, track, duration)
 	draw_chapter_marks(app, track, duration)
 	if in_rect(w.seek_bar, app.mouse.x, app.mouse.y) {
 		// Where a click would go.
