@@ -85,3 +85,16 @@ rules_are_saved :: proc(t: ^testing.T) {
 	testing.expect_value(t, strings.join(l.chat.highlights[:], ",", context.temp_allocator), "gg")
 	testing.expect_value(t, strings.join(l.chat.ignored[:], ",", context.temp_allocator), "nightbot")
 }
+
+@(test)
+shared_chat_source_is_kept :: proc(t: ^testing.T) {
+	other := chat("@id=1;room-id=100;source-room-id=200 :a!a@x PRIVMSG #chan :hi from the other channel")
+	defer destroy_chat_message(other)
+	testing.expect_value(t, other.source_room, "200")
+	own := chat("@id=2;room-id=100;source-room-id=100 :b!b@x PRIVMSG #chan :hi from here")
+	defer destroy_chat_message(own)
+	testing.expect_value(t, own.source_room, "")
+	plain := chat("@id=3;room-id=100 :c!c@x PRIVMSG #chan :no shared chat")
+	defer destroy_chat_message(plain)
+	testing.expect_value(t, plain.source_room, "")
+}

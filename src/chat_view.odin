@@ -66,6 +66,10 @@ Assets :: struct {
 	// The user's chat settings (Layout.chat), for laying messages out; nil in
 	// tests.
 	rules:         ^Chat_Rules,
+	// For looking things up from the chat (App.client_id; not owned), and the
+	// Shared Chat channels' names (shared_chat.odin).
+	client_id:     string,
+	rooms:         Room_Names,
 }
 
 // The user's own chat rules, kept in layout.json: phrases that highlight a message,
@@ -729,6 +733,10 @@ Message_Layout :: struct {
 	hide_reply:     bool,
 	timestamps:     bool,
 	hide_badges:    bool,
+	rooms_version:  int,
+	// The Shared Chat channel shown before the message, which its items point
+	// into (owned).
+	source:         string,
 	// The time shown before the message, which its items point into (owned).
 	stamp:          string,
 	height:         f32,
@@ -747,9 +755,12 @@ message_layout :: proc(a: ^Assets, channel: ^Emotes, m: ^Chat_Message, scale, wi
 message_layout_into :: proc(a: ^Assets, channel: ^Emotes, m: ^Chat_Message, l: ^Message_Layout, scale, width: f32, hide_reply := false) -> ^Message_Layout {
 	timestamps := a.rules != nil && a.rules.timestamps && m.sent_ms > 0
 	hide_badges := a.rules != nil && a.rules.hide_badges
-	if l.height > 0 && l.width == width && l.scale == scale && l.text_scale == a.renderer.text_scale && l.images_version == a.images.version && l.hide_reply == hide_reply && l.timestamps == timestamps && l.hide_badges == hide_badges {
+	// Only a message from another channel waits on a name.
+	rooms_version := a.rooms.version if m.source_room != "" else 0
+	if l.height > 0 && l.width == width && l.scale == scale && l.text_scale == a.renderer.text_scale && l.images_version == a.images.version && l.hide_reply == hide_reply && l.timestamps == timestamps && l.hide_badges == hide_badges && l.rooms_version == rooms_version {
 		return l
 	}
+	l.rooms_version = rooms_version
 	clear(&l.items)
 	l.hide_reply = hide_reply
 	l.timestamps = timestamps
@@ -801,6 +812,16 @@ message_layout_into :: proc(a: ^Assets, channel: ^Emotes, m: ^Chat_Message, l: ^
 		if stamp := format_chat_time(m.sent_ms); stamp != "" {
 			l.stamp = strings.clone(stamp)
 			put_text(&b, .Regular, CHAT_SYSTEM_TEXT, l.stamp)
+			space(&b, .Regular)
+		}
+	}
+	// Shared Chat: the channel it was sent in, when it's another.
+	delete(l.source)
+	l.source = ""
+	if m.source_room != "" {
+		if name, ok := room_name(a, m.source_room); ok {
+			l.source = strings.clone(name)
+			put_text(&b, .Bold, CHAT_SYSTEM_TEXT, l.source)
 			space(&b, .Regular)
 		}
 	}

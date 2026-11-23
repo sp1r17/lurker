@@ -245,6 +245,8 @@ run :: proc(channels: []string, config: Config, video: Maybe(Twitch_Link) = nil)
 
 	defer images_destroy(&a.images)
 	defer emotes_destroy(&a.emotes)
+	a.client_id = app.client_id
+	defer room_names_destroy(&a.rooms)
 	defer user_emotes_destroy(&a.user_emotes)
 	defer emoji_table_destroy(&a.emoji)
 	jobs_start(&a.jobs, sdl.RegisterEvents(1))
@@ -700,6 +702,8 @@ finish_jobs :: proc(app: ^App) {
 			finish_bonus_job(app, &p)
 		case Drops_Job:
 			finish_drops_job(app, &p)
+		case Room_Name_Job:
+			finish_room_name_job(&app.assets, &p)
 		}
 		destroy_job(job)
 	}
