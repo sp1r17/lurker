@@ -53,6 +53,7 @@ Job_Payload :: union {
 	Bonus_Job,
 	Drops_Job,
 	Room_Name_Job,
+	Chat_Banner_Job,
 }
 
 Jobs :: struct {
@@ -215,6 +216,8 @@ destroy_job :: proc(job: ^Job) {
 		destroy_drops_job(&p)
 	case Room_Name_Job:
 		destroy_room_name_job(&p)
+	case Chat_Banner_Job:
+		destroy_chat_banner_job(&p)
 	}
 	free(job)
 }

@@ -75,6 +75,8 @@ Watch :: struct {
 	live_now:         bool,
 	// Until when (Assets.now_ms) the volume bar shows.
 	volume_osd_until: int,
+	// What's pinned and predicted, shown above the chat (chat_banner.odin).
+	banner:           Chat_Banner,
 	// The channel points balance, and asking for it (bonus.odin); and checking
 	// for finished drops (drops.odin).
 	bonus:            Bonus,
@@ -258,6 +260,7 @@ watch_stop :: proc(app: ^App) {
 	destroy_vod(w.vod)
 	replay_destroy(&w.replay)
 	vod_extras_clear(app)
+	chat_banner_destroy(&w.banner)
 	delete(w.chapter_items)
 	w^ = {}
 	app.session += 1

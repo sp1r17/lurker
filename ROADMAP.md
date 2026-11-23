@@ -81,7 +81,9 @@ watch time from reports its own player sends, and streamlink sends none.
 
 Chat:
 
-- Pinned chat messages, and polls and predictions shown above the chat
+- Pinned chat messages, and polls and predictions shown above the chat (done
+  for pinned messages and predictions; polls aren't in Twitch's GraphQL as far
+  as Lurker can find)
 - Shared Chat: show which channel each message came from (done; not yet seen in
   a real Shared Chat session)
 - Chat over the video in fullscreen, with its position, size and background
