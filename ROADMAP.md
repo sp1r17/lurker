@@ -96,6 +96,11 @@ Playback and notifications:
 - A video enhancement setting with three presets: Off; Balanced, with
   debanding and a sharper scaler at almost no cost; and Upscale, which adds a
   neural upscaler (FSRCNNX or RAVU) when the window is bigger than the video
+- Audio normalization, evening out loud and quiet streamers and sudden alerts
+- Choosing the audio output device, and an audio delay for Bluetooth
+  headphones
+- Screenshots of the video, without Lurker's UI, at the stream's resolution
+- Stepping frame by frame through past broadcasts and clips (`,` and `.`)
 - Notify when a followed channel changes its title or category
 - Keyboard shortcut list in the app (`?`)
 
@@ -106,6 +111,10 @@ Playback and notifications:
 - A mini player while browsing: the stream being watched keeps playing in a
   small window or a live thumbnail
 - A preview of a stream when hovering its card
+- A buffered mode, the opposite of low latency: rewinding a live stream by a
+  few seconds, saving the last minute to a file, speeding up slightly to catch
+  up when the stream falls behind, and smooth motion on high refresh rate
+  screens
 - Themes
 
 ## 1.0: Release candidate
