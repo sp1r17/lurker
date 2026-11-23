@@ -203,6 +203,8 @@ Chat_Message :: struct {
 	deleted:   bool,
 	// Mentions the signed-in user.
 	mention:   bool,
+	// Sent by the person using Lurker (chat_view_add).
+	own:       bool,
 	// Said before the chat joined (chat_history.odin): drawn dimmed.
 	historical: bool,
 	// Why it's marked out ("First message"), shown above it, or "".

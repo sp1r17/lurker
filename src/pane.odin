@@ -228,6 +228,11 @@ draw_pane :: proc(app: ^App, p: ^Chat_Pane, focused: bool) {
 	// mentions are unread at its right.
 	draw_rect(r, p.header_rect, CHAT_HEADER)
 	title := p.channel if p.channel != "" else "New split"
+	// The watched channel's viewers, while it's live (Chat_Rules.viewer_count).
+	w := &app.watch
+	if app.layout.chat.viewer_count && p.channel != "" && p.channel == w.channel && w.has_info && !w.playing_vod && w.info.viewer_count > 0 {
+		title = fmt.tprintf("%s · %s viewers", p.channel, format_viewers(w.info.viewer_count))
+	}
 	size := BROWSE_CARD_TEXT_SIZE * scale
 	p.mention_badge = {}
 	title_room := p.header_rect.w - 16 * scale

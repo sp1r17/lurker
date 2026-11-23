@@ -82,6 +82,16 @@ Chat_Rules :: struct {
 	hide_bots:       bool,
 	// Every other message on a lighter background.
 	alternate_lines: bool,
+	// No badges before names.
+	hide_badges:     bool,
+	// Your own messages, marked out.
+	highlight_own:   bool,
+	// A thin line between messages.
+	separators:      bool,
+	// Emotes still, on their first frame.
+	still_emotes:    bool,
+	// The watched channel's viewer count above its chat.
+	viewer_count:    bool,
 }
 
 // Chat bots common enough to hide by name (Chat_Rules.hide_bots), lowercase.
@@ -107,6 +117,9 @@ CHAT_BOTS :: [?]string {
 CHAT_STREAMER_BACKGROUND :: Color{0xb0, 0x3a, 0x7a, 60}
 CHAT_MODERATOR_BACKGROUND :: Color{0x1f, 0x8f, 0x8f, 55}
 CHAT_ALTERNATE_BACKGROUND :: Color{0xff, 0xff, 0xff, 9}
+// Your own messages (Chat_Rules.highlight_own), and the lines between messages.
+CHAT_OWN_BACKGROUND :: Color{0x3f, 0x6f, 0xa5, 70}
+CHAT_SEPARATOR :: Color{0xff, 0xff, 0xff, 18}
 
 // Whether `m` is left out as a bot's, or a "!command" (Chat_Rules.hide_bots).
 hidden_as_bot :: proc(m: ^Chat_Message) -> bool {
@@ -255,6 +268,7 @@ chat_view_add :: proc(v: ^Chat_View, a: ^Assets, scale, width: f32, new_messages
 		apply_third_party_emotes(added, v.emotes, &a.emotes, &a.user_emotes if own else nil)
 		apply_emoji(added, &a.emoji)
 		mine := self_login != "" && added.login == self_login
+		added.own = mine && added.kind != .System
 		added.mention = mentions(added, self_login) || (!mine && highlighted(added, v.rules))
 		if added.mention {
 			mentions_added += 1
@@ -584,8 +598,13 @@ draw_chat_view :: proc(a: ^Assets, v: ^Chat_View, rect: Rect, scale: f32, filter
 				draw_rect(r, line, CHAT_MENTION_BACKGROUND)
 			case m.accent != .None:
 				draw_rect(r, line, CHAT_ACCENT_BACKGROUNDS[m.accent])
+			case v.rules != nil && v.rules.highlight_own && m.own:
+				draw_rect(r, line, CHAT_OWN_BACKGROUND)
 			case v.rules != nil && v.rules.highlight_staff && is_staff:
 				draw_rect(r, line, staff)
+			}
+			if v.rules != nil && v.rules.separators {
+				draw_rect(r, {line.x, line.y, line.w, max(1, scale)}, CHAT_SEPARATOR)
 			}
 			draw_message(a, v, m, layout, rect.x + pad, top)
 			append(&v.message_hits, Message_Hit{{rect.x, top - gap / 2, rect.w, layout.height + gap}, i})
@@ -656,6 +675,9 @@ draw_message :: proc(a: ^Assets, v: ^Chat_View, m: ^Chat_Message, layout: ^Messa
 				continue
 			}
 			texture, next := image_frame(item.image, a.now_ms)
+			if a.rules != nil && a.rules.still_emotes && len(item.image.frames) > 0 {
+				texture, next = item.image.frames[0].texture, -1
+			}
 			draw_image(&a.renderer, texture, rect, {255, 255, 255, alpha})
 			if next >= 0 && (a.next_frame_ms < 0 || next < a.next_frame_ms) {
 				a.next_frame_ms = next
@@ -706,6 +728,7 @@ Message_Layout :: struct {
 	images_version: int,
 	hide_reply:     bool,
 	timestamps:     bool,
+	hide_badges:    bool,
 	// The time shown before the message, which its items point into (owned).
 	stamp:          string,
 	height:         f32,
@@ -723,12 +746,14 @@ message_layout :: proc(a: ^Assets, channel: ^Emotes, m: ^Chat_Message, scale, wi
 // `hide_reply`, a reply leaves out what it replies to (shown just above it).
 message_layout_into :: proc(a: ^Assets, channel: ^Emotes, m: ^Chat_Message, l: ^Message_Layout, scale, width: f32, hide_reply := false) -> ^Message_Layout {
 	timestamps := a.rules != nil && a.rules.timestamps && m.sent_ms > 0
-	if l.height > 0 && l.width == width && l.scale == scale && l.text_scale == a.renderer.text_scale && l.images_version == a.images.version && l.hide_reply == hide_reply && l.timestamps == timestamps {
+	hide_badges := a.rules != nil && a.rules.hide_badges
+	if l.height > 0 && l.width == width && l.scale == scale && l.text_scale == a.renderer.text_scale && l.images_version == a.images.version && l.hide_reply == hide_reply && l.timestamps == timestamps && l.hide_badges == hide_badges {
 		return l
 	}
 	clear(&l.items)
 	l.hide_reply = hide_reply
 	l.timestamps = timestamps
+	l.hide_badges = hide_badges
 	l.width = width
 	l.scale = scale
 	l.text_scale = a.renderer.text_scale
@@ -781,6 +806,9 @@ message_layout_into :: proc(a: ^Assets, channel: ^Emotes, m: ^Chat_Message, l: ^
 	}
 
 	for key in m.badges {
+		if hide_badges {
+			break
+		}
 		badge, found := badge_lookup(channel, &a.emotes, key)
 		if !found {
 			continue

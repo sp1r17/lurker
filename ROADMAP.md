@@ -86,7 +86,8 @@ Chat:
   adjustable
 - More chat options: hiding badges, highlighting bits and your own messages,
   lines between messages, the viewer or chatter count above the chat, and still
-  emotes instead of animated ones
+  emotes instead of animated ones (done; bits were already highlighted, and the
+  count is viewers, which needs signing in)
 - Whispers
 
 Playback and notifications:

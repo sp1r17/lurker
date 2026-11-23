@@ -15,6 +15,11 @@ Setting_Switch :: enum {
 	Chat_Highlight_Staff,
 	Chat_Hide_Bots,
 	Chat_Alternate_Lines,
+	Chat_Hide_Badges,
+	Chat_Highlight_Own,
+	Chat_Separators,
+	Chat_Still_Emotes,
+	Chat_Viewer_Count,
 	Chat_Sync,
 	Next_Clip,
 	Watch_Points,
@@ -257,6 +262,16 @@ setting_on :: proc(app: ^App, s: Setting_Switch) -> bool {
 		return l.chat.hide_bots
 	case .Chat_Alternate_Lines:
 		return l.chat.alternate_lines
+	case .Chat_Hide_Badges:
+		return l.chat.hide_badges
+	case .Chat_Highlight_Own:
+		return l.chat.highlight_own
+	case .Chat_Separators:
+		return l.chat.separators
+	case .Chat_Still_Emotes:
+		return l.chat.still_emotes
+	case .Chat_Viewer_Count:
+		return l.chat.viewer_count
 	case .Chat_Sync:
 		return l.chat_sync
 	case .Next_Clip:
@@ -396,6 +411,21 @@ setting_toggle :: proc(app: ^App, s: Setting_Switch) {
 	case .Chat_Alternate_Lines:
 		app.layout.chat.alternate_lines = !app.layout.chat.alternate_lines
 		layout_save(&app.layout)
+	case .Chat_Hide_Badges:
+		app.layout.chat.hide_badges = !app.layout.chat.hide_badges
+		layout_save(&app.layout)
+	case .Chat_Highlight_Own:
+		app.layout.chat.highlight_own = !app.layout.chat.highlight_own
+		layout_save(&app.layout)
+	case .Chat_Separators:
+		app.layout.chat.separators = !app.layout.chat.separators
+		layout_save(&app.layout)
+	case .Chat_Still_Emotes:
+		app.layout.chat.still_emotes = !app.layout.chat.still_emotes
+		layout_save(&app.layout)
+	case .Chat_Viewer_Count:
+		app.layout.chat.viewer_count = !app.layout.chat.viewer_count
+		layout_save(&app.layout)
 	case .Chat_Sync:
 		app.layout.chat_sync = !app.layout.chat_sync
 		layout_save(&app.layout)
@@ -522,6 +552,11 @@ draw_settings :: proc(app: ^App, content: Rect) {
 		.Chat_Highlight_Staff = "Highlight the streamer's and moderators' messages",
 		.Chat_Hide_Bots       = "Hide bots and !commands",
 		.Chat_Alternate_Lines = "Alternate message backgrounds",
+		.Chat_Hide_Badges     = "Hide badges",
+		.Chat_Highlight_Own   = "Highlight your own messages",
+		.Chat_Separators      = "Lines between messages",
+		.Chat_Still_Emotes    = "Still emotes instead of animated ones",
+		.Chat_Viewer_Count    = "Show the viewer count above the chat",
 		.Chat_Sync     = "Delay chat to match the stream",
 		.Next_Clip     = "Play the next clip when one ends",
 		.Watch_Points  = "Earn channel points from watch time",
@@ -565,7 +600,7 @@ draw_settings :: proc(app: ^App, content: Rect) {
 		{title = "General", switches = general_switches, choices = {.Start_View}, text_size = true},
 		{title = "Streams", switches = {.Low_Latency, .Auto_Quality, .Normalize_Audio, .Follow_Raids, .Next_Clip, .Watch_Points}, choices = {.Latency_Buffer, .Max_Quality, .Video_Enhancement, .Audio_Device, .Audio_Delay}, language = true},
 		{title = "Live notifications", switches = {.Notify_Changes}, choices = {.Notify_For}, lists = {.Notify_Channels}, notifications = true},
-		{title = "Chat", switches = {.Chat_Sync, .Chat_Timestamps, .Chat_Highlight_Staff, .Chat_Hide_Bots, .Chat_Alternate_Lines}, lists = {.Highlights, .Ignored}},
+		{title = "Chat", switches = {.Chat_Sync, .Chat_Timestamps, .Chat_Highlight_Staff, .Chat_Highlight_Own, .Chat_Hide_Bots, .Chat_Hide_Badges, .Chat_Alternate_Lines, .Chat_Separators, .Chat_Still_Emotes, .Chat_Viewer_Count}, lists = {.Highlights, .Ignored}},
 		{title = "Blocked", lists = {.Blocked_Channels, .Blocked_Categories}},
 		{title = "Account", account = true},
 		{title = "Bug reports", log = true},

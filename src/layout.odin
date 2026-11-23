@@ -166,6 +166,11 @@ parse_layout :: proc(data: []byte, l: ^Layout) -> bool {
 		chat_highlight_staff: bool,
 		chat_hide_bots:       bool,
 		chat_alternate_lines: bool,
+		chat_hide_badges:     bool,
+		chat_highlight_own:   bool,
+		chat_separators:      bool,
+		chat_still_emotes:    bool,
+		chat_viewer_count:    bool,
 		update_checks_off: bool,
 		skipped_version:   string,
 		language:          string,
@@ -250,6 +255,11 @@ parse_layout :: proc(data: []byte, l: ^Layout) -> bool {
 	l.chat.highlight_staff = saved.chat_highlight_staff
 	l.chat.hide_bots = saved.chat_hide_bots
 	l.chat.alternate_lines = saved.chat_alternate_lines
+	l.chat.hide_badges = saved.chat_hide_badges
+	l.chat.highlight_own = saved.chat_highlight_own
+	l.chat.separators = saved.chat_separators
+	l.chat.still_emotes = saved.chat_still_emotes
+	l.chat.viewer_count = saved.chat_viewer_count
 	for phrase in saved.highlights {
 		rule_add(&l.chat.highlights, strings.to_lower(strings.trim_space(phrase), context.temp_allocator))
 	}
@@ -317,11 +327,16 @@ layout_save :: proc(l: ^Layout) {
 		chat_highlight_staff: bool,
 		chat_hide_bots:       bool,
 		chat_alternate_lines: bool,
+		chat_hide_badges:     bool,
+		chat_highlight_own:   bool,
+		chat_separators:      bool,
+		chat_still_emotes:    bool,
+		chat_viewer_count:    bool,
 		update_checks_off: bool,
 		skipped_version:   string,
 		language:          string,
 		language_hide:     bool,
-	}{LAYOUT_VERSION, l.splits, l.volume, l.muted, quality_name(l.quality), l.low_latency, l.raids_off, l.stats, l.chat_sync, l.latency_buffer_ms, l.max_height, fmt.tprint(l.video_enhancement), l.next_clip_off, l.points_off, l.normalize_audio, l.auto_quality_off, l.audio_device, l.audio_delay_ms, l.stream_sort, l.start_view, l.hide_chat, l.text_size, l.notifications_off, l.notify_only, l.notify_changes, l.notify_muted[:], l.notify_chosen[:], l.chat.highlights[:], l.chat.ignored[:], l.chat.timestamps, l.chat.highlight_staff, l.chat.hide_bots, l.chat.alternate_lines, l.update_checks_off, l.skipped_version, l.language, l.language_hide}
+	}{LAYOUT_VERSION, l.splits, l.volume, l.muted, quality_name(l.quality), l.low_latency, l.raids_off, l.stats, l.chat_sync, l.latency_buffer_ms, l.max_height, fmt.tprint(l.video_enhancement), l.next_clip_off, l.points_off, l.normalize_audio, l.auto_quality_off, l.audio_device, l.audio_delay_ms, l.stream_sort, l.start_view, l.hide_chat, l.text_size, l.notifications_off, l.notify_only, l.notify_changes, l.notify_muted[:], l.notify_chosen[:], l.chat.highlights[:], l.chat.ignored[:], l.chat.timestamps, l.chat.highlight_staff, l.chat.hide_bots, l.chat.alternate_lines, l.chat.hide_badges, l.chat.highlight_own, l.chat.separators, l.chat.still_emotes, l.chat.viewer_count, l.update_checks_off, l.skipped_version, l.language, l.language_hide}
 	data, err := json.marshal(saved, {pretty = true, use_enum_names = true}, context.temp_allocator)
 	if err != nil {
 		return
