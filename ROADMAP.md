@@ -85,7 +85,7 @@ Chat:
 - Shared Chat: show which channel each message came from (done; not yet seen in
   a real Shared Chat session)
 - Chat over the video in fullscreen, with its position, size and background
-  adjustable
+  adjustable (done)
 - More chat options: hiding badges, highlighting bits and your own messages,
   lines between messages, the viewer or chatter count above the chat, and still
   emotes instead of animated ones (done; bits were already highlighted, and the

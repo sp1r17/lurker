@@ -219,7 +219,7 @@ draw_pane :: proc(app: ^App, p: ^Chat_Pane, focused: bool) {
 	a := &app.assets
 	r := &a.renderer
 	scale := app.scale
-	draw_rect(r, p.rect, CHAT_BACKGROUND)
+	draw_rect(r, p.rect, app.assets.chat_background if app.assets.chat_background.a > 0 else CHAT_BACKGROUND)
 	if pane_seen(app, p) {
 		p.unread_mentions = 0
 	}

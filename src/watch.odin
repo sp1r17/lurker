@@ -992,11 +992,24 @@ watch_scroll :: proc(app: ^App, x, y, wheel_y: f32) {
 watch_prepare :: proc(app: ^App, screen: Rect) {
 	w := &app.watch
 	n := f32(len(w.panes)) if w.show_chat else 0
-	pane_w := min(f32(i32(CHAT_WIDTH * app.scale)), screen.w * MAX_CHAT_SHARE / max(n, 1))
-	chats_w := pane_w * n
-	w.video_rect = {0, 0, screen.w - chats_w, screen.h}
-	for p, i in w.panes {
-		pane_layout(app, p, {w.video_rect.w + f32(i) * pane_w, 0, pane_w, screen.h})
+	app.assets.chat_background = CHAT_BACKGROUND
+	if chat_overlay_on(app) {
+		// The video fills the screen, the chats over it (chat_overlay.odin).
+		l := &app.layout
+		w.video_rect = screen
+		box := chat_overlay_rect(screen, l.chat_overlay_position, l.chat_overlay_size, app.scale)
+		app.assets.chat_background = chat_overlay_background(l.chat_overlay_background)
+		box_pane_w := box.w / max(n, 1)
+		for p, i in w.panes {
+			pane_layout(app, p, {box.x + f32(i) * box_pane_w, box.y, box_pane_w, box.h})
+		}
+	} else {
+		pane_w := min(f32(i32(CHAT_WIDTH * app.scale)), screen.w * MAX_CHAT_SHARE / max(n, 1))
+		chats_w := pane_w * n
+		w.video_rect = {0, 0, screen.w - chats_w, screen.h}
+		for p, i in w.panes {
+			pane_layout(app, p, {w.video_rect.w + f32(i) * pane_w, 0, pane_w, screen.h})
+		}
 	}
 
 	// A resize draws the frame again at the new size.

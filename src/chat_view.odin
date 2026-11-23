@@ -70,6 +70,9 @@ Assets :: struct {
 	// Shared Chat channels' names (shared_chat.odin).
 	client_id:     string,
 	rooms:         Room_Names,
+	// The chat's background: CHAT_BACKGROUND, or see-through over the video
+	// (chat_overlay.odin). Set while laying out.
+	chat_background: Color,
 }
 
 // The user's own chat rules, kept in layout.json: phrases that highlight a message,
@@ -556,7 +559,7 @@ chat_view_click :: proc(v: ^Chat_View, x, y: f32) -> bool {
 // message_matches).
 draw_chat_view :: proc(a: ^Assets, v: ^Chat_View, rect: Rect, scale: f32, filter := "") {
 	r := &a.renderer
-	draw_rect(r, rect, CHAT_BACKGROUND)
+	draw_rect(r, rect, a.chat_background if a.chat_background.a > 0 else CHAT_BACKGROUND)
 	pad := CHAT_PADDING * scale
 	gap := CHAT_MESSAGE_GAP * scale
 	content_w := rect.w - 2 * pad

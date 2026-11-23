@@ -20,6 +20,7 @@ Setting_Switch :: enum {
 	Chat_Separators,
 	Chat_Still_Emotes,
 	Chat_Viewer_Count,
+	Chat_Overlay,
 	Chat_Sync,
 	Next_Clip,
 	Watch_Points,
@@ -37,6 +38,9 @@ Setting_Choice :: enum {
 	Video_Enhancement,
 	Audio_Device,
 	Audio_Delay,
+	Chat_Overlay_Position,
+	Chat_Overlay_Size,
+	Chat_Overlay_Background,
 	Notify_For,
 	Start_View,
 }
@@ -274,6 +278,8 @@ setting_on :: proc(app: ^App, s: Setting_Switch) -> bool {
 		return l.chat.still_emotes
 	case .Chat_Viewer_Count:
 		return l.chat.viewer_count
+	case .Chat_Overlay:
+		return l.chat_overlay
 	case .Chat_Sync:
 		return l.chat_sync
 	case .Next_Clip:
@@ -324,6 +330,15 @@ setting_value :: proc(app: ^App, c: Setting_Choice) -> string {
 		return "Not connected: system default for now"
 	case .Audio_Delay:
 		return "None" if l.audio_delay_ms == 0 else fmt.tprintf("%d ms", l.audio_delay_ms)
+	case .Chat_Overlay_Position:
+		labels := CHAT_OVERLAY_POSITION_LABELS
+		return labels[l.chat_overlay_position]
+	case .Chat_Overlay_Size:
+		labels := CHAT_OVERLAY_SIZE_LABELS
+		return labels[l.chat_overlay_size]
+	case .Chat_Overlay_Background:
+		labels := CHAT_OVERLAY_BACKGROUND_LABELS
+		return labels[l.chat_overlay_background]
 	case .Notify_For:
 		return "Only channels you choose" if app.layout.notify_only else "All followed channels"
 	case .Start_View:
@@ -374,6 +389,12 @@ setting_next :: proc(app: ^App, c: Setting_Choice) {
 		delays := AUDIO_DELAYS
 		l.audio_delay_ms = next(delays[:], l.audio_delay_ms)
 		player_set_audio_delay(&app.player, l.audio_delay_ms)
+	case .Chat_Overlay_Position:
+		l.chat_overlay_position = Chat_Overlay_Position((int(l.chat_overlay_position) + 1) % len(Chat_Overlay_Position))
+	case .Chat_Overlay_Size:
+		l.chat_overlay_size = Chat_Overlay_Size((int(l.chat_overlay_size) + 1) % len(Chat_Overlay_Size))
+	case .Chat_Overlay_Background:
+		l.chat_overlay_background = Chat_Overlay_Background((int(l.chat_overlay_background) + 1) % len(Chat_Overlay_Background))
 	case .Notify_For:
 		l.notify_only = !l.notify_only
 	case .Start_View:
@@ -431,6 +452,9 @@ setting_toggle :: proc(app: ^App, s: Setting_Switch) {
 		layout_save(&app.layout)
 	case .Chat_Viewer_Count:
 		app.layout.chat.viewer_count = !app.layout.chat.viewer_count
+		layout_save(&app.layout)
+	case .Chat_Overlay:
+		app.layout.chat_overlay = !app.layout.chat_overlay
 		layout_save(&app.layout)
 	case .Chat_Sync:
 		app.layout.chat_sync = !app.layout.chat_sync
@@ -569,6 +593,7 @@ draw_settings :: proc(app: ^App, content: Rect) {
 		.Chat_Separators      = "Lines between messages",
 		.Chat_Still_Emotes    = "Still emotes instead of animated ones",
 		.Chat_Viewer_Count    = "Show the viewer count above the chat",
+		.Chat_Overlay         = "Chat over the video in fullscreen",
 		.Chat_Sync     = "Delay chat to match the stream",
 		.Next_Clip     = "Play the next clip when one ends",
 		.Watch_Points  = "Earn channel points from watch time",
@@ -584,6 +609,9 @@ draw_settings :: proc(app: ^App, content: Rect) {
 		.Video_Enhancement = "Video enhancement",
 		.Audio_Device   = "Sound output",
 		.Audio_Delay    = "Show the video later, for Bluetooth headphones",
+		.Chat_Overlay_Position   = "Chat over the video: where",
+		.Chat_Overlay_Size       = "Chat over the video: size",
+		.Chat_Overlay_Background = "Chat over the video: background",
 		.Notify_For     = "Notify for",
 		.Start_View     = "Start page",
 	}
@@ -614,7 +642,7 @@ draw_settings :: proc(app: ^App, content: Rect) {
 		{title = "General", switches = general_switches, choices = {.Start_View}, text_size = true},
 		{title = "Streams", switches = {.Low_Latency, .Auto_Quality, .Normalize_Audio, .Follow_Raids, .Next_Clip, .Watch_Points, .Claim_Bonus, .Claim_Drops}, choices = {.Latency_Buffer, .Max_Quality, .Video_Enhancement, .Audio_Device, .Audio_Delay}, language = true},
 		{title = "Live notifications", switches = {.Notify_Changes}, choices = {.Notify_For}, lists = {.Notify_Channels}, notifications = true},
-		{title = "Chat", switches = {.Chat_Sync, .Chat_Timestamps, .Chat_Highlight_Staff, .Chat_Highlight_Own, .Chat_Hide_Bots, .Chat_Hide_Badges, .Chat_Alternate_Lines, .Chat_Separators, .Chat_Still_Emotes, .Chat_Viewer_Count}, lists = {.Highlights, .Ignored}},
+		{title = "Chat", switches = {.Chat_Sync, .Chat_Timestamps, .Chat_Highlight_Staff, .Chat_Highlight_Own, .Chat_Hide_Bots, .Chat_Hide_Badges, .Chat_Alternate_Lines, .Chat_Separators, .Chat_Still_Emotes, .Chat_Viewer_Count, .Chat_Overlay}, choices = {.Chat_Overlay_Position, .Chat_Overlay_Size, .Chat_Overlay_Background}, lists = {.Highlights, .Ignored}},
 		{title = "Blocked", lists = {.Blocked_Channels, .Blocked_Categories}},
 		{title = "Account", account = true},
 		{title = "Bug reports", log = true},
