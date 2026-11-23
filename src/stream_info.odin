@@ -221,6 +221,9 @@ draw_stream_info :: proc(app: ^App) {
 		if uptime, ok := format_uptime(w.info.started_at, time.now()); ok {
 			append(&parts, uptime)
 		}
+		if balance, ok := w.bonus.balance.?; ok {
+			append(&parts, fmt.tprintf("%s points", format_viewers(balance)))
+		}
 		stats := strings.join(parts[:], "   ", context.temp_allocator)
 		sw := text_width(r, .Regular, size, stats)
 		y := bar.y + pad + (name_h - lh) / 2

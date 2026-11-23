@@ -1424,6 +1424,95 @@ parse_chapters_response :: proc(body: []byte) -> (chapters: []Chapter, err: Twit
 	return list, .None
 }
 
+// The signed-in user's channel points on channel `login`: the channel's ID, the
+// balance, and the ID of a bonus waiting to be claimed ("" for none). Twitch's
+// site internals, not a documented API. Allocated with the temp allocator.
+get_channel_points :: proc(client_id, token, login: string) -> (channel_id: string, balance: int, claim_id: string, err: Twitch_Error) {
+	variables := make(map[string]string, context.temp_allocator)
+	variables["login"] = login
+	body := gql_post(client_id, token, "query($login: String!) { channel(name: $login) { id self { communityPoints { balance availableClaim { id } } } } }", variables) or_return
+	return parse_channel_points_response(body)
+}
+
+parse_channel_points_response :: proc(body: []byte) -> (channel_id: string, balance: int, claim_id: string, err: Twitch_Error) {
+	r: struct {
+		data:   struct {
+			channel: Maybe(struct {
+				id:   string,
+				self: Maybe(struct {
+					communityPoints: Maybe(struct {
+						balance:        int,
+						availableClaim: Maybe(struct {
+							id: string,
+						}),
+					}),
+				}),
+			}),
+		},
+		errors: Graphql_Errors,
+	}
+	if json.unmarshal(body, &r, allocator = context.temp_allocator) != nil {
+		return "", 0, "", .Bad_Json
+	}
+	check_errors(r.errors) or_return
+	channel, has_channel := r.data.channel.?
+	if !has_channel {
+		return "", 0, "", .None
+	}
+	self := channel.self.? or_else {}
+	points, has_points := self.communityPoints.?
+	if !has_points {
+		// Signed out, or the channel has no channel points.
+		return channel.id, 0, "", .None
+	}
+	claim := points.availableClaim.? or_else {}
+	return channel.id, points.balance, claim.id, .None
+}
+
+// Claims bonus `claim_id` on channel `channel_id` for the signed-in user;
+// returns the balance after. The IDs go into the query itself (gql_post's
+// variables are strings, the mutation takes an object), so only IDs of letters,
+// digits and dashes are sent.
+claim_channel_points :: proc(client_id, token, channel_id, claim_id: string) -> (balance: int, err: Twitch_Error) {
+	plain :: proc(s: string) -> bool {
+		for c in s {
+			if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-') {
+				return false
+			}
+		}
+		return s != ""
+	}
+	if !plain(channel_id) || !plain(claim_id) {
+		return 0, .Bad_Json
+	}
+	query := fmt.tprintf(`mutation { claimCommunityPoints(input: {channelID: "%s", claimID: "%s"}) { currentPoints error { code } } }`, channel_id, claim_id)
+	body := gql_post(client_id, token, query) or_return
+	r: struct {
+		data:   struct {
+			claimCommunityPoints: Maybe(struct {
+				currentPoints: int,
+				error:         Maybe(struct {
+					code: string,
+				}),
+			}),
+		},
+		errors: Graphql_Errors,
+	}
+	if json.unmarshal(body, &r, allocator = context.temp_allocator) != nil {
+		return 0, .Bad_Json
+	}
+	check_errors(r.errors) or_return
+	result, ok := r.data.claimCommunityPoints.?
+	if !ok {
+		return 0, .Bad_Json
+	}
+	if e, failed := result.error.?; failed {
+		log.warnf("claiming channel points failed: %s", e.code)
+		return 0, .Bad_Status
+	}
+	return result.currentPoints, .None
+}
+
 // A stretch of a past broadcast with its sound muted (for copyrighted music), in
 // seconds.
 Muted_Segment :: struct {

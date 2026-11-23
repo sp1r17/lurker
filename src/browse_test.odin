@@ -451,3 +451,20 @@ muted_segments_are_joined :: proc(t: ^testing.T) {
 	testing.expect_value(t, gone_err, Twitch_Error.None)
 	testing.expect_value(t, len(gone), 0)
 }
+
+@(test)
+channel_points_are_read :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	body := `{"data":{"channel":{"id":"23161357","self":{"communityPoints":{"balance":272669,"availableClaim":{"id":"b929-c26f"}}}}}}`
+	id, balance, claim, err := parse_channel_points_response(transmute([]byte)body)
+	testing.expect_value(t, err, Twitch_Error.None)
+	testing.expect_value(t, id, "23161357")
+	testing.expect_value(t, balance, 272669)
+	testing.expect_value(t, claim, "b929-c26f")
+	// No bonus waiting; and signed out (no points at all).
+	_, _, claim, _ = parse_channel_points_response(transmute([]byte)string(`{"data":{"channel":{"id":"1","self":{"communityPoints":{"balance":5,"availableClaim":null}}}}}`))
+	testing.expect_value(t, claim, "")
+	_, balance, claim, err = parse_channel_points_response(transmute([]byte)string(`{"data":{"channel":{"id":"1","self":null}}}`))
+	testing.expect_value(t, err, Twitch_Error.None)
+	testing.expect_value(t, balance, 0)
+}

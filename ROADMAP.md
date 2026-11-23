@@ -75,7 +75,7 @@ watch time from reports its own player sends, and streamlink sends none.
   earns channel points and drop progress. Paused or buffering minutes don't
   count, and if Twitch changes how this works, only this stops (done for
   channel points; drop progress not checked yet)
-- The channel points balance, and claiming the bonus automatically
+- The channel points balance, and claiming the bonus automatically (done)
 - Claiming finished drops automatically
 
 Chat:
