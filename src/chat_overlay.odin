@@ -54,9 +54,31 @@ CHAT_OVERLAY_SHARES :: [Chat_Overlay_Size][2]f32 {
 	.Large  = {0.32, 0.8},
 }
 
+// Whether the chats go over the video, fullscreen with the setting on: they show
+// there whether or not they're hidden beside it (Layout.hide_chat), until C
+// hides them for this watch.
+chat_overlay_mode :: proc(app: ^App) -> bool {
+	return app.fullscreen && app.layout.chat_overlay
+}
+
 // Whether the chats show over the video now.
 chat_overlay_on :: proc(app: ^App) -> bool {
-	return app.fullscreen && app.layout.chat_overlay && app.watch.show_chat
+	return chat_overlay_mode(app) && !app.watch.overlay_hidden
+}
+
+// Whether the chats are showing: over the video, or beside it.
+chats_shown :: proc(app: ^App) -> bool {
+	return chat_overlay_on(app) if chat_overlay_mode(app) else app.watch.show_chat
+}
+
+// Shows or hides the chats: over the video, for this watch; beside it, as the
+// setting kept for every channel (watch_show_chat).
+watch_toggle_chats :: proc(app: ^App, show: bool) {
+	if chat_overlay_mode(app) {
+		app.watch.overlay_hidden = !show
+		return
+	}
+	watch_show_chat(app, show)
 }
 
 // Where the chats go over a video filling `screen`: in the chosen corner, the

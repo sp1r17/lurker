@@ -165,7 +165,7 @@ pane_chat_arrived :: proc(app: ^App, p: ^Chat_Pane) {
 // Whether new messages in `p` are in front of the user: the window has focus, the
 // chats are showing and this one is at its newest messages.
 pane_seen :: proc(app: ^App, p: ^Chat_Pane) -> bool {
-	return app.window_focused && app.watch.show_chat && p.view.scroll == 0
+	return app.window_focused && chats_shown(app) && p.view.scroll == 0
 }
 
 // Whether `p` shows a past broadcast's chat (it's the main chat, during a replay),
@@ -375,7 +375,7 @@ focused_box :: proc(app: ^App) -> (p: ^Chat_Pane, box: Box, ok: bool) {
 }
 
 box_focus :: proc(app: ^App, p: ^Chat_Pane, box: Box) {
-	if !app.watch.show_chat {
+	if !chats_shown(app) {
 		return
 	}
 	// Chatting needs a sign-in; naming a new split's channel doesn't. A replayed

@@ -58,6 +58,9 @@ Watch :: struct {
 	signed_stream:   bool,
 	new_video_frame: bool,
 	show_chat:       bool,
+	// The chats over the video were hidden with C, for this watch
+	// (chat_overlay.odin).
+	overlay_hidden:  bool,
 	// panes[0] is the watched channel's chat; the rest are splits (Ctrl+T).
 	panes:           [dynamic]^Chat_Pane,
 	// The pane keys like Enter and Ctrl+F act on.
@@ -791,7 +794,7 @@ watch_key :: proc(app: ^App, key: sdl.KeyboardEvent) -> bool {
 	case sdl.K_DOWN:
 		set_volume(app, app.layout.volume - VOLUME_STEP, app.layout.muted)
 	case sdl.K_C:
-		watch_show_chat(app, !w.show_chat)
+		watch_toggle_chats(app, !chats_shown(app))
 	case sdl.K_R:
 		// A frozen or stuttering stream, started again; a video, from where it is.
 		restart_stream(app)
@@ -897,13 +900,12 @@ watch_show_chat :: proc(app: ^App, show: bool) {
 
 // Whether the mouse is where the show-chat tab appears.
 show_tab_hovered :: proc(app: ^App, screen_w: f32) -> bool {
-	w := &app.watch
-	return !w.show_chat && app.mouse.x >= screen_w - SHOW_CHAT_ZONE * app.scale && app.mouse.x < screen_w
+	return !chats_shown(app) && app.mouse.x >= screen_w - SHOW_CHAT_ZONE * app.scale && app.mouse.x < screen_w
 }
 
 // The pane under (x, y), or nil.
 pane_at :: proc(app: ^App, x, y: f32) -> (p: ^Chat_Pane, index: int) {
-	if !app.watch.show_chat {
+	if !chats_shown(app) {
 		return nil, -1
 	}
 	for pane, i in app.watch.panes {
@@ -923,12 +925,12 @@ watch_click :: proc(app: ^App, x, y: f32) {
 	if controls_click(app, x, y) {
 		return
 	}
-	if w.show_chat && w.hide_button.w > 0 && in_rect(w.hide_button, x, y) {
-		watch_show_chat(app, false)
+	if chats_shown(app) && w.hide_button.w > 0 && in_rect(w.hide_button, x, y) {
+		watch_toggle_chats(app, false)
 		return
 	}
-	if !w.show_chat && w.show_tab.w > 0 && in_rect(w.show_tab, x, y) {
-		watch_show_chat(app, true)
+	if !chats_shown(app) && w.show_tab.w > 0 && in_rect(w.show_tab, x, y) {
+		watch_toggle_chats(app, true)
 		return
 	}
 	p, i := pane_at(app, x, y)
@@ -994,7 +996,7 @@ watch_scroll :: proc(app: ^App, x, y, wheel_y: f32) {
 // changes the OpenGL viewport and framebuffer while it draws.
 watch_prepare :: proc(app: ^App, screen: Rect) {
 	w := &app.watch
-	n := f32(len(w.panes)) if w.show_chat else 0
+	n := f32(len(w.panes)) if chats_shown(app) else 0
 	app.assets.chat_background = CHAT_BACKGROUND
 	if chat_overlay_on(app) {
 		// The video fills the screen, the chats over it (chat_overlay.odin).
@@ -1075,7 +1077,7 @@ draw_watch :: proc(app: ^App) {
 	draw_controls(app)
 	w.hide_button = {}
 	w.show_tab = {}
-	if !w.show_chat {
+	if !chats_shown(app) {
 		// A tab at the right edge, only while the mouse is near it and has moved
 		// lately, or is on the tab itself.
 		size := SHOW_CHAT_TAB * scale
