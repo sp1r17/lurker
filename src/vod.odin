@@ -301,11 +301,13 @@ vod_key :: proc(app: ^App, key: sdl.KeyboardEvent) -> bool {
 		player_command(&app.player, {"seek", fmt.ctprintf("%d", -VOD_SEEK_SECONDS), "relative"})
 	case sdl.K_RIGHT:
 		player_command(&app.player, {"seek", fmt.ctprintf("%d", VOD_SEEK_SECONDS), "relative"})
-	// A frame back or on, pausing first, as in mpv.
-	case sdl.K_COMMA:
-		player_frame_step(&app.player, back = true)
-	case sdl.K_PERIOD:
-		player_frame_step(&app.player, back = false)
+	// A frame back or on, pausing first, as in mpv; not with Ctrl (Ctrl+, is
+	// Settings, when browsing).
+	case sdl.K_COMMA, sdl.K_PERIOD:
+		if key.mod & SHORTCUT_MOD != {} {
+			return false
+		}
+		player_frame_step(&app.player, back = key.key == sdl.K_COMMA)
 	case:
 		return false
 	}

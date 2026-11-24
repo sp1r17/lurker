@@ -210,7 +210,7 @@ settings are stored in `~/.config/lurker` (`%APPDATA%\lurker` on Windows).
 | R | Refresh (or start a frozen stream again) |
 | Enter | Chat in the focused split, or play an offline channel's last broadcast |
 | Ctrl+T / Ctrl+W | Open / close a chat split |
-| Ctrl+, | Settings |
+| Ctrl+, | Settings (when browsing) |
 | Ctrl+F | Search the chat, or channels when browsing |
 | / | Search channels |
 | Ctrl+= / Ctrl+- / Ctrl+0, or Ctrl+scroll | Text size |
