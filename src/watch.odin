@@ -927,7 +927,8 @@ watch_click :: proc(app: ^App, x, y: f32) {
 		user_card_click(app, x, y)
 		return
 	}
-	if controls_click(app, x, y) {
+	// The chats over the video are drawn over its buttons, so they take the click.
+	if !on_chat_overlay(app, x, y) && controls_click(app, x, y) {
 		return
 	}
 	// A header or an edge of the chats over the video moves or resizes them.
@@ -1043,6 +1044,12 @@ draw_watch :: proc(app: ^App) {
 	w := &app.watch
 	video := w.video_rect
 	text_size := BROWSE_CARD_TEXT_SIZE * app.scale
+	// The video's buttons don't light up under the chats over it, which take the
+	// clicks there (watch_click).
+	mouse := app.mouse
+	if on_chat_overlay(app, mouse.x, mouse.y) {
+		app.mouse = {-1, -1}
+	}
 	switch w.status {
 	case .Playing:
 		if quality_playing(watch_quality(app), w.qualities).kind == .Audio {
@@ -1086,6 +1093,7 @@ draw_watch :: proc(app: ^App) {
 	draw_resume_notice(app)
 	draw_screenshot_notice(app)
 	draw_controls(app)
+	app.mouse = mouse
 	w.hide_button = {}
 	w.show_tab = {}
 	if !chats_shown(app) {
