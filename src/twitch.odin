@@ -1470,23 +1470,13 @@ parse_channel_points_response :: proc(body: []byte) -> (channel_id: string, bala
 }
 
 // Claims bonus `claim_id` on channel `channel_id` for the signed-in user;
-// returns the balance after. The IDs go into the query itself (gql_post's
-// variables are strings, the mutation takes an object), so only IDs of letters,
-// digits and dashes are sent.
+// returns the balance after.
 claim_channel_points :: proc(client_id, token, channel_id, claim_id: string) -> (balance: int, err: Twitch_Error) {
-	plain :: proc(s: string) -> bool {
-		for c in s {
-			if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-') {
-				return false
-			}
-		}
-		return s != ""
-	}
-	if !plain(channel_id) || !plain(claim_id) {
-		return 0, .Bad_Json
-	}
-	query := fmt.tprintf(`mutation { claimCommunityPoints(input: {channelID: "%s", claimID: "%s"}) { currentPoints error { code } } }`, channel_id, claim_id)
-	body := gql_post(client_id, token, query) or_return
+	variables := make(map[string]string, context.temp_allocator)
+	variables["channel"] = channel_id
+	variables["claim"] = claim_id
+	query := "mutation($channel: ID!, $claim: ID!) { claimCommunityPoints(input: {channelID: $channel, claimID: $claim}) { currentPoints error { code } } }"
+	body := gql_post(client_id, token, query, variables) or_return
 	r: struct {
 		data:   struct {
 			claimCommunityPoints: Maybe(struct {
@@ -1570,21 +1560,12 @@ parse_finished_drops_response :: proc(body: []byte) -> (drops: []Finished_Drop, 
 	return list[:], .None
 }
 
-// Claims finished drop `instance_id` for the signed-in user. The ID goes into
-// the query itself (the mutation takes an object), so only IDs of letters,
-// digits, dashes and "#" (it joins the user's, campaign's and drop's IDs) are
-// sent.
+// Claims finished drop `instance_id` for the signed-in user.
 claim_drop :: proc(client_id, token, instance_id: string) -> Twitch_Error {
-	for c in instance_id {
-		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '#') {
-			return .Bad_Json
-		}
-	}
-	if instance_id == "" {
-		return .Bad_Json
-	}
-	query := fmt.tprintf(`mutation { claimDropRewards(input: {dropInstanceID: "%s"}) { status } }`, instance_id)
-	body := gql_post(client_id, token, query) or_return
+	variables := make(map[string]string, context.temp_allocator)
+	variables["id"] = instance_id
+	query := "mutation($id: ID!) { claimDropRewards(input: {dropInstanceID: $id}) { status } }"
+	body := gql_post(client_id, token, query, variables) or_return
 	r: struct {
 		data:   struct {
 			claimDropRewards: Maybe(struct {
