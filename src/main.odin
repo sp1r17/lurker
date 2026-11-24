@@ -506,9 +506,11 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 		app.mouse = {e.motion.x * density, e.motion.y * density}
 		if .LEFT in e.motion.state {
 			window_drag_motion(app, app.mouse.x, app.mouse.y)
+			chat_overlay_drag_motion(app, app.mouse.x, app.mouse.y)
 		} else {
 			app.drag_armed = false
 		}
+		chat_overlay_update_cursor(app)
 		if app.screen == .Watch {
 			watch_mouse_moved(app, app.mouse.x, app.mouse.y)
 		}
@@ -547,6 +549,11 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 		}
 	case e.type == .MOUSE_BUTTON_UP:
 		app.drag_armed = false
+		if e.button.button == sdl.BUTTON_LEFT {
+			chat_overlay_release(app)
+			chat_overlay_update_cursor(app)
+			redraw^ = true
+		}
 	case e.type == .MOUSE_BUTTON_DOWN:
 		// The mouse's back button leaves the stream, like a browser's.
 		if e.button.button == sdl.BUTTON_X1 && app.screen == .Watch {

@@ -331,9 +331,15 @@ setting_value :: proc(app: ^App, c: Setting_Choice) -> string {
 	case .Audio_Delay:
 		return "None" if l.audio_delay_ms == 0 else fmt.tprintf("%d ms", l.audio_delay_ms)
 	case .Chat_Overlay_Position:
+		if l.chat_overlay_box[2] > 0 {
+			return "Custom (dragged)"
+		}
 		labels := CHAT_OVERLAY_POSITION_LABELS
 		return labels[l.chat_overlay_position]
 	case .Chat_Overlay_Size:
+		if l.chat_overlay_box[2] > 0 {
+			return "Custom (resized)"
+		}
 		labels := CHAT_OVERLAY_SIZE_LABELS
 		return labels[l.chat_overlay_size]
 	case .Chat_Overlay_Background:
@@ -390,9 +396,18 @@ setting_next :: proc(app: ^App, c: Setting_Choice) {
 		l.audio_delay_ms = next(delays[:], l.audio_delay_ms)
 		player_set_audio_delay(&app.player, l.audio_delay_ms)
 	case .Chat_Overlay_Position:
-		l.chat_overlay_position = Chat_Overlay_Position((int(l.chat_overlay_position) + 1) % len(Chat_Overlay_Position))
+		// A dragged box goes back to the corner shown before it was dragged.
+		if l.chat_overlay_box[2] > 0 {
+			l.chat_overlay_box = {}
+		} else {
+			l.chat_overlay_position = Chat_Overlay_Position((int(l.chat_overlay_position) + 1) % len(Chat_Overlay_Position))
+		}
 	case .Chat_Overlay_Size:
-		l.chat_overlay_size = Chat_Overlay_Size((int(l.chat_overlay_size) + 1) % len(Chat_Overlay_Size))
+		if l.chat_overlay_box[2] > 0 {
+			l.chat_overlay_box = {}
+		} else {
+			l.chat_overlay_size = Chat_Overlay_Size((int(l.chat_overlay_size) + 1) % len(Chat_Overlay_Size))
+		}
 	case .Chat_Overlay_Background:
 		l.chat_overlay_background = Chat_Overlay_Background((int(l.chat_overlay_background) + 1) % len(Chat_Overlay_Background))
 	case .Notify_For:

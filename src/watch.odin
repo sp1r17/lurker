@@ -61,6 +61,11 @@ Watch :: struct {
 	// The chats over the video were hidden with C, for this watch
 	// (chat_overlay.odin).
 	overlay_hidden:  bool,
+	// Where the chats over the video are, and the screen they're over, as laid out
+	// last; and their box being moved or resized (chat_overlay.odin).
+	overlay_rect:    Rect,
+	overlay_screen:  Rect,
+	overlay_drag:    Chat_Overlay_Drag,
 	// panes[0] is the watched channel's chat; the rest are splits (Ctrl+T).
 	panes:           [dynamic]^Chat_Pane,
 	// The pane keys like Enter and Ctrl+F act on.
@@ -925,6 +930,10 @@ watch_click :: proc(app: ^App, x, y: f32) {
 	if controls_click(app, x, y) {
 		return
 	}
+	// A header or an edge of the chats over the video moves or resizes them.
+	if chat_overlay_press(app, x, y) {
+		return
+	}
 	if chats_shown(app) && w.hide_button.w > 0 && in_rect(w.hide_button, x, y) {
 		watch_toggle_chats(app, false)
 		return
@@ -1002,13 +1011,15 @@ watch_prepare :: proc(app: ^App, screen: Rect) {
 		// The video fills the screen, the chats over it (chat_overlay.odin).
 		l := &app.layout
 		w.video_rect = screen
-		box := chat_overlay_rect(screen, l.chat_overlay_position, l.chat_overlay_size, app.scale)
+		box := chat_overlay_box(app, screen)
+		w.overlay_rect, w.overlay_screen = box, screen
 		app.assets.chat_background = chat_overlay_background(l.chat_overlay_background)
 		box_pane_w := box.w / max(n, 1)
 		for p, i in w.panes {
 			pane_layout(app, p, {box.x + f32(i) * box_pane_w, box.y, box_pane_w, box.h})
 		}
 	} else {
+		w.overlay_rect, w.overlay_screen = {}, {}
 		pane_w := min(f32(i32(CHAT_WIDTH * app.scale)), screen.w * MAX_CHAT_SHARE / max(n, 1))
 		chats_w := pane_w * n
 		w.video_rect = {0, 0, screen.w - chats_w, screen.h}

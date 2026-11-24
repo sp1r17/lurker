@@ -67,6 +67,11 @@ draggable :: proc(app: ^App, x, y: f32) -> bool {
 		if w.show_tab.w > 0 && in_rect(w.show_tab, x, y) {
 			return false
 		}
+		// The chats over the video aren't video: a double-click there stays in
+		// fullscreen.
+		if on_chat_overlay(app, x, y) {
+			return false
+		}
 		return in_rect(w.video_rect, x, y)
 	case .Browse:
 		if app.sign_in.sign_out.w > 0 && in_rect(app.sign_in.sign_out, x, y) {
