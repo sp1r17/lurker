@@ -301,6 +301,13 @@ vod_key :: proc(app: ^App, key: sdl.KeyboardEvent) -> bool {
 		player_command(&app.player, {"seek", fmt.ctprintf("%d", -VOD_SEEK_SECONDS), "relative"})
 	case sdl.K_RIGHT:
 		player_command(&app.player, {"seek", fmt.ctprintf("%d", VOD_SEEK_SECONDS), "relative"})
+	// A frame back or on, pausing first, as in mpv; not with Ctrl (Ctrl+, is
+	// Settings, when browsing).
+	case sdl.K_COMMA, sdl.K_PERIOD:
+		if key.mod & SHORTCUT_MOD != {} {
+			return false
+		}
+		player_frame_step(&app.player, back = key.key == sdl.K_COMMA)
 	case:
 		return false
 	}
@@ -333,7 +340,6 @@ draw_resume_notice :: proc(app: ^App) {
 
 // A one-line notice centred near the video's top, below the controls. Returns
 // where it is.
-@(private = "file")
 draw_notice :: proc(app: ^App, label: string) -> Rect {
 	w := &app.watch
 	r := &app.assets.renderer
@@ -429,8 +435,9 @@ draw_vod_offer :: proc(app: ^App, video: Rect) {
 		if w.vod.game != "" {
 			detail = fmt.tprintf("%s · %s", detail, w.vod.game)
 		}
-		title := fit_text(r, .Bold, title_size, w.vod.title, room)
-		draw_text(r, .Bold, title_size, cx - text_width(r, .Bold, title_size, title) / 2, y, title, BROWSE_TEXT)
+		// Centred, with any emoji as images.
+		title_w := min(text_line_width(&app.assets, .Bold, title_size, w.vod.title), room)
+		draw_text_line(&app.assets, .Bold, title_size, cx - title_w / 2, y, w.vod.title, BROWSE_TEXT, room)
 		y += lh_title
 		detail = fit_text(r, .Regular, size, detail, room)
 		draw_text(r, .Regular, size, cx - text_width(r, .Regular, size, detail) / 2, y, detail, BROWSE_DIM_TEXT)
@@ -512,6 +519,7 @@ draw_vod_seek :: proc(app: ^App, right: f32) {
 	track := Rect{bar_x, panel.y + (panel.h - track_h) / 2, bar_w, track_h}
 	draw_rect(r, track, CHAT_TOGGLE_BACKGROUND)
 	draw_rect(r, {track.x, track.y, track.w * f32(pos / duration), track.h}, BROWSE_ACCENT)
+	draw_muted_segments(app, track, duration)
 	draw_chapter_marks(app, track, duration)
 	if in_rect(w.seek_bar, app.mouse.x, app.mouse.y) {
 		// Where a click would go.

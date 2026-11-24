@@ -33,6 +33,8 @@ Chat_Pane :: struct {
 	// From the last draw, in pixels.
 	rect:          Rect,
 	header_rect:   Rect,
+	// What's pinned and predicted, below the header (chat_banner.odin).
+	banner_rect:   Rect,
 	messages_rect: Rect,
 	input_rect:    Rect,
 	search_rect:   Rect,
@@ -163,7 +165,7 @@ pane_chat_arrived :: proc(app: ^App, p: ^Chat_Pane) {
 // Whether new messages in `p` are in front of the user: the window has focus, the
 // chats are showing and this one is at its newest messages.
 pane_seen :: proc(app: ^App, p: ^Chat_Pane) -> bool {
-	return app.window_focused && app.watch.show_chat && p.view.scroll == 0
+	return app.window_focused && chats_shown(app) && p.view.scroll == 0
 }
 
 // Whether `p` shows a past broadcast's chat (it's the main chat, during a replay),
@@ -192,6 +194,15 @@ pane_layout :: proc(app: ^App, p: ^Chat_Pane, rect: Rect) {
 	} else {
 		p.search_rect = {}
 	}
+	// What's pinned and predicted, on the watched channel's chat.
+	p.banner_rect = {}
+	if p.channel != "" && p.channel == app.watch.channel {
+		if _, n := chat_banner_lines(&app.watch.banner); n > 0 {
+			line_h := line_height(&app.assets.renderer, .Regular, BROWSE_CARD_TEXT_SIZE * scale) + pad / 2
+			p.banner_rect = {rect.x, top, rect.w, f32(n) * line_h + pad / 2}
+			top = p.banner_rect.y + p.banner_rect.h
+		}
+	}
 	p.input_rect = {rect.x + pad, rect.y + rect.h - pad - box_h, rect.w - 2 * pad, box_h}
 	// The emote button takes a square at the box's right.
 	p.emote_button = {}
@@ -219,7 +230,7 @@ draw_pane :: proc(app: ^App, p: ^Chat_Pane, focused: bool) {
 	a := &app.assets
 	r := &a.renderer
 	scale := app.scale
-	draw_rect(r, p.rect, CHAT_BACKGROUND)
+	draw_rect(r, p.rect, app.assets.chat_background if app.assets.chat_background.a > 0 else CHAT_BACKGROUND)
 	if pane_seen(app, p) {
 		p.unread_mentions = 0
 	}
@@ -228,9 +239,20 @@ draw_pane :: proc(app: ^App, p: ^Chat_Pane, focused: bool) {
 	// mentions are unread at its right.
 	draw_rect(r, p.header_rect, CHAT_HEADER)
 	title := p.channel if p.channel != "" else "New split"
+	// How many are in the watched channel's chat, while it's live
+	// (Chat_Rules.chatter_count, chat_banner.odin).
+	w := &app.watch
+	if app.layout.chat.chatter_count && p.channel != "" && p.channel == w.channel && !w.playing_vod && w.banner.chatters > 0 {
+		title = fmt.tprintf("%s · %s in chat", p.channel, format_viewers(w.banner.chatters))
+	}
 	size := BROWSE_CARD_TEXT_SIZE * scale
 	p.mention_badge = {}
 	title_room := p.header_rect.w - 16 * scale
+	// The first header has two buttons at its left ("»" and over or beside the
+	// video, draw_watch); the title stays centred, clear of them.
+	if len(w.panes) > 0 && p == w.panes[0] {
+		title_room = p.header_rect.w - 4 * p.header_rect.h - 8 * scale
+	}
 	if p.unread_mentions > 0 {
 		p.mention_badge = draw_mention_badge(app, p.header_rect.x + p.header_rect.w - 6 * scale, p.header_rect.y + p.header_rect.h / 2, p.unread_mentions)
 		// The title stays centred, clear of the badge.
@@ -247,6 +269,17 @@ draw_pane :: proc(app: ^App, p: ^Chat_Pane, focused: bool) {
 		draw_centered(r, .Regular, CHAT_FONT_SIZE * scale, p.messages_rect, "Which channel?", CHAT_SYSTEM_TEXT)
 	} else {
 		draw_chat_view(a, &p.view, p.messages_rect, scale, filter)
+	}
+
+	if p.banner_rect.w > 0 {
+		draw_rect(r, p.banner_rect, CHAT_HEADER)
+		lines, n := chat_banner_lines(&app.watch.banner)
+		line_h := line_height(r, .Regular, size) + CHAT_PADDING * scale / 2
+		for line, i in lines[:n] {
+			x := p.banner_rect.x + 8 * scale
+			y := p.banner_rect.y + CHAT_PADDING * scale / 4 + f32(i) * line_h
+			draw_text(r, .Regular, size, x, y, fit_text(r, .Regular, size, line, p.banner_rect.w - 16 * scale), CHAT_TEXT)
+		}
 	}
 
 	if p.modes_rect.w > 0 {
@@ -347,7 +380,7 @@ focused_box :: proc(app: ^App) -> (p: ^Chat_Pane, box: Box, ok: bool) {
 }
 
 box_focus :: proc(app: ^App, p: ^Chat_Pane, box: Box) {
-	if !app.watch.show_chat {
+	if !chats_shown(app) {
 		return
 	}
 	// Chatting needs a sign-in; naming a new split's channel doesn't. A replayed

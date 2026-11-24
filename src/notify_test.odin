@@ -88,3 +88,35 @@ live_notification_text :: proc(t: ^testing.T) {
 	_, body = live_notification_summary(streams[:2])
 	testing.expect_value(t, body, "A and B")
 }
+
+@(test)
+info_changes_are_found :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	n: Live_Notifier
+	defer live_notifier_destroy(&n)
+	a := Stream{user_id = "1", user_name = "A", title = "Chill", game_name = "Chess"}
+	b := Stream{user_id = "2", user_name = "B", title = "Speedrun", game_name = "Celeste"}
+	// The first list only remembers.
+	testing.expect_value(t, len(live_notifier_info_changes(&n, {a, b})), 0)
+	a.title = "Ranked"
+	b.game_name = "Hades"
+	changes := live_notifier_info_changes(&n, {a, b})
+	testing.expect_value(t, len(changes), 2)
+	testing.expect_value(t, changes[0], Info_Change{index = 0, title = true})
+	testing.expect_value(t, changes[1], Info_Change{index = 1, category = true})
+	title, body := info_change_notification(b, changes[1])
+	testing.expect_value(t, title, "B is now in Hades")
+	testing.expect_value(t, body, "Speedrun")
+	// Unchanged: nothing. Gone and back with a new title: it went live instead.
+	testing.expect_value(t, len(live_notifier_info_changes(&n, {a, b})), 0)
+	testing.expect_value(t, len(live_notifier_info_changes(&n, {b})), 0)
+	a.title = "Back"
+	testing.expect_value(t, len(live_notifier_info_changes(&n, {a, b})), 0)
+	a.title = "Both"
+	a.game_name = "Go"
+	both := live_notifier_info_changes(&n, {a, b})
+	testing.expect_value(t, len(both), 1)
+	title, body = info_change_notification(a, both[0])
+	testing.expect_value(t, title, "A changed title and category")
+	testing.expect_value(t, body, "Both\nGo")
+}

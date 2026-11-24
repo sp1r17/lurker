@@ -288,7 +288,8 @@ draw_history :: proc(app: ^App, content: Rect) {
 		if e.game != "" {
 			detail = fmt.tprintf("%s · %s", detail, e.game)
 		}
-		draw_text(r, .Regular, text_size, tx, ty + lh_name, fit_text(r, .Regular, text_size, detail, remove.x - 12 * scale - tx), BROWSE_DIM_TEXT)
+		// The title can have emoji, drawn as images like everywhere else.
+		draw_text_line(a, .Regular, text_size, tx, ty + lh_name, detail, BROWSE_DIM_TEXT, remove.x - 12 * scale - tx)
 	}
 	clip_end(r)
 }

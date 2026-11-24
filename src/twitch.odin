@@ -1424,6 +1424,237 @@ parse_chapters_response :: proc(body: []byte) -> (chapters: []Chapter, err: Twit
 	return list, .None
 }
 
+// The signed-in user's channel points on channel `login`: the channel's ID, the
+// balance, and the ID of a bonus waiting to be claimed ("" for none). Twitch's
+// site internals, not a documented API. Allocated with the temp allocator.
+get_channel_points :: proc(client_id, token, login: string) -> (channel_id: string, balance: int, claim_id: string, err: Twitch_Error) {
+	variables := make(map[string]string, context.temp_allocator)
+	variables["login"] = login
+	body := gql_post(client_id, token, "query($login: String!) { channel(name: $login) { id self { communityPoints { balance availableClaim { id } } } } }", variables) or_return
+	return parse_channel_points_response(body)
+}
+
+parse_channel_points_response :: proc(body: []byte) -> (channel_id: string, balance: int, claim_id: string, err: Twitch_Error) {
+	r: struct {
+		data:   struct {
+			channel: Maybe(struct {
+				id:   string,
+				self: Maybe(struct {
+					communityPoints: Maybe(struct {
+						balance:        int,
+						availableClaim: Maybe(struct {
+							id: string,
+						}),
+					}),
+				}),
+			}),
+		},
+		errors: Graphql_Errors,
+	}
+	if json.unmarshal(body, &r, allocator = context.temp_allocator) != nil {
+		return "", 0, "", .Bad_Json
+	}
+	check_errors(r.errors) or_return
+	channel, has_channel := r.data.channel.?
+	if !has_channel {
+		return "", 0, "", .None
+	}
+	self := channel.self.? or_else {}
+	points, has_points := self.communityPoints.?
+	if !has_points {
+		// Signed out, or the channel has no channel points.
+		return channel.id, 0, "", .None
+	}
+	claim := points.availableClaim.? or_else {}
+	return channel.id, points.balance, claim.id, .None
+}
+
+// Claims bonus `claim_id` on channel `channel_id` for the signed-in user;
+// returns the balance after.
+claim_channel_points :: proc(client_id, token, channel_id, claim_id: string) -> (balance: int, err: Twitch_Error) {
+	variables := make(map[string]string, context.temp_allocator)
+	variables["channel"] = channel_id
+	variables["claim"] = claim_id
+	query := "mutation($channel: ID!, $claim: ID!) { claimCommunityPoints(input: {channelID: $channel, claimID: $claim}) { currentPoints error { code } } }"
+	body := gql_post(client_id, token, query, variables) or_return
+	r: struct {
+		data:   struct {
+			claimCommunityPoints: Maybe(struct {
+				currentPoints: int,
+				error:         Maybe(struct {
+					code: string,
+				}),
+			}),
+		},
+		errors: Graphql_Errors,
+	}
+	if json.unmarshal(body, &r, allocator = context.temp_allocator) != nil {
+		return 0, .Bad_Json
+	}
+	check_errors(r.errors) or_return
+	result, ok := r.data.claimCommunityPoints.?
+	if !ok {
+		return 0, .Bad_Json
+	}
+	if e, failed := result.error.?; failed {
+		log.warnf("claiming channel points failed: %s", e.code)
+		return 0, .Bad_Status
+	}
+	return result.currentPoints, .None
+}
+
+// A drop finished but not yet claimed: its instance (what claiming takes) and
+// name, and its game's. Allocated with the temp allocator.
+Finished_Drop :: struct {
+	instance_id, name, game: string,
+}
+
+// The signed-in user's drops that are finished and waiting to be claimed, from
+// their campaigns in progress. Twitch's site internals, not a documented API.
+get_finished_drops :: proc(client_id, token: string) -> (drops: []Finished_Drop, err: Twitch_Error) {
+	body := gql_post(client_id, token, "query { currentUser { inventory { dropCampaignsInProgress { game { name } timeBasedDrops { name self { dropInstanceID isClaimed } } } } } }") or_return
+	return parse_finished_drops_response(body)
+}
+
+parse_finished_drops_response :: proc(body: []byte) -> (drops: []Finished_Drop, err: Twitch_Error) {
+	r: struct {
+		data:   struct {
+			currentUser: Maybe(struct {
+				inventory: Maybe(struct {
+					dropCampaignsInProgress: []struct {
+						game:           Maybe(struct {
+							name: string,
+						}),
+						timeBasedDrops: []struct {
+							name: string,
+							self: Maybe(struct {
+								dropInstanceID: Maybe(string),
+								isClaimed:      bool,
+							}),
+						},
+					},
+				}),
+			}),
+		},
+		errors: Graphql_Errors,
+	}
+	if json.unmarshal(body, &r, allocator = context.temp_allocator) != nil {
+		return nil, .Bad_Json
+	}
+	check_errors(r.errors) or_return
+	user, has_user := r.data.currentUser.?
+	if !has_user {
+		return nil, .None
+	}
+	inventory := user.inventory.? or_else {}
+	list := make([dynamic]Finished_Drop, context.temp_allocator)
+	for c in inventory.dropCampaignsInProgress {
+		game := c.game.? or_else {}
+		for d in c.timeBasedDrops {
+			self := d.self.? or_else {}
+			if id, finished := self.dropInstanceID.?; finished && id != "" && !self.isClaimed {
+				append(&list, Finished_Drop{id, d.name, game.name})
+			}
+		}
+	}
+	return list[:], .None
+}
+
+// Claims finished drop `instance_id` for the signed-in user.
+claim_drop :: proc(client_id, token, instance_id: string) -> Twitch_Error {
+	variables := make(map[string]string, context.temp_allocator)
+	variables["id"] = instance_id
+	query := "mutation($id: ID!) { claimDropRewards(input: {dropInstanceID: $id}) { status } }"
+	body := gql_post(client_id, token, query, variables) or_return
+	r: struct {
+		data:   struct {
+			claimDropRewards: Maybe(struct {
+				status: string,
+			}),
+		},
+		errors: Graphql_Errors,
+	}
+	if json.unmarshal(body, &r, allocator = context.temp_allocator) != nil {
+		return .Bad_Json
+	}
+	if len(r.errors) > 0 {
+		log.warnf("claiming a drop failed: %s", r.errors[0].message)
+	}
+	check_errors(r.errors) or_return
+	if _, ok := r.data.claimDropRewards.?; !ok {
+		return .Bad_Json
+	}
+	return .None
+}
+
+// A stretch of a past broadcast with its sound muted (for copyrighted music), in
+// seconds.
+Muted_Segment :: struct {
+	start, length: int,
+}
+
+// The muted stretches of past broadcast `id`, in order, those that touch joined
+// into one. Allocated with the temp allocator.
+get_muted_segments :: proc(client_id, token, id: string) -> (segments: []Muted_Segment, err: Twitch_Error) {
+	variables := make(map[string]string, context.temp_allocator)
+	variables["id"] = id
+	body := gql_post(
+		client_id,
+		token,
+		"query($id: ID!) { video(id: $id) { muteInfo { mutedSegmentConnection { nodes { offset duration } } } } }",
+		variables,
+	) or_return
+	return parse_muted_segments_response(body)
+}
+
+parse_muted_segments_response :: proc(body: []byte) -> (segments: []Muted_Segment, err: Twitch_Error) {
+	r: struct {
+		data:   struct {
+			video: Maybe(struct {
+				muteInfo: Maybe(struct {
+					mutedSegmentConnection: Maybe(struct {
+						nodes: []struct {
+							offset:   int,
+							duration: int,
+						},
+					}),
+				}),
+			}),
+		},
+		errors: Graphql_Errors,
+	}
+	if json.unmarshal(body, &r, allocator = context.temp_allocator) != nil {
+		return nil, .Bad_Json
+	}
+	check_errors(r.errors) or_return
+	video, has_video := r.data.video.?
+	if !has_video {
+		return nil, .None
+	}
+	info := video.muteInfo.? or_else {}
+	connection := info.mutedSegmentConnection.? or_else {}
+	list := make([dynamic]Muted_Segment, context.temp_allocator)
+	for n in connection.nodes {
+		if n.duration <= 0 {
+			continue
+		}
+		append(&list, Muted_Segment{n.offset, n.duration})
+	}
+	slice.sort_by(list[:], proc(a, b: Muted_Segment) -> bool {return a.start < b.start})
+	joined := make([dynamic]Muted_Segment, context.temp_allocator)
+	for s in list {
+		if len(joined) > 0 {
+			last := &joined[len(joined) - 1]
+			if s.start <= last.start + last.length {
+				last.length = max(last.length, s.start + s.length - last.start)
+				continue
+			}
+		}
+		append(&joined, s)
+	}
+	return joined[:], .None
+}
+
 // A message from a past broadcast's chat, as a chat message, and when in the
 // broadcast it was sent.
 Replay_Message :: struct {

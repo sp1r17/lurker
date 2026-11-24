@@ -75,35 +75,45 @@ watch time from reports its own player sends, and streamlink sends none.
   earns channel points and drop progress. Paused or buffering minutes don't
   count, and if Twitch changes how this works, only this stops (done for
   channel points; drop progress not checked yet)
-- The channel points balance, and claiming the bonus automatically
-- Claiming finished drops automatically
+- The channel points balance, and claiming the bonus automatically (done;
+  claiming was broken until its request was fixed, and hasn't been seen to work
+  since)
+- Claiming finished drops automatically (done; reading the inventory checked,
+  claiming not yet, with no drop finished to claim)
 
 Chat:
 
-- Pinned chat messages, and polls and predictions shown above the chat
-- Shared Chat: show which channel each message came from
-- Chat over the video in fullscreen, with its position, size and background
-  adjustable
+- Pinned chat messages, and polls and predictions shown above the chat (done
+  for pinned messages and predictions; polls aren't in Twitch's GraphQL as far
+  as Lurker can find)
+- Shared Chat: show which channel each message came from, by its profile
+  picture as Twitch does (done; not yet seen in a real Shared Chat session)
+- Chat over the video, switched with O in any window, with its position, size
+  and background adjustable, and moved and resized with the mouse (done)
 - More chat options: hiding badges, highlighting bits and your own messages,
   lines between messages, the viewer or chatter count above the chat, and still
-  emotes instead of animated ones
-- Whispers
+  emotes instead of animated ones (done; bits were already highlighted, and the
+  count is chatters)
+- Whispers (done: received in the chat being watched, sent with `/w`; sending
+  not yet checked, as Twitch's answer to a test whisper to yourself was unclear)
 
 Playback and notifications:
 
-- Lower the quality when the stream keeps buffering
-- Muted parts of past broadcasts shown on the seek bar
+- Lower the quality when the stream keeps buffering (done)
+- Muted parts of past broadcasts shown on the seek bar (done)
 - A video enhancement setting: Off, or Balanced, with debanding and a sharper
   scaler at almost no cost (done; a neural upscaler, FSRCNNX, was tried and
   dropped: on Twitch's compressed streams it made no visible difference)
 - Audio normalization, evening out loud and quiet streamers and sudden alerts
   (done)
 - Choosing the audio output device, and an audio delay for Bluetooth
-  headphones
+  headphones (done)
 - Screenshots of the video, without Lurker's UI, at the stream's resolution
+  (done)
 - Stepping frame by frame through past broadcasts and clips (`,` and `.`)
-- Notify when a followed channel changes its title or category
-- Keyboard shortcut list in the app (`?`)
+  (done)
+- Notify when a followed channel changes its title or category (done)
+- Keyboard shortcut list in the app (`?`) (done)
 
 ## 0.13: Bigger features
 

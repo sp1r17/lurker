@@ -341,6 +341,10 @@ recording_playlist_is_finished :: proc(t: ^testing.T) {
 	)
 	_, ok = finished_playlist("<html>", "https://x/y")
 	testing.expect(t, !ok)
+	// Fragmented MP4: the init segment's address too.
+	fmp4, fmp4_ok := finished_playlist("#EXTM3U\n#EXT-X-MAP:URI=\"init-0.mp4\"\n#EXTINF:10.000,\n0.mp4\n", "https://cdn.example/abc/1080p60/index-dvr.m3u8")
+	testing.expect(t, fmp4_ok)
+	testing.expect_value(t, fmp4, "#EXTM3U\n#EXT-X-MAP:URI=\"https://cdn.example/abc/1080p60/init-0.mp4\"\n#EXTINF:10.000,\nhttps://cdn.example/abc/1080p60/0.mp4\n#EXT-X-ENDLIST\n")
 }
 
 @(test)
@@ -427,4 +431,74 @@ card_follows_read :: proc(t: ^testing.T) {
 	gone := `{"data":{"game":null}}`
 	f, err = parse_card_follows_response(transmute([]byte)string(gone))
 	testing.expect_value(t, f.category, Follow_State.Unknown)
+}
+
+@(test)
+muted_segments_are_joined :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	body := `{"data":{"video":{"muteInfo":{"mutedSegmentConnection":{"nodes":[` +
+		`{"offset":4320,"duration":180},{"offset":2700,"duration":180},{"offset":4140,"duration":180},{"offset":9000,"duration":0}]}}}}}`
+	segments, err := parse_muted_segments_response(transmute([]byte)body)
+	testing.expect_value(t, err, Twitch_Error.None)
+	testing.expect_value(t, len(segments), 2)
+	testing.expect_value(t, segments[0], Muted_Segment{2700, 180})
+	// 4140 and 4320 touch: one stretch.
+	testing.expect_value(t, segments[1], Muted_Segment{4140, 360})
+	none, none_err := parse_muted_segments_response(transmute([]byte)string(`{"data":{"video":{"muteInfo":{"mutedSegmentConnection":null}}}}`))
+	testing.expect_value(t, none_err, Twitch_Error.None)
+	testing.expect_value(t, len(none), 0)
+	gone, gone_err := parse_muted_segments_response(transmute([]byte)string(`{"data":{"video":null}}`))
+	testing.expect_value(t, gone_err, Twitch_Error.None)
+	testing.expect_value(t, len(gone), 0)
+}
+
+@(test)
+channel_points_are_read :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	body := `{"data":{"channel":{"id":"23161357","self":{"communityPoints":{"balance":272669,"availableClaim":{"id":"b929-c26f"}}}}}}`
+	id, balance, claim, err := parse_channel_points_response(transmute([]byte)body)
+	testing.expect_value(t, err, Twitch_Error.None)
+	testing.expect_value(t, id, "23161357")
+	testing.expect_value(t, balance, 272669)
+	testing.expect_value(t, claim, "b929-c26f")
+	// No bonus waiting; and signed out (no points at all).
+	_, _, claim, _ = parse_channel_points_response(transmute([]byte)string(`{"data":{"channel":{"id":"1","self":{"communityPoints":{"balance":5,"availableClaim":null}}}}}`))
+	testing.expect_value(t, claim, "")
+	_, balance, claim, err = parse_channel_points_response(transmute([]byte)string(`{"data":{"channel":{"id":"1","self":null}}}`))
+	testing.expect_value(t, err, Twitch_Error.None)
+	testing.expect_value(t, balance, 0)
+}
+
+@(test)
+finished_drops_are_found :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	body := `{"data":{"currentUser":{"inventory":{"dropCampaignsInProgress":[` +
+		`{"game":{"name":"Cyberpunk 2077"},"timeBasedDrops":[` +
+		`{"name":"Quadra Paintjobs","self":{"dropInstanceID":null,"isClaimed":false}},` +
+		`{"name":"Jacket","self":{"dropInstanceID":"1#2#3","isClaimed":false}},` +
+		`{"name":"Hat","self":{"dropInstanceID":"1#2#4","isClaimed":true}}]}]}}}}`
+	drops, err := parse_finished_drops_response(transmute([]byte)body)
+	testing.expect_value(t, err, Twitch_Error.None)
+	testing.expect_value(t, len(drops), 1)
+	testing.expect_value(t, drops[0], Finished_Drop{"1#2#3", "Jacket", "Cyberpunk 2077"})
+	none, _ := parse_finished_drops_response(transmute([]byte)string(`{"data":{"currentUser":null}}`))
+	testing.expect_value(t, len(none), 0)
+}
+
+@(test)
+chat_banner_lines_are_made :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	body := `{"data":{"channel":{"pinnedChatMessages":{"edges":[{"node":{"pinnedMessage":{"content":{"text":"Giveaway at 9"},"sender":{"displayName":"Mod"}}}}]},` +
+		`"activePredictionEvents":[{"title":"Win?","status":"LOCKED","outcomes":[{"title":"Yes","totalPoints":300},{"title":"No","totalPoints":100}]}]}}}`
+	pinned, prediction, _, ok := parse_chat_banner_response(transmute([]byte)body)
+	testing.expect(t, ok)
+	testing.expect_value(t, pinned, "Pinned · Mod: Giveaway at 9")
+	testing.expect_value(t, prediction, "Prediction (locked) · Win?: Yes 75% · No 25%")
+	// Nothing going on; a resolved prediction no longer shows.
+	chatters: int
+	pinned, prediction, chatters, ok = parse_chat_banner_response(transmute([]byte)string(`{"data":{"channel":{"chatters":{"count":11955},"pinnedChatMessages":{"edges":[]},"activePredictionEvents":[{"title":"Done","status":"RESOLVED","outcomes":[]}]}}}`))
+	testing.expect(t, ok)
+	testing.expect_value(t, pinned, "")
+	testing.expect_value(t, prediction, "")
+	testing.expect_value(t, chatters, 11955)
 }

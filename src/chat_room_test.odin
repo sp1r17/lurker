@@ -36,3 +36,17 @@ chat_self_reads_badges :: proc(t: ^testing.T) {
 	s = chat_self_from_tags(msg)
 	testing.expect(t, s.subscriber && !chat_self_exempt(s))
 }
+
+@(test)
+shared_chat_channels_are_read :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	room, ok := parse_room_response(transmute([]byte)string(`{"data":{"user":{"login":"moonmoon","displayName":"MOONMOON","profileImageURL":"https://x/moon-70x70.png"}}}`))
+	testing.expect(t, ok)
+	testing.expect_value(t, room, Room{"MOONMOON", "https://x/moon-70x70.png"})
+	// No display name: the login; no picture: the name is shown instead.
+	room, ok = parse_room_response(transmute([]byte)string(`{"data":{"user":{"login":"lirik","displayName":"","profileImageURL":""}}}`))
+	testing.expect(t, ok)
+	testing.expect_value(t, room, Room{"lirik", ""})
+	_, ok = parse_room_response(transmute([]byte)string(`{"data":{"user":null}}`))
+	testing.expect(t, !ok)
+}

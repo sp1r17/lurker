@@ -85,6 +85,7 @@ Render_Param_Type :: enum c.int {
 	Opengl_Fbo          = 3,
 	Flip_Y              = 4,
 	Advanced_Control    = 10,
+	Block_For_Target_Time = 12,
 }
 
 Render_Param :: struct {

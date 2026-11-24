@@ -67,6 +67,11 @@ draggable :: proc(app: ^App, x, y: f32) -> bool {
 		if w.show_tab.w > 0 && in_rect(w.show_tab, x, y) {
 			return false
 		}
+		// The chats over the video aren't video: a double-click there stays in
+		// fullscreen.
+		if on_chat_overlay(app, x, y) {
+			return false
+		}
 		return in_rect(w.video_rect, x, y)
 	case .Browse:
 		if app.sign_in.sign_out.w > 0 && in_rect(app.sign_in.sign_out, x, y) {
@@ -88,14 +93,14 @@ toggle_fullscreen :: proc(app: ^App) {
 	_ = sdl.SetWindowFullscreen(app.window, app.fullscreen)
 }
 
-// A left press at (x, y), in pixels: a double-click on a drag area maximizes or
-// restores, and a press on one may become a drag once the mouse moves.
+// A left press at (x, y), in pixels: a double-click on a drag area goes
+// fullscreen or back, and a press on one may become a drag once the mouse moves.
 window_press :: proc(app: ^App, x, y: f32, clicks: u8) {
 	app.drag_armed = false
 	if !draggable(app, x, y) {
 		return
 	}
-	// Double-click: the same as the maximize button, like a title bar's.
+	// Double-click: the same as the maximize button and F.
 	if clicks == 2 {
 		toggle_maximized(app)
 		return
@@ -208,16 +213,13 @@ window_controls_click :: proc(app: ^App, x, y: f32) -> bool {
 	return false
 }
 
-// Maximizes or restores the window; in fullscreen, leaves that instead (a
-// fullscreen window ignores both).
+// The maximize button and a double-click: fullscreen or back, the same state F
+// toggles, so the chat over the video (chat_overlay.odin) shows whichever is
+// used. A window the compositor maximized (Meta+Up, say) is restored first.
 toggle_maximized :: proc(app: ^App) {
-	if app.fullscreen {
-		toggle_fullscreen(app)
+	if !app.fullscreen && .MAXIMIZED in sdl.GetWindowFlags(app.window) {
+		_ = sdl.RestoreWindow(app.window)
 		return
 	}
-	if .MAXIMIZED in sdl.GetWindowFlags(app.window) {
-		_ = sdl.RestoreWindow(app.window)
-	} else {
-		_ = sdl.MaximizeWindow(app.window)
-	}
+	toggle_fullscreen(app)
 }

@@ -46,6 +46,17 @@ Layout :: struct {
 	points_off:  bool,
 	// Loudness evened out between streams, and within one (player_set_normalize).
 	normalize_audio: bool,
+	// Not lowering a live stream's quality when it keeps buffering (buffering.odin).
+	auto_quality_off: bool,
+	// Not claiming channel point bonuses (bonus.odin), or finished drops
+	// (drops.odin).
+	bonus_off:        bool,
+	drops_off:        bool,
+	// The audio output, by mpv's name ("" for the system's choice; owned), and
+	// how much later the video shows for headphones that play sound late
+	// (AUDIO_DELAYS, in ms).
+	audio_device:    string,
+	audio_delay_ms:  int,
 	// How stream lists are ordered, and the tab the browse screen opens on.
 	stream_sort: Stream_Sort,
 	start_view:  Browse_View,
@@ -58,10 +69,22 @@ Layout :: struct {
 	// Logins, owned.
 	notifications_off: bool,
 	notify_only:       bool,
+	// Also a notification when a followed live channel changes its title or
+	// category (live_notifier_info_changes).
+	notify_changes:    bool,
 	notify_muted:      [dynamic]string,
 	notify_chosen:     [dynamic]string,
 	// Highlight phrases and ignored people, for every chat.
 	chat:              Chat_Rules,
+	// The chats over the video (O), and where, how big and how
+	// see-through (chat_overlay.odin).
+	chat_overlay:            bool,
+	chat_overlay_position:   Chat_Overlay_Position,
+	chat_overlay_size:       Chat_Overlay_Size,
+	chat_overlay_background: Chat_Overlay_Background,
+	// Where the chats over the video were dragged to, as x, y, width and height
+	// shares of the screen; no width for the corner and size above.
+	chat_overlay_box:        [4]f32,
 	// Not checking for new versions (update.odin), and the version the user chose
 	// to skip (owned).
 	update_checks_off: bool,
@@ -84,6 +107,7 @@ layout_destroy :: proc(l: ^Layout) {
 	chat_rules_destroy(&l.chat)
 	delete(l.skipped_version)
 	delete(l.language)
+	delete(l.audio_device)
 	for list in ([]^[dynamic]string{&l.notify_muted, &l.notify_chosen}) {
 		for login in list {
 			delete(login)
@@ -91,6 +115,10 @@ layout_destroy :: proc(l: ^Layout) {
 		delete(list^)
 	}
 }
+
+// The audio delays offered (Layout.audio_delay_ms), in ms: Bluetooth
+// headphones play sound about 100 to 300 ms late.
+AUDIO_DELAYS :: [?]int{0, 100, 150, 200, 250, 300}
 
 // The format layout.json is saved in (see saved.odin). 1 added the version.
 LAYOUT_VERSION :: 1
@@ -133,12 +161,18 @@ parse_layout :: proc(data: []byte, l: ^Layout) -> bool {
 		next_clip_off: bool,
 		points_off:  bool,
 		normalize_audio: bool,
+		auto_quality_off: bool,
+		bonus_off:        bool,
+		drops_off:        bool,
+		audio_device:    string,
+		audio_delay_ms:  int,
 		stream_sort: Stream_Sort,
 		start_view:  Browse_View,
 		hide_chat:   bool,
 		text_size:   int,
 		notifications_off: bool,
 		notify_only:       bool,
+		notify_changes:    bool,
 		notify_muted:      []string,
 		notify_chosen:     []string,
 		highlights:  []string,
@@ -147,6 +181,18 @@ parse_layout :: proc(data: []byte, l: ^Layout) -> bool {
 		chat_highlight_staff: bool,
 		chat_hide_bots:       bool,
 		chat_alternate_lines: bool,
+		chat_hide_badges:     bool,
+		chat_highlight_own:   bool,
+		chat_separators:      bool,
+		chat_still_emotes:    bool,
+		chat_chatter_count:   bool,
+		// Its name before 0.12 was released.
+		chat_viewer_count:    bool,
+		chat_overlay:            bool,
+		chat_overlay_position:   string,
+		chat_overlay_size:       string,
+		chat_overlay_background: string,
+		chat_overlay_box:        [4]f32,
 		update_checks_off: bool,
 		skipped_version:   string,
 		language:          string,
@@ -170,6 +216,18 @@ parse_layout :: proc(data: []byte, l: ^Layout) -> bool {
 	l.next_clip_off = saved.next_clip_off
 	l.points_off = saved.points_off
 	l.normalize_audio = saved.normalize_audio
+	l.auto_quality_off = saved.auto_quality_off
+	l.bonus_off = saved.bonus_off
+	l.drops_off = saved.drops_off
+	if saved.audio_device != "" {
+		delete(l.audio_device)
+		l.audio_device = strings.clone(saved.audio_device)
+	}
+	for ms in AUDIO_DELAYS {
+		if saved.audio_delay_ms == ms {
+			l.audio_delay_ms = ms
+		}
+	}
 	// Only the values offered, so a hand-edited file can't set another.
 	for ms in LOW_LATENCY_BUFFERS {
 		if saved.latency_buffer_ms == ms {
@@ -196,6 +254,7 @@ parse_layout :: proc(data: []byte, l: ^Layout) -> bool {
 	l.hide_chat = saved.hide_chat
 	l.notifications_off = saved.notifications_off
 	l.notify_only = saved.notify_only
+	l.notify_changes = saved.notify_changes
 	for login in saved.notify_muted {
 		if valid_login(login) {
 			rule_add(&l.notify_muted, login)
@@ -220,6 +279,16 @@ parse_layout :: proc(data: []byte, l: ^Layout) -> bool {
 	l.chat.highlight_staff = saved.chat_highlight_staff
 	l.chat.hide_bots = saved.chat_hide_bots
 	l.chat.alternate_lines = saved.chat_alternate_lines
+	l.chat.hide_badges = saved.chat_hide_badges
+	l.chat.highlight_own = saved.chat_highlight_own
+	l.chat.separators = saved.chat_separators
+	l.chat.still_emotes = saved.chat_still_emotes
+	l.chat.chatter_count = saved.chat_chatter_count || saved.chat_viewer_count
+	l.chat_overlay = saved.chat_overlay
+	l.chat_overlay_position = enum_from_name(Chat_Overlay_Position, saved.chat_overlay_position, Chat_Overlay_Position.Bottom_Right)
+	l.chat_overlay_size = enum_from_name(Chat_Overlay_Size, saved.chat_overlay_size, Chat_Overlay_Size.Medium)
+	l.chat_overlay_background = enum_from_name(Chat_Overlay_Background, saved.chat_overlay_background, Chat_Overlay_Background.Dim)
+	l.chat_overlay_box = saved.chat_overlay_box
 	for phrase in saved.highlights {
 		rule_add(&l.chat.highlights, strings.to_lower(strings.trim_space(phrase), context.temp_allocator))
 	}
@@ -269,12 +338,18 @@ layout_save :: proc(l: ^Layout) {
 		next_clip_off: bool,
 		points_off:  bool,
 		normalize_audio: bool,
+		auto_quality_off: bool,
+		bonus_off:        bool,
+		drops_off:        bool,
+		audio_device:    string,
+		audio_delay_ms:  int,
 		stream_sort: Stream_Sort,
 		start_view:  Browse_View,
 		hide_chat:   bool,
 		text_size:   int,
 		notifications_off: bool,
 		notify_only:       bool,
+		notify_changes:    bool,
 		notify_muted:      []string,
 		notify_chosen:     []string,
 		highlights:  []string,
@@ -283,11 +358,21 @@ layout_save :: proc(l: ^Layout) {
 		chat_highlight_staff: bool,
 		chat_hide_bots:       bool,
 		chat_alternate_lines: bool,
+		chat_hide_badges:     bool,
+		chat_highlight_own:   bool,
+		chat_separators:      bool,
+		chat_still_emotes:    bool,
+		chat_chatter_count:   bool,
+		chat_overlay:            bool,
+		chat_overlay_position:   string,
+		chat_overlay_size:       string,
+		chat_overlay_background: string,
+		chat_overlay_box:        [4]f32,
 		update_checks_off: bool,
 		skipped_version:   string,
 		language:          string,
 		language_hide:     bool,
-	}{LAYOUT_VERSION, l.splits, l.volume, l.muted, quality_name(l.quality), l.low_latency, l.raids_off, l.stats, l.chat_sync, l.latency_buffer_ms, l.max_height, fmt.tprint(l.video_enhancement), l.next_clip_off, l.points_off, l.normalize_audio, l.stream_sort, l.start_view, l.hide_chat, l.text_size, l.notifications_off, l.notify_only, l.notify_muted[:], l.notify_chosen[:], l.chat.highlights[:], l.chat.ignored[:], l.chat.timestamps, l.chat.highlight_staff, l.chat.hide_bots, l.chat.alternate_lines, l.update_checks_off, l.skipped_version, l.language, l.language_hide}
+	}{LAYOUT_VERSION, l.splits, l.volume, l.muted, quality_name(l.quality), l.low_latency, l.raids_off, l.stats, l.chat_sync, l.latency_buffer_ms, l.max_height, fmt.tprint(l.video_enhancement), l.next_clip_off, l.points_off, l.normalize_audio, l.auto_quality_off, l.bonus_off, l.drops_off, l.audio_device, l.audio_delay_ms, l.stream_sort, l.start_view, l.hide_chat, l.text_size, l.notifications_off, l.notify_only, l.notify_changes, l.notify_muted[:], l.notify_chosen[:], l.chat.highlights[:], l.chat.ignored[:], l.chat.timestamps, l.chat.highlight_staff, l.chat.hide_bots, l.chat.alternate_lines, l.chat.hide_badges, l.chat.highlight_own, l.chat.separators, l.chat.still_emotes, l.chat.chatter_count, l.chat_overlay, fmt.tprint(l.chat_overlay_position), fmt.tprint(l.chat_overlay_size), fmt.tprint(l.chat_overlay_background), l.chat_overlay_box, l.update_checks_off, l.skipped_version, l.language, l.language_hide}
 	data, err := json.marshal(saved, {pretty = true, use_enum_names = true}, context.temp_allocator)
 	if err != nil {
 		return

@@ -15,10 +15,20 @@ Setting_Switch :: enum {
 	Chat_Highlight_Staff,
 	Chat_Hide_Bots,
 	Chat_Alternate_Lines,
+	Chat_Hide_Badges,
+	Chat_Highlight_Own,
+	Chat_Separators,
+	Chat_Still_Emotes,
+	Chat_Chatter_Count,
+	Chat_Overlay,
 	Chat_Sync,
 	Next_Clip,
 	Watch_Points,
 	Normalize_Audio,
+	Notify_Changes,
+	Auto_Quality,
+	Claim_Bonus,
+	Claim_Drops,
 }
 
 // Settings with a few values, shown as the value; a click moves to the next.
@@ -26,6 +36,11 @@ Setting_Choice :: enum {
 	Latency_Buffer,
 	Max_Quality,
 	Video_Enhancement,
+	Audio_Device,
+	Audio_Delay,
+	Chat_Overlay_Position,
+	Chat_Overlay_Size,
+	Chat_Overlay_Background,
 	Notify_For,
 	Start_View,
 }
@@ -253,6 +268,18 @@ setting_on :: proc(app: ^App, s: Setting_Switch) -> bool {
 		return l.chat.hide_bots
 	case .Chat_Alternate_Lines:
 		return l.chat.alternate_lines
+	case .Chat_Hide_Badges:
+		return l.chat.hide_badges
+	case .Chat_Highlight_Own:
+		return l.chat.highlight_own
+	case .Chat_Separators:
+		return l.chat.separators
+	case .Chat_Still_Emotes:
+		return l.chat.still_emotes
+	case .Chat_Chatter_Count:
+		return l.chat.chatter_count
+	case .Chat_Overlay:
+		return l.chat_overlay
 	case .Chat_Sync:
 		return l.chat_sync
 	case .Next_Clip:
@@ -261,6 +288,14 @@ setting_on :: proc(app: ^App, s: Setting_Switch) -> bool {
 		return !l.points_off
 	case .Normalize_Audio:
 		return l.normalize_audio
+	case .Notify_Changes:
+		return l.notify_changes
+	case .Auto_Quality:
+		return !l.auto_quality_off
+	case .Claim_Bonus:
+		return !l.bonus_off
+	case .Claim_Drops:
+		return !l.drops_off
 	}
 	return false
 }
@@ -283,6 +318,33 @@ setting_value :: proc(app: ^App, c: Setting_Choice) -> string {
 	case .Video_Enhancement:
 		labels := VIDEO_ENHANCEMENT_LABELS
 		return labels[l.video_enhancement]
+	case .Audio_Device:
+		if l.audio_device == "" {
+			return "System default"
+		}
+		for d in app.player.audio_devices {
+			if d.name == l.audio_device {
+				return d.description
+			}
+		}
+		return "Not connected: system default for now"
+	case .Audio_Delay:
+		return "None" if l.audio_delay_ms == 0 else fmt.tprintf("%d ms", l.audio_delay_ms)
+	case .Chat_Overlay_Position:
+		if l.chat_overlay_box[2] > 0 {
+			return "Custom (dragged)"
+		}
+		labels := CHAT_OVERLAY_POSITION_LABELS
+		return labels[l.chat_overlay_position]
+	case .Chat_Overlay_Size:
+		if l.chat_overlay_box[2] > 0 {
+			return "Custom (resized)"
+		}
+		labels := CHAT_OVERLAY_SIZE_LABELS
+		return labels[l.chat_overlay_size]
+	case .Chat_Overlay_Background:
+		labels := CHAT_OVERLAY_BACKGROUND_LABELS
+		return labels[l.chat_overlay_background]
 	case .Notify_For:
 		return "Only channels you choose" if app.layout.notify_only else "All followed channels"
 	case .Start_View:
@@ -312,6 +374,42 @@ setting_next :: proc(app: ^App, c: Setting_Choice) {
 		l.max_height = next(heights[:], l.max_height)
 	case .Video_Enhancement:
 		l.video_enhancement = Video_Enhancement((int(l.video_enhancement) + 1) % len(Video_Enhancement))
+	case .Audio_Device:
+		// The system's choice, then each output; one no longer there goes back to
+		// the system's.
+		names := make([dynamic]string, context.temp_allocator)
+		append(&names, "")
+		for d in app.player.audio_devices {
+			append(&names, d.name)
+		}
+		next_name := ""
+		for name, i in names {
+			if name == l.audio_device {
+				next_name = names[(i + 1) % len(names)]
+			}
+		}
+		delete(l.audio_device)
+		l.audio_device = strings.clone(next_name)
+		player_set_audio_device(&app.player, l.audio_device)
+	case .Audio_Delay:
+		delays := AUDIO_DELAYS
+		l.audio_delay_ms = next(delays[:], l.audio_delay_ms)
+		player_set_audio_delay(&app.player, l.audio_delay_ms)
+	case .Chat_Overlay_Position:
+		// A dragged box goes back to the corner shown before it was dragged.
+		if l.chat_overlay_box[2] > 0 {
+			l.chat_overlay_box = {}
+		} else {
+			l.chat_overlay_position = Chat_Overlay_Position((int(l.chat_overlay_position) + 1) % len(Chat_Overlay_Position))
+		}
+	case .Chat_Overlay_Size:
+		if l.chat_overlay_box[2] > 0 {
+			l.chat_overlay_box = {}
+		} else {
+			l.chat_overlay_size = Chat_Overlay_Size((int(l.chat_overlay_size) + 1) % len(Chat_Overlay_Size))
+		}
+	case .Chat_Overlay_Background:
+		l.chat_overlay_background = Chat_Overlay_Background((int(l.chat_overlay_background) + 1) % len(Chat_Overlay_Background))
 	case .Notify_For:
 		l.notify_only = !l.notify_only
 	case .Start_View:
@@ -355,11 +453,41 @@ setting_toggle :: proc(app: ^App, s: Setting_Switch) {
 	case .Chat_Alternate_Lines:
 		app.layout.chat.alternate_lines = !app.layout.chat.alternate_lines
 		layout_save(&app.layout)
+	case .Chat_Hide_Badges:
+		app.layout.chat.hide_badges = !app.layout.chat.hide_badges
+		layout_save(&app.layout)
+	case .Chat_Highlight_Own:
+		app.layout.chat.highlight_own = !app.layout.chat.highlight_own
+		layout_save(&app.layout)
+	case .Chat_Separators:
+		app.layout.chat.separators = !app.layout.chat.separators
+		layout_save(&app.layout)
+	case .Chat_Still_Emotes:
+		app.layout.chat.still_emotes = !app.layout.chat.still_emotes
+		layout_save(&app.layout)
+	case .Chat_Chatter_Count:
+		app.layout.chat.chatter_count = !app.layout.chat.chatter_count
+		layout_save(&app.layout)
+	case .Chat_Overlay:
+		app.layout.chat_overlay = !app.layout.chat_overlay
+		layout_save(&app.layout)
 	case .Chat_Sync:
 		app.layout.chat_sync = !app.layout.chat_sync
 		layout_save(&app.layout)
 	case .Next_Clip:
 		app.layout.next_clip_off = !app.layout.next_clip_off
+		layout_save(&app.layout)
+	case .Claim_Drops:
+		app.layout.drops_off = !app.layout.drops_off
+		layout_save(&app.layout)
+	case .Claim_Bonus:
+		app.layout.bonus_off = !app.layout.bonus_off
+		layout_save(&app.layout)
+	case .Auto_Quality:
+		app.layout.auto_quality_off = !app.layout.auto_quality_off
+		layout_save(&app.layout)
+	case .Notify_Changes:
+		app.layout.notify_changes = !app.layout.notify_changes
 		layout_save(&app.layout)
 	case .Normalize_Audio:
 		app.layout.normalize_audio = !app.layout.normalize_audio
@@ -475,15 +603,30 @@ draw_settings :: proc(app: ^App, content: Rect) {
 		.Chat_Highlight_Staff = "Highlight the streamer's and moderators' messages",
 		.Chat_Hide_Bots       = "Hide bots and !commands",
 		.Chat_Alternate_Lines = "Alternate message backgrounds",
+		.Chat_Hide_Badges     = "Hide badges",
+		.Chat_Highlight_Own   = "Highlight your own messages",
+		.Chat_Separators      = "Lines between messages",
+		.Chat_Still_Emotes    = "Still emotes instead of animated ones",
+		.Chat_Chatter_Count   = "Show how many are in the chat, above it",
+		.Chat_Overlay         = "Chat over the video (O)",
 		.Chat_Sync     = "Delay chat to match the stream",
 		.Next_Clip     = "Play the next clip when one ends",
 		.Watch_Points  = "Earn channel points from watch time",
 		.Normalize_Audio = "Even out loudness between streams and alerts",
+		.Notify_Changes  = "Also when a live channel changes its title or category",
+		.Auto_Quality    = "Lower the quality when the stream keeps buffering",
+		.Claim_Bonus     = "Claim channel point bonuses automatically",
+		.Claim_Drops     = "Claim finished drops automatically",
 	}
 	choice_labels := [Setting_Choice]string {
 		.Latency_Buffer = "Low latency buffer",
 		.Max_Quality    = "Highest quality",
 		.Video_Enhancement = "Video enhancement",
+		.Audio_Device   = "Sound output",
+		.Audio_Delay    = "Show the video later, for Bluetooth headphones",
+		.Chat_Overlay_Position   = "Chat over the video: where",
+		.Chat_Overlay_Size       = "Chat over the video: size",
+		.Chat_Overlay_Background = "Chat over the video: background",
 		.Notify_For     = "Notify for",
 		.Start_View     = "Start page",
 	}
@@ -512,9 +655,9 @@ draw_settings :: proc(app: ^App, content: Rect) {
 	general_switches := []Setting_Switch{.Notifications, .Update_Checks} if NOTIFICATIONS_SUPPORTED else []Setting_Switch{.Update_Checks}
 	all_sections := [?]Section {
 		{title = "General", switches = general_switches, choices = {.Start_View}, text_size = true},
-		{title = "Streams", switches = {.Low_Latency, .Normalize_Audio, .Follow_Raids, .Next_Clip, .Watch_Points}, choices = {.Latency_Buffer, .Max_Quality, .Video_Enhancement}, language = true},
-		{title = "Live notifications", choices = {.Notify_For}, lists = {.Notify_Channels}, notifications = true},
-		{title = "Chat", switches = {.Chat_Sync, .Chat_Timestamps, .Chat_Highlight_Staff, .Chat_Hide_Bots, .Chat_Alternate_Lines}, lists = {.Highlights, .Ignored}},
+		{title = "Streams", switches = {.Low_Latency, .Auto_Quality, .Normalize_Audio, .Follow_Raids, .Next_Clip, .Watch_Points, .Claim_Bonus, .Claim_Drops}, choices = {.Latency_Buffer, .Max_Quality, .Video_Enhancement, .Audio_Device, .Audio_Delay}, language = true},
+		{title = "Live notifications", switches = {.Notify_Changes}, choices = {.Notify_For}, lists = {.Notify_Channels}, notifications = true},
+		{title = "Chat", switches = {.Chat_Sync, .Chat_Timestamps, .Chat_Highlight_Staff, .Chat_Highlight_Own, .Chat_Hide_Bots, .Chat_Hide_Badges, .Chat_Alternate_Lines, .Chat_Separators, .Chat_Still_Emotes, .Chat_Chatter_Count, .Chat_Overlay}, choices = {.Chat_Overlay_Position, .Chat_Overlay_Size, .Chat_Overlay_Background}, lists = {.Highlights, .Ignored}},
 		{title = "Blocked", lists = {.Blocked_Channels, .Blocked_Categories}},
 		{title = "Account", account = true},
 		{title = "Bug reports", log = true},
@@ -537,7 +680,7 @@ draw_settings :: proc(app: ^App, content: Rect) {
 		}
 		total_h += section_gap
 	}
-	total_h += lh_text + pad
+	total_h += pad
 	scroll := &b.scroll[.Settings]
 	b.max_scroll[.Settings] = max(0, total_h - rest.h)
 	scroll^ = clamp(scroll^, 0, b.max_scroll[.Settings])
@@ -576,7 +719,9 @@ draw_settings :: proc(app: ^App, content: Rect) {
 			y += row_h + row_gap
 			draw_rect(r, row, BROWSE_PLACEHOLDER)
 			draw_text(r, .Regular, name_size, row.x + row_pad, row.y + (row.h - lh_name) / 2, choice_labels[c], BROWSE_TEXT)
-			value := setting_value(app, c)
+			// A long value (a sound output's name) is cut short before the label.
+			label_w := text_width(r, .Regular, name_size, choice_labels[c])
+			value := fit_text(r, .Regular, text_size, setting_value(app, c), max(row.w - label_w - 2 * row_pad - 24 * scale, 0))
 			vw := text_width(r, .Regular, text_size, value)
 			button := Rect{row.x + row.w - row_pad - vw, row.y + (row.h - lh_text) / 2, vw, lh_text}
 			hovered := in_rect(button, app.mouse.x, app.mouse.y)
@@ -693,7 +838,6 @@ draw_settings :: proc(app: ^App, content: Rect) {
 		}
 		y += section_gap
 	}
-	draw_text(r, .Regular, text_size, x, y, "Right-click a stream, channel or category to block it.", BROWSE_DIM_TEXT)
 	clip_end(r)
 }
 

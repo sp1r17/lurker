@@ -24,6 +24,20 @@ Live_Notifier :: struct {
 	// When each channel (by user ID; owned keys) was last in the list. Channels
 	// gone longer than LIVE_GRACE_MS are dropped.
 	last_seen: map[string]int,
+	// Each channel's title and category in the last list (by user ID; all
+	// owned), to tell when they change (live_notifier_info_changes).
+	info:      map[string]Seen_Info,
+}
+
+Seen_Info :: struct {
+	title, category: string,
+}
+
+// A channel whose title or category changed: its index in the list.
+Info_Change :: struct {
+	index:    int,
+	title:    bool,
+	category: bool,
 }
 
 live_notifier_clear :: proc(n: ^Live_Notifier) {
@@ -31,6 +45,12 @@ live_notifier_clear :: proc(n: ^Live_Notifier) {
 		delete(id)
 	}
 	clear(&n.last_seen)
+	for id, seen in n.info {
+		delete(id)
+		delete(seen.title)
+		delete(seen.category)
+	}
+	clear(&n.info)
 	n.seeded = false
 	n.last_poll = 0
 }
@@ -38,6 +58,55 @@ live_notifier_clear :: proc(n: ^Live_Notifier) {
 live_notifier_destroy :: proc(n: ^Live_Notifier) {
 	live_notifier_clear(n)
 	delete(n.last_seen)
+	delete(n.info)
+}
+
+// Takes a new list of the followed channels that are live, and returns those
+// whose title or category changed since the last list. Only channels in both
+// count: one going live is announced as that. Allocated with the temp
+// allocator.
+live_notifier_info_changes :: proc(n: ^Live_Notifier, streams: []Stream) -> []Info_Change {
+	changes := make([dynamic]Info_Change, context.temp_allocator)
+	now := make(map[string]struct{}, len(streams), context.temp_allocator)
+	for s, i in streams {
+		now[s.user_id] = {}
+		if seen, ok := &n.info[s.user_id]; ok {
+			c := Info_Change{index = i, title = seen.title != s.title, category = seen.category != s.game_name}
+			if c.title || c.category {
+				append(&changes, c)
+				delete(seen.title)
+				delete(seen.category)
+				seen^ = {strings.clone(s.title), strings.clone(s.game_name)}
+			}
+		} else {
+			n.info[strings.clone(s.user_id)] = {strings.clone(s.title), strings.clone(s.game_name)}
+		}
+	}
+	gone := make([dynamic]string, context.temp_allocator)
+	for id in n.info {
+		if id not_in now {
+			append(&gone, id)
+		}
+	}
+	for id in gone {
+		key, seen := delete_key(&n.info, id)
+		delete(key)
+		delete(seen.title)
+		delete(seen.category)
+	}
+	return changes[:]
+}
+
+// A channel's notification for a new title or category. Allocated with the temp
+// allocator.
+info_change_notification :: proc(s: Stream, c: Info_Change) -> (title, body: string) {
+	switch {
+	case c.title && c.category:
+		return fmt.tprintf("%s changed title and category", s.user_name), fmt.tprintf("%s\n%s", s.title, s.game_name)
+	case c.category:
+		return fmt.tprintf("%s is now in %s", s.user_name, s.game_name), s.title
+	}
+	return fmt.tprintf("%s changed the title", s.user_name), s.title
 }
 
 // Takes a new list of the followed channels that are live, and returns the
@@ -118,6 +187,10 @@ live_notify :: proc(app: ^App, streams: []Stream) {
 		return
 	}
 	went_live := live_notifier_update(&app.live, streams, app.assets.now_ms)
+	changed := live_notifier_info_changes(&app.live, streams)
+	if app.layout.notify_changes {
+		info_notify(app, streams, changed)
+	}
 	announce := make([dynamic]Stream, context.temp_allocator)
 	for i in went_live {
 		s := streams[i]
@@ -147,6 +220,33 @@ live_notify :: proc(app: ^App, streams: []Stream) {
 		append(&p.notifications, Live_Notification{title = strings.clone(title), body = strings.clone(body), login = strings.clone(s.user_login)})
 	}
 	jobs_add(&app.assets.jobs, run_notify_job, p)
+}
+
+// Announces the channels in `changed` with a new title or category, except one
+// being watched and those not wanted; many at once share one notification.
+@(private = "file")
+info_notify :: proc(app: ^App, streams: []Stream, changed: []Info_Change) {
+	p := Notify_Job {
+		client_id = strings.clone(app.client_id),
+		auth      = clone_auth(app.auth),
+	}
+	for c in changed {
+		s := streams[c.index]
+		if (app.screen == .Watch && s.user_login == app.watch.channel) || !notify_wanted(&app.layout, s.user_login) {
+			continue
+		}
+		title, body := info_change_notification(s, c)
+		append(&p.notifications, Live_Notification{title = strings.clone(title), body = strings.clone(body), login = strings.clone(s.user_login)})
+	}
+	switch {
+	case len(p.notifications) == 0:
+		destroy_notify_job(&p)
+	case len(p.notifications) > LIVE_NOTIFY_MAX:
+		show_notification(app, fmt.tprintf("%d channels you follow changed title or category", len(p.notifications)), "", "")
+		destroy_notify_job(&p)
+	case:
+		jobs_add(&app.assets.jobs, run_notify_job, p)
+	}
 }
 
 // One channel's notification: its text, the channel a click opens, and its

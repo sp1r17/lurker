@@ -4,7 +4,7 @@ import "core:fmt"
 import "core:slice"
 import "core:strings"
 
-CHAT_COMMANDS_HELP :: "Commands: /me, /highlight, /unhighlight, /highlights, /ignore, /unignore, /ignores; for moderators /ban, /unban, /timeout, /untimeout, /clear"
+CHAT_COMMANDS_HELP :: "Commands: /me, /w, /highlight, /unhighlight, /highlights, /ignore, /unignore, /ignores; for moderators /ban, /unban, /timeout, /untimeout, /clear"
 
 // Runs a command typed in the chat box, other than /me (which is sent). Returns
 // false if `text` isn't one.
@@ -82,6 +82,15 @@ pane_command :: proc(app: ^App, p: ^Chat_Pane, text: string) -> bool {
 		}
 	case "/clear":
 		mod_request(app, p, .Clear)
+	case "/w", "/whisper":
+		target, _, message := strings.partition(arg, " ")
+		login := strings.to_lower(strings.trim_left(target, "@"), context.temp_allocator)
+		message = strings.trim_space(message)
+		if !valid_login(login) || message == "" {
+			pane_notice(app, p, "Whisper someone: /w name message")
+			return true
+		}
+		whisper_send(app, p, login, message)
 	case:
 		return false
 	}

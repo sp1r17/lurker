@@ -1,5 +1,6 @@
 package app
 
+import "core:encoding/json"
 import "core:fmt"
 import "core:log"
 import "core:strings"
@@ -29,13 +30,66 @@ Player :: struct {
 	position:      Maybe(f64),
 	duration:      Maybe(f64),
 	paused:        bool,
+	// A frame step under way: mpv plays the frame, unpausing for it, and then
+	// pauses again; it counts as paused throughout (player_frame_step).
+	stepping:      bool,
 	// For the stream stats (stream_stats.odin).
 	stats:         Player_Stats,
+	// The audio outputs there are to choose from (audio-device-list), as mpv
+	// last reported them. Owned.
+	audio_devices: [dynamic]Audio_Device,
+}
+
+// An audio output: mpv's name for it, and the name people know it by. Owned.
+Audio_Device :: struct {
+	name:        string,
+	description: string,
+}
+
+// The outputs in mpv's audio-device-list (JSON) that Lurker's audio output can
+// use, replacing those in `list`: on Linux only PulseAudio's (ao=pulse), as
+// mpv lists each device under PipeWire too. "auto", the system's own choice,
+// isn't one: it's the setting's default.
+parse_audio_devices :: proc(text: string, list: ^[dynamic]Audio_Device) {
+	audio_devices_clear(list)
+	devices: []struct {
+		name, description: string,
+	}
+	if json.unmarshal_string(text, &devices, allocator = context.temp_allocator) != nil {
+		return
+	}
+	for d in devices {
+		if d.name == "auto" || (ODIN_OS == .Linux && !strings.has_prefix(d.name, "pulse/")) {
+			continue
+		}
+		append(list, Audio_Device{strings.clone(d.name), strings.clone(d.description if d.description != "" else d.name)})
+	}
+}
+
+audio_devices_clear :: proc(list: ^[dynamic]Audio_Device) {
+	for d in list {
+		delete(d.name)
+		delete(d.description)
+	}
+	clear(list)
+}
+
+// Plays sound through `name` (an Audio_Device's), or the system's choice for
+// "". A device that isn't there now leaves it to the system too.
+player_set_audio_device :: proc(p: ^Player, name: string) {
+	player_command(p, {"set", "audio-device", strings.clone_to_cstring(name if name != "" else "auto", context.temp_allocator)})
+}
+
+// Shows the video `ms` later than the sound would have it, for headphones that
+// play it late (Bluetooth): mpv's audio-delay, negative for the video's.
+player_set_audio_delay :: proc(p: ^Player, ms: int) {
+	player_command(p, {"set", "audio-delay", fmt.ctprintf("%.3f", -f64(ms) / 1000)})
 }
 
 // How playback is going, as mpv last reported it, for the stream stats. Reset
 // with each file played; nil while mpv has no value.
 Player_Stats :: struct {
+	width:           Maybe(i64),
 	height:          Maybe(i64),
 	fps:             Maybe(f64),
 	// mpv's names ("h264"; "vaapi", "no"). Owned.
@@ -62,6 +116,7 @@ STATS_PROPERTIES := [?]struct {
 	name:   cstring,
 	format: mpv.Format,
 } {
+	{"video-params/w", .Int64},
 	{"video-params/h", .Int64},
 	{"estimated-vf-fps", .Double},
 	{"video-format", .String},
@@ -136,6 +191,7 @@ player_init :: proc(p: ^Player) -> Player_Error {
 	mpv.observe_property(p.handle, 0, "time-pos", .Double)
 	mpv.observe_property(p.handle, 0, "duration", .Double)
 	mpv.observe_property(p.handle, 0, "pause", .Flag)
+	mpv.observe_property(p.handle, 0, "audio-device-list", .String)
 	for prop in STATS_PROPERTIES {
 		mpv.observe_property(p.handle, 0, prop.name, prop.format)
 	}
@@ -158,6 +214,8 @@ player_destroy :: proc(p: ^Player) {
 	mpv.render_context_free(p.render)
 	mpv.terminate_destroy(p.handle)
 	stats_reset(&p.stats)
+	audio_devices_clear(&p.audio_devices)
+	delete(p.audio_devices)
 	gl.DeleteFramebuffers(1, &p.fbo)
 	gl.DeleteTextures(1, &p.texture)
 }
@@ -244,6 +302,8 @@ player_load_at :: proc(p: ^Player, url: string, start: f64, online_segments := f
 // loadfile with per-file options, joined with commas.
 @(private = "file")
 load_with_options :: proc(p: ^Player, url: string, options: []string) {
+	// A step through the last video doesn't carry over.
+	p.stepping = false
 	curl := strings.clone_to_cstring(url, context.temp_allocator)
 	if len(options) == 0 {
 		player_command(p, {"loadfile", curl})
@@ -263,9 +323,21 @@ player_duration :: proc(p: ^Player) -> (seconds: f64, ok: bool) {
 	return p.duration.?
 }
 
-// Whether mpv is paused.
+// Whether mpv is paused, or stepping a frame and about to be again.
 player_paused :: proc(p: ^Player) -> bool {
-	return p.paused
+	return p.paused || p.stepping
+}
+
+// A frame on, or back with `back`, pausing first, as in mpv.
+player_frame_step :: proc(p: ^Player, back: bool) {
+	p.stepping = true
+	player_command(p, {"frame-back-step" if back else "frame-step"})
+}
+
+// Pauses, or plays on.
+player_toggle_pause :: proc(p: ^Player) {
+	p.stepping = false
+	player_command(p, {"cycle", "pause"})
 }
 
 @(private = "file")
@@ -283,6 +355,8 @@ property_changed :: proc(p: ^Player, prop: ^mpv.Event_Property) {
 	}
 	s := &p.stats
 	switch string(prop.name) {
+	case "video-params/w":
+		s.width = integer
 	case "video-params/h":
 		s.height = integer
 	case "estimated-vf-fps":
@@ -315,8 +389,13 @@ property_changed :: proc(p: ^Player, prop: ^mpv.Event_Property) {
 		p.position = number
 	case "duration":
 		p.duration = number
+	case "audio-device-list":
+		parse_audio_devices(text, &p.audio_devices)
 	case "pause":
 		p.paused = prop.format == .Flag && (^i32)(prop.data)^ != 0
+		if p.paused {
+			p.stepping = false
+		}
 	}
 }
 
@@ -348,6 +427,46 @@ Player_Event :: enum {
 	Playing,
 	// The stream reached its end, or failed (the reason is logged).
 	Ended,
+}
+
+// The video's current picture at its own size, without Lurker's UI: RGBA rows,
+// top first, opaque. mpv draws it again into a texture that size, and it's read
+// back; mpv's own screenshot command can't read a picture the hardware decoder
+// still holds (NVDEC: "cuda not supported by libswscale"). Must be called with
+// the window's OpenGL context current.
+player_capture :: proc(p: ^Player, allocator := context.allocator) -> (pixels: []u8, size: [2]i32, ok: bool) {
+	w := i32(p.stats.width.? or_else 0)
+	h := i32(p.stats.height.? or_else 0)
+	if w <= 0 || h <= 0 || p.render == nil {
+		return nil, {}, false
+	}
+	fbo, texture: u32
+	gl.GenFramebuffers(1, &fbo)
+	gl.GenTextures(1, &texture)
+	defer {
+		gl.DeleteFramebuffers(1, &fbo)
+		gl.DeleteTextures(1, &texture)
+	}
+	gl.BindTexture(gl.TEXTURE_2D, texture)
+	gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, nil)
+	gl.BindFramebuffer(gl.FRAMEBUFFER, fbo)
+	gl.FramebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0)
+	target := mpv.Opengl_Fbo{fbo = i32(fbo), w = w, h = h}
+	// As player_render: the first row read is the picture's top. And now,
+	// rather than when the frame is due.
+	flip_y: i32 = 0
+	block: i32 = 0
+	params := [?]mpv.Render_Param{{.Opengl_Fbo, &target}, {.Flip_Y, &flip_y}, {.Block_For_Target_Time, &block}, {}}
+	mpv.render_context_render(p.render, raw_data(params[:]))
+	pixels = make([]u8, int(w) * int(h) * 4, allocator)
+	gl.BindFramebuffer(gl.FRAMEBUFFER, fbo)
+	gl.PixelStorei(gl.PACK_ALIGNMENT, 1)
+	gl.ReadPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, raw_data(pixels))
+	gl.BindFramebuffer(gl.FRAMEBUFFER, 0)
+	for i := 3; i < len(pixels); i += 4 {
+		pixels[i] = 255
+	}
+	return pixels, {w, h}, true
 }
 Player_Events :: bit_set[Player_Event]
 
@@ -382,6 +501,7 @@ player_handle_events :: proc(p: ^Player) -> (events: Player_Events) {
 			if e.error < 0 {
 				log.warnf("mpv command failed: %s", mpv.error_string(e.error))
 			}
+
 		}
 	}
 }
@@ -437,7 +557,11 @@ player_render :: proc(p: ^Player) {
 	// Unflipped, the texture's first row is the image's top, which is how the
 	// renderer maps textures.
 	flip_y: i32 = 0
-	params := [?]mpv.Render_Param{{.Opengl_Fbo, &fbo}, {.Flip_Y, &flip_y}, {}}
+	// Not waiting for the frame's display time: the update callback already says
+	// when one is due, and waiting held every redraw (a chat box being dragged,
+	// say) to the video's frame rate on a faster screen.
+	block: i32 = 0
+	params := [?]mpv.Render_Param{{.Opengl_Fbo, &fbo}, {.Flip_Y, &flip_y}, {.Block_For_Target_Time, &block}, {}}
 	mpv.render_context_render(p.render, raw_data(params[:]))
 }
 

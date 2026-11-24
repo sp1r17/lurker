@@ -6,7 +6,11 @@ import "core:strings"
 import "core:unicode/utf8"
 import sdl "vendor:sdl3"
 
-CHAT_MAX_MESSAGES :: 1000
+// The newest messages each chat keeps (a few MB for a thousand). Once there are
+// CHAT_TRIM_BATCH more, the oldest go all at once: dropping them one by one
+// would move every other message along with each new one.
+CHAT_MAX_MESSAGES :: 10_000
+CHAT_TRIM_BATCH :: 1000
 // Sizes in logical pixels, scaled by the display scale.
 CHAT_WIDTH :: 340
 CHAT_FONT_SIZE :: 17
@@ -66,6 +70,13 @@ Assets :: struct {
 	// The user's chat settings (Layout.chat), for laying messages out; nil in
 	// tests.
 	rules:         ^Chat_Rules,
+	// For looking things up from the chat (App.client_id; not owned), and the
+	// Shared Chat channels' names (shared_chat.odin).
+	client_id:     string,
+	rooms:         Room_Names,
+	// The chat's background: CHAT_BACKGROUND, or see-through over the video
+	// (chat_overlay.odin). Set while laying out.
+	chat_background: Color,
 }
 
 // The user's own chat rules, kept in layout.json: phrases that highlight a message,
@@ -82,6 +93,16 @@ Chat_Rules :: struct {
 	hide_bots:       bool,
 	// Every other message on a lighter background.
 	alternate_lines: bool,
+	// No badges before names.
+	hide_badges:     bool,
+	// Your own messages, marked out.
+	highlight_own:   bool,
+	// A thin line between messages.
+	separators:      bool,
+	// Emotes still, on their first frame.
+	still_emotes:    bool,
+	// How many are in the watched channel's chat, above it.
+	chatter_count:   bool,
 }
 
 // Chat bots common enough to hide by name (Chat_Rules.hide_bots), lowercase.
@@ -107,6 +128,9 @@ CHAT_BOTS :: [?]string {
 CHAT_STREAMER_BACKGROUND :: Color{0xb0, 0x3a, 0x7a, 60}
 CHAT_MODERATOR_BACKGROUND :: Color{0x1f, 0x8f, 0x8f, 55}
 CHAT_ALTERNATE_BACKGROUND :: Color{0xff, 0xff, 0xff, 9}
+// Your own messages (Chat_Rules.highlight_own), and the lines between messages.
+CHAT_OWN_BACKGROUND :: Color{0x3f, 0x6f, 0xa5, 70}
+CHAT_SEPARATOR :: Color{0xff, 0xff, 0xff, 18}
 
 // Whether `m` is left out as a bot's, or a "!command" (Chat_Rules.hide_bots).
 hidden_as_bot :: proc(m: ^Chat_Message) -> bool {
@@ -255,6 +279,7 @@ chat_view_add :: proc(v: ^Chat_View, a: ^Assets, scale, width: f32, new_messages
 		apply_third_party_emotes(added, v.emotes, &a.emotes, &a.user_emotes if own else nil)
 		apply_emoji(added, &a.emoji)
 		mine := self_login != "" && added.login == self_login
+		added.own = mine && added.kind != .System
 		added.mention = mentions(added, self_login) || (!mine && highlighted(added, v.rules))
 		if added.mention {
 			mentions_added += 1
@@ -330,14 +355,20 @@ chat_view_refresh_badges :: proc(v: ^Chat_View) {
 	}
 }
 
-// Drops `login`'s messages, when they've just been ignored.
+// Drops `login`'s messages, when they've just been ignored, in one pass: the
+// rest move up over them, in order.
 chat_view_remove_user :: proc(v: ^Chat_View, login: string) {
-	for i := len(v.messages) - 1; i >= 0; i -= 1 {
-		if v.messages[i].kind != .System && v.messages[i].login == login {
-			destroy_chat_message(v.messages[i])
-			ordered_remove(&v.messages, i)
+	kept := 0
+	for i in 0 ..< len(v.messages) {
+		m := v.messages[i]
+		if m.kind != .System && m.login == login {
+			destroy_chat_message(m)
+			continue
 		}
+		v.messages[kept] = m
+		kept += 1
 	}
+	resize(&v.messages, kept)
 }
 
 // Whether the message's text has one of the user's highlight phrases, as whole
@@ -378,9 +409,13 @@ contains_words :: proc(text, phrase: string) -> bool {
 	return false
 }
 
-// Keeps the newest CHAT_MAX_MESSAGES.
+// Keeps the newest CHAT_MAX_MESSAGES, dropping the oldest once there are
+// CHAT_TRIM_BATCH more.
 @(private = "file")
 trim_messages :: proc(v: ^Chat_View) {
+	if len(v.messages) < CHAT_MAX_MESSAGES + CHAT_TRIM_BATCH {
+		return
+	}
 	if over := len(v.messages) - CHAT_MAX_MESSAGES; over > 0 {
 		for m in v.messages[:over] {
 			destroy_chat_message(m)
@@ -538,7 +573,7 @@ chat_view_click :: proc(v: ^Chat_View, x, y: f32) -> bool {
 // message_matches).
 draw_chat_view :: proc(a: ^Assets, v: ^Chat_View, rect: Rect, scale: f32, filter := "") {
 	r := &a.renderer
-	draw_rect(r, rect, CHAT_BACKGROUND)
+	draw_rect(r, rect, a.chat_background if a.chat_background.a > 0 else CHAT_BACKGROUND)
 	pad := CHAT_PADDING * scale
 	gap := CHAT_MESSAGE_GAP * scale
 	content_w := rect.w - 2 * pad
@@ -584,8 +619,13 @@ draw_chat_view :: proc(a: ^Assets, v: ^Chat_View, rect: Rect, scale: f32, filter
 				draw_rect(r, line, CHAT_MENTION_BACKGROUND)
 			case m.accent != .None:
 				draw_rect(r, line, CHAT_ACCENT_BACKGROUNDS[m.accent])
+			case v.rules != nil && v.rules.highlight_own && m.own:
+				draw_rect(r, line, CHAT_OWN_BACKGROUND)
 			case v.rules != nil && v.rules.highlight_staff && is_staff:
 				draw_rect(r, line, staff)
+			}
+			if v.rules != nil && v.rules.separators {
+				draw_rect(r, {line.x, line.y, line.w, max(1, scale)}, CHAT_SEPARATOR)
 			}
 			draw_message(a, v, m, layout, rect.x + pad, top)
 			append(&v.message_hits, Message_Hit{{rect.x, top - gap / 2, rect.w, layout.height + gap}, i})
@@ -656,6 +696,9 @@ draw_message :: proc(a: ^Assets, v: ^Chat_View, m: ^Chat_Message, layout: ^Messa
 				continue
 			}
 			texture, next := image_frame(item.image, a.now_ms)
+			if a.rules != nil && a.rules.still_emotes && len(item.image.frames) > 0 {
+				texture, next = item.image.frames[0].texture, -1
+			}
 			draw_image(&a.renderer, texture, rect, {255, 255, 255, alpha})
 			if next >= 0 && (a.next_frame_ms < 0 || next < a.next_frame_ms) {
 				a.next_frame_ms = next
@@ -684,8 +727,8 @@ Layout_Item :: struct {
 	link:    string,
 	// Part of the line saying what a reply replies to: clicking it opens the thread.
 	is_reply: bool,
-	// A badge (`text` is its "set/version") or emote (`text` is its name), which
-	// shows a tooltip when hovered.
+	// A badge (`text` is its "set/version"), emote (`text` is its name) or Shared
+	// Chat channel (`text` is its name), which shows a tooltip when hovered.
 	hint:        Item_Hint,
 	third_party: bool,
 	source:      Emote_Source,
@@ -695,6 +738,7 @@ Item_Hint :: enum {
 	None,
 	Badge,
 	Emote,
+	Room,
 }
 
 // A message laid out for one width, scale and text size. Images that finish loading can change
@@ -706,6 +750,11 @@ Message_Layout :: struct {
 	images_version: int,
 	hide_reply:     bool,
 	timestamps:     bool,
+	hide_badges:    bool,
+	rooms_version:  int,
+	// The Shared Chat channel shown before the message, which its items point
+	// into (owned).
+	source:         string,
 	// The time shown before the message, which its items point into (owned).
 	stamp:          string,
 	height:         f32,
@@ -723,12 +772,17 @@ message_layout :: proc(a: ^Assets, channel: ^Emotes, m: ^Chat_Message, scale, wi
 // `hide_reply`, a reply leaves out what it replies to (shown just above it).
 message_layout_into :: proc(a: ^Assets, channel: ^Emotes, m: ^Chat_Message, l: ^Message_Layout, scale, width: f32, hide_reply := false) -> ^Message_Layout {
 	timestamps := a.rules != nil && a.rules.timestamps && m.sent_ms > 0
-	if l.height > 0 && l.width == width && l.scale == scale && l.text_scale == a.renderer.text_scale && l.images_version == a.images.version && l.hide_reply == hide_reply && l.timestamps == timestamps {
+	hide_badges := a.rules != nil && a.rules.hide_badges
+	// Only a message from another channel waits on a name.
+	rooms_version := a.rooms.version if m.source_room != "" else 0
+	if l.height > 0 && l.width == width && l.scale == scale && l.text_scale == a.renderer.text_scale && l.images_version == a.images.version && l.hide_reply == hide_reply && l.timestamps == timestamps && l.hide_badges == hide_badges && l.rooms_version == rooms_version {
 		return l
 	}
+	l.rooms_version = rooms_version
 	clear(&l.items)
 	l.hide_reply = hide_reply
 	l.timestamps = timestamps
+	l.hide_badges = hide_badges
 	l.width = width
 	l.scale = scale
 	l.text_scale = a.renderer.text_scale
@@ -779,8 +833,32 @@ message_layout_into :: proc(a: ^Assets, channel: ^Emotes, m: ^Chat_Message, l: ^
 			space(&b, .Regular)
 		}
 	}
+	// Shared Chat: the channel it was sent in, when it's another: its picture,
+	// like a badge, or its name until there's none to be had.
+	delete(l.source)
+	l.source = ""
+	if m.source_room != "" {
+		if room, ok := room_info(a, m.source_room); ok {
+			l.source = strings.clone(room.name)
+			image: ^Image
+			if room.image_url != "" {
+				image = image_get(&a.images, &a.jobs, room.image_url, pixel_scale)
+			}
+			if image != nil && image.state != .Failed {
+				put_image(&b, image, BADGE_HEIGHT, 0)
+				hint_last(&b, {hint = .Room, text = l.source})
+				b.x += BADGE_GAP * scale
+			} else {
+				put_text(&b, .Bold, CHAT_SYSTEM_TEXT, l.source)
+				space(&b, .Regular)
+			}
+		}
+	}
 
 	for key in m.badges {
+		if hide_badges {
+			break
+		}
 		badge, found := badge_lookup(channel, &a.emotes, key)
 		if !found {
 			continue
@@ -1029,6 +1107,9 @@ draw_chat_tooltip :: proc(a: ^Assets, v: ^Chat_View, view_rect, bounds: Rect, x,
 	case .Emote:
 		title, detail = item.text, emote_source_label(item.third_party, item.source)
 		height = TOOLTIP_EMOTE_HEIGHT
+	case .Room:
+		title, detail = item.text, "Shared Chat"
+		height = TOOLTIP_BADGE_HEIGHT
 	}
 
 	r := &a.renderer

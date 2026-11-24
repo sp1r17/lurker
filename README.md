@@ -32,6 +32,7 @@ pre-roll or mid-roll ads.
   `/highlight` and `/ignore`
 - User cards with everything someone said in the chat; moderators can time out,
   ban and delete from them, or with `/timeout`, `/ban` and `/clear`
+- Whispers show in the chat you're watching; send one with `/w name message`
 - Hover a stream card for its full title, or an emote or badge for its name
 - Sort streams by viewers, start time, name or category; live cards show how
   long the stream has been live
@@ -197,20 +198,24 @@ settings are stored in `~/.config/lurker` (`%APPDATA%\lurker` on Windows).
 | Up / Down | Volume |
 | Left / Right | Seek 10 seconds (videos) |
 | [ / ] | Slower / faster (videos) |
+| , / . | A frame back / on, paused (videos) |
 | Page Up / Page Down | Previous / next chapter |
 | Home | Start a resumed video over |
 | F | Fullscreen |
-| Double-click the video or the top bar | Maximize / restore |
+| Double-click the video or the top bar | Fullscreen / back |
 | C | Show or hide chat |
+| O | Chat over the video, or beside it |
 | I | Show or hide the stream stats |
+| S | Screenshot of the video, saved in Pictures/Lurker |
 | R | Refresh (or start a frozen stream again) |
 | Enter | Chat in the focused split, or play an offline channel's last broadcast |
 | Ctrl+T / Ctrl+W | Open / close a chat split |
-| Ctrl+, | Settings |
+| Ctrl+, | Settings (when browsing) |
 | Ctrl+F | Search the chat, or channels when browsing |
 | / | Search channels |
 | Ctrl+= / Ctrl+- / Ctrl+0, or Ctrl+scroll | Text size |
 | Esc, or the mouse's back button | Back |
+| ? | This list, in the app |
 | Q | Quit |
 
 On macOS, use Cmd instead of Ctrl, and Option+Left / Right to move by word.

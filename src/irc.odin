@@ -203,6 +203,11 @@ Chat_Message :: struct {
 	deleted:   bool,
 	// Mentions the signed-in user.
 	mention:   bool,
+	// Sent by the person using Lurker (chat_view_add).
+	own:       bool,
+	// In a Shared Chat session, the channel it was sent in, by ID, when that's
+	// another than this chat's (shared_chat.odin); "" otherwise. Owned.
+	source_room: string,
 	// Said before the chat joined (chat_history.odin): drawn dimmed.
 	historical: bool,
 	// Why it's marked out ("First message"), shown above it, or "".
@@ -246,6 +251,7 @@ destroy_chat_message :: proc(m: Chat_Message) {
 	delete(m.reply_parent)
 	delete(m.thread)
 	delete(m.label)
+	delete(m.source_room)
 	for b in m.badges {
 		delete(b)
 	}
@@ -256,6 +262,8 @@ destroy_chat_message :: proc(m: Chat_Message) {
 	delete(m.card_layout.items)
 	delete(m.layout.stamp)
 	delete(m.card_layout.stamp)
+	delete(m.layout.source)
+	delete(m.card_layout.source)
 }
 
 destroy_fragments :: proc(fragments: []Fragment) {
@@ -318,6 +326,7 @@ privmsg_to_chat :: proc(msg: Irc_Message) -> Chat_Message {
 		id      = strings.clone(id),
 		login   = strings.clone(login),
 		user_id = strings.clone(user_id),
+		source_room = strings.clone(shared_source_room(msg)),
 	}
 	badges, _ := irc_tag(msg, "badges")
 	for badge in strings.split_iterator(&badges, ",") {

@@ -49,6 +49,13 @@ Job_Payload :: union {
 	Ping_Job,
 	Latency_Job,
 	Points_Job,
+	Screenshot_Job,
+	Bonus_Job,
+	Drops_Job,
+	Room_Name_Job,
+	Chat_Banner_Job,
+	Whispers_Job,
+	Whisper_Send_Job,
 }
 
 Jobs :: struct {
@@ -203,6 +210,20 @@ destroy_job :: proc(job: ^Job) {
 		destroy_latency_job(&p)
 	case Points_Job:
 		destroy_points_job(&p)
+	case Screenshot_Job:
+		destroy_screenshot_job(&p)
+	case Bonus_Job:
+		destroy_bonus_job(&p)
+	case Drops_Job:
+		destroy_drops_job(&p)
+	case Room_Name_Job:
+		destroy_room_name_job(&p)
+	case Chat_Banner_Job:
+		destroy_chat_banner_job(&p)
+	case Whispers_Job:
+		destroy_whispers_job(&p)
+	case Whisper_Send_Job:
+		destroy_whisper_send_job(&p)
 	}
 	free(job)
 }

@@ -16,6 +16,8 @@ finish-args:
   - --device=dri
   # Notifications when followed channels go live.
   - --talk-name=org.freedesktop.Notifications
+  # Screenshots (S), in a Lurker folder in Pictures.
+  - --filesystem=xdg-pictures/Lurker:create
 
 cleanup:
   - /include

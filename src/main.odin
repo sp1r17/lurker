@@ -156,6 +156,10 @@ App :: struct {
 	// Until when (Assets.now_ms) the text size shows after a change, and Ctrl+wheel
 	// scrolling not yet a whole step.
 	text_size_osd_until: int,
+	// Whispers received, shown in the chat (whispers.odin).
+	whispers:            Whispers,
+	// The keyboard shortcut list (?) is showing (shortcuts.odin).
+	shortcuts_open:      bool,
 	text_size_wheel:     f32,
 	// Whether the window has the keyboard focus: mentions arriving without it
 	// count as unread.
@@ -243,6 +247,9 @@ run :: proc(channels: []string, config: Config, video: Maybe(Twitch_Link) = nil)
 
 	defer images_destroy(&a.images)
 	defer emotes_destroy(&a.emotes)
+	a.client_id = app.client_id
+	defer room_names_destroy(&a.rooms)
+	defer whispers_destroy(&app.whispers)
 	defer user_emotes_destroy(&a.user_emotes)
 	defer emoji_table_destroy(&a.emoji)
 	jobs_start(&a.jobs, sdl.RegisterEvents(1))
@@ -266,6 +273,8 @@ run :: proc(channels: []string, config: Config, video: Maybe(Twitch_Link) = nil)
 	app.assets.rules = &app.layout.chat
 	apply_volume(&app)
 	player_set_normalize(&app.player, app.layout.normalize_audio)
+	player_set_audio_device(&app.player, app.layout.audio_device)
+	player_set_audio_delay(&app.player, app.layout.audio_delay_ms)
 	a.renderer.text_scale = f32(app.layout.text_size) / 100
 	defer layout_destroy(&app.layout)
 	app.watched = watched_load()
@@ -311,7 +320,7 @@ run :: proc(channels: []string, config: Config, video: Maybe(Twitch_Link) = nil)
 		// Wake up for the next animation frame, browse refresh or sign-in poll,
 		// whichever is due first.
 		wait := a.next_frame_ms if a.next_frame_ms >= 0 else -1
-		dues := []int{-1, -1, volume_osd_wait(&app), controls_wait(&app), stream_info_tick(&app), stream_end_tick(&app), stream_retry_tick(&app), text_size_osd_wait(&app), replay_tick(&app), watched_tick(&app), resume_notice_wait(&app), live_poll_tick(&app), update_tick(&app), ping_tick(&app), latency_tick(&app), chat_delay_tick(&app), settings_wait(&app), points_tick(&app)}
+		dues := []int{-1, -1, volume_osd_wait(&app), controls_wait(&app), stream_info_tick(&app), stream_end_tick(&app), stream_retry_tick(&app), text_size_osd_wait(&app), replay_tick(&app), watched_tick(&app), resume_notice_wait(&app), screenshot_notice_wait(&app), buffering_tick(&app), bonus_tick(&app), drops_tick(&app), chat_banner_tick(&app), whispers_tick(&app), live_poll_tick(&app), update_tick(&app), ping_tick(&app), latency_tick(&app), chat_delay_tick(&app), settings_wait(&app), points_tick(&app)}
 		if app.screen == .Browse {
 			dues[0], dues[1] = browse_tick(&app), sign_in_tick(&app)
 		}
@@ -406,6 +415,12 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 		}
 	case e.type == .KEY_DOWN && text_size_key(app, e.key):
 		redraw^ = true
+	case e.type == .KEY_DOWN && app.shortcuts_open:
+		shortcuts_key(app, e.key)
+		redraw^ = true
+	case e.type == .MOUSE_BUTTON_DOWN && app.shortcuts_open:
+		app.shortcuts_open = false
+		redraw^ = true
 	case e.type == .KEY_DOWN && app.screen == .Watch && is_typing(app):
 		// Typing: every key goes to the box.
 		pane_input_key(app, e.key)
@@ -415,6 +430,9 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 		redraw^ = true
 	case e.type == .KEY_DOWN && app.screen == .Browse && settings_typing(&app.browse):
 		settings_key(app, e.key)
+		redraw^ = true
+	case e.type == .KEY_DOWN && is_question_key(e.key):
+		app.shortcuts_open = true
 		redraw^ = true
 	case e.type == .KEY_DOWN:
 		switch e.key.key {
@@ -488,9 +506,11 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 		app.mouse = {e.motion.x * density, e.motion.y * density}
 		if .LEFT in e.motion.state {
 			window_drag_motion(app, app.mouse.x, app.mouse.y)
+			chat_overlay_drag_motion(app, app.mouse.x, app.mouse.y)
 		} else {
 			app.drag_armed = false
 		}
+		chat_overlay_update_cursor(app)
 		if app.screen == .Watch {
 			watch_mouse_moved(app, app.mouse.x, app.mouse.y)
 		}
@@ -529,6 +549,11 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 		}
 	case e.type == .MOUSE_BUTTON_UP:
 		app.drag_armed = false
+		if e.button.button == sdl.BUTTON_LEFT {
+			chat_overlay_release(app)
+			chat_overlay_update_cursor(app)
+			redraw^ = true
+		}
 	case e.type == .MOUSE_BUTTON_DOWN:
 		// The mouse's back button leaves the stream, like a browser's.
 		if e.button.button == sdl.BUTTON_X1 && app.screen == .Watch {
@@ -553,7 +578,8 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 		}
 		x, y := e.button.x * density, e.button.y * density
 		redraw^ = true
-		if window_controls_click(app, x, y) {
+		// Under the chats over the video, they're covered: the chats take it.
+		if !(app.screen == .Watch && on_chat_overlay(app, x, y)) && window_controls_click(app, x, y) {
 			return true
 		}
 		window_press(app, x, y, e.button.clicks)
@@ -681,6 +707,20 @@ finish_jobs :: proc(app: ^App) {
 			finish_latency_job(app, &p)
 		case Points_Job:
 			finish_points_job(app, &p)
+		case Screenshot_Job:
+			finish_screenshot_job(app, &p)
+		case Bonus_Job:
+			finish_bonus_job(app, &p)
+		case Drops_Job:
+			finish_drops_job(app, &p)
+		case Room_Name_Job:
+			finish_room_name_job(&app.assets, &p)
+		case Chat_Banner_Job:
+			finish_chat_banner_job(app, &p)
+		case Whispers_Job:
+			finish_whispers_job(app, &p)
+		case Whisper_Send_Job:
+			finish_whisper_send_job(app, &p)
 		}
 		destroy_job(job)
 	}
@@ -746,6 +786,7 @@ draw :: proc(app: ^App) {
 			draw_watch(app)
 		}
 		draw_text_size_osd(app, screen)
+		draw_shortcuts(app, screen)
 		app.mouse = mouse
 		settled := app.menu_rect_next == app.menu_rect
 		app.menu_rect = app.menu_rect_next

@@ -283,8 +283,12 @@ quality_choices :: proc(q: Quality, r: Renditions) -> (choices: [MAX_RENDITIONS 
 	return
 }
 
-// The quality to ask for: the saved one, within the highest allowed.
+// The quality to ask for: the saved one, within the highest allowed; or a lower
+// one for this watch, after the stream kept buffering (buffering.odin).
 watch_quality :: proc(app: ^App) -> Quality {
+	if q, ok := app.watch.quality_override.?; ok {
+		return q
+	}
 	return quality_capped(app.layout.quality, app.layout.max_height)
 }
 

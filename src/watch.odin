@@ -58,6 +58,16 @@ Watch :: struct {
 	signed_stream:   bool,
 	new_video_frame: bool,
 	show_chat:       bool,
+	// The chats over the video were hidden with C, for this watch
+	// (chat_overlay.odin).
+	overlay_hidden:  bool,
+	// Where the chats over the video are, and the screen they're over, as laid out
+	// last; and their box being moved or resized (chat_overlay.odin).
+	overlay_rect:    Rect,
+	overlay_screen:  Rect,
+	overlay_drag:    Chat_Overlay_Drag,
+	// The header button switching between the two, from the last draw.
+	overlay_button:  Rect,
 	// panes[0] is the watched channel's chat; the rest are splits (Ctrl+T).
 	panes:           [dynamic]^Chat_Pane,
 	// The pane keys like Enter and Ctrl+F act on.
@@ -75,6 +85,20 @@ Watch :: struct {
 	live_now:         bool,
 	// Until when (Assets.now_ms) the volume bar shows.
 	volume_osd_until: int,
+	// What's pinned and predicted, shown above the chat (chat_banner.odin).
+	banner:           Chat_Banner,
+	// The channel points balance, and asking for it (bonus.odin); and checking
+	// for finished drops (drops.odin).
+	bonus:            Bonus,
+	drops:            Drops,
+	// Stalls of the live stream, and the quality it was lowered to for them
+	// (buffering.odin); nil for the saved one.
+	buffering:        Buffering,
+	quality_override: Maybe(Quality),
+	// Until when the notice after a screenshot (S) shows, and whether it was
+	// saved (screenshot.odin).
+	screenshot_until: int,
+	screenshot_saved: bool,
 	// Where the stream stats end, for the volume bar to go below them; 0 while
 	// they're hidden. Set while drawing.
 	stats_bottom:     f32,
@@ -136,6 +160,8 @@ Watch :: struct {
 	// video they're for; the playback speed; the chapter list's state and, from
 	// the last draw, its button, items and the speed button.
 	chapters:         [dynamic]Chapter,
+	// The past broadcast's muted stretches (vod_extras.odin). Owned.
+	muted:            [dynamic]Muted_Segment,
 	storyboard:       Storyboard,
 	extras_id:        string,
 	speed:            f64,
@@ -244,6 +270,7 @@ watch_stop :: proc(app: ^App) {
 	destroy_vod(w.vod)
 	replay_destroy(&w.replay)
 	vod_extras_clear(app)
+	chat_banner_destroy(&w.banner)
 	delete(w.chapter_items)
 	w^ = {}
 	app.session += 1
@@ -328,10 +355,13 @@ start_stream :: proc(app: ^App, signed: bool) {
 watch_set_quality :: proc(app: ^App, q: Quality) {
 	w := &app.watch
 	w.quality_menu = false
-	if q == app.layout.quality {
+	was := quality_playing(watch_quality(app), w.qualities)
+	// Picking one undoes lowering it for buffering.
+	lowered := w.quality_override != nil
+	w.quality_override = nil
+	if q == app.layout.quality && !lowered {
 		return
 	}
-	was := quality_playing(watch_quality(app), w.qualities)
 	app.layout.quality = q
 	layout_save(&app.layout)
 	// Source, say, may be the rendition already playing.
@@ -362,7 +392,6 @@ watch_toggle_low_latency :: proc(app: ^App) {
 	restart_stream(app)
 }
 
-@(private = "file")
 restart_stream :: proc(app: ^App) {
 	if app.watch.playing_vod {
 		// Picks up where it was, in the new quality.
@@ -764,7 +793,7 @@ watch_key :: proc(app: ^App, key: sdl.KeyboardEvent) -> bool {
 			watch_stop(app)
 		}
 	case sdl.K_SPACE:
-		player_command(&app.player, {"cycle", "pause"})
+		player_toggle_pause(&app.player)
 	case sdl.K_M:
 		set_volume(app, app.layout.volume, !app.layout.muted)
 	case sdl.K_UP:
@@ -772,12 +801,16 @@ watch_key :: proc(app: ^App, key: sdl.KeyboardEvent) -> bool {
 	case sdl.K_DOWN:
 		set_volume(app, app.layout.volume - VOLUME_STEP, app.layout.muted)
 	case sdl.K_C:
-		watch_show_chat(app, !w.show_chat)
+		watch_toggle_chats(app, !chats_shown(app))
+	case sdl.K_O:
+		watch_toggle_overlay(app)
 	case sdl.K_R:
 		// A frozen or stuttering stream, started again; a video, from where it is.
 		restart_stream(app)
 	case sdl.K_I:
 		watch_toggle_stats(app)
+	case sdl.K_S:
+		watch_screenshot(app)
 	case sdl.K_RETURN, sdl.K_KP_ENTER:
 		if (w.status == .Offline || w.status == .Ended) && w.vod_state == .Found {
 			watch_play_vod(app)
@@ -876,13 +909,12 @@ watch_show_chat :: proc(app: ^App, show: bool) {
 
 // Whether the mouse is where the show-chat tab appears.
 show_tab_hovered :: proc(app: ^App, screen_w: f32) -> bool {
-	w := &app.watch
-	return !w.show_chat && app.mouse.x >= screen_w - SHOW_CHAT_ZONE * app.scale && app.mouse.x < screen_w
+	return !chats_shown(app) && app.mouse.x >= screen_w - SHOW_CHAT_ZONE * app.scale && app.mouse.x < screen_w
 }
 
 // The pane under (x, y), or nil.
 pane_at :: proc(app: ^App, x, y: f32) -> (p: ^Chat_Pane, index: int) {
-	if !app.watch.show_chat {
+	if !chats_shown(app) {
 		return nil, -1
 	}
 	for pane, i in app.watch.panes {
@@ -899,15 +931,24 @@ watch_click :: proc(app: ^App, x, y: f32) {
 		user_card_click(app, x, y)
 		return
 	}
-	if controls_click(app, x, y) {
+	// The chats over the video are drawn over its buttons, so they take the click.
+	if !on_chat_overlay(app, x, y) && controls_click(app, x, y) {
 		return
 	}
-	if w.show_chat && w.hide_button.w > 0 && in_rect(w.hide_button, x, y) {
-		watch_show_chat(app, false)
+	// A header or an edge of the chats over the video moves or resizes them.
+	if chat_overlay_press(app, x, y) {
 		return
 	}
-	if !w.show_chat && w.show_tab.w > 0 && in_rect(w.show_tab, x, y) {
-		watch_show_chat(app, true)
+	if chats_shown(app) && w.hide_button.w > 0 && in_rect(w.hide_button, x, y) {
+		watch_toggle_chats(app, false)
+		return
+	}
+	if chats_shown(app) && w.overlay_button.w > 0 && in_rect(w.overlay_button, x, y) {
+		watch_toggle_overlay(app)
+		return
+	}
+	if !chats_shown(app) && w.show_tab.w > 0 && in_rect(w.show_tab, x, y) {
+		watch_toggle_chats(app, true)
 		return
 	}
 	p, i := pane_at(app, x, y)
@@ -973,12 +1014,27 @@ watch_scroll :: proc(app: ^App, x, y, wheel_y: f32) {
 // changes the OpenGL viewport and framebuffer while it draws.
 watch_prepare :: proc(app: ^App, screen: Rect) {
 	w := &app.watch
-	n := f32(len(w.panes)) if w.show_chat else 0
-	pane_w := min(f32(i32(CHAT_WIDTH * app.scale)), screen.w * MAX_CHAT_SHARE / max(n, 1))
-	chats_w := pane_w * n
-	w.video_rect = {0, 0, screen.w - chats_w, screen.h}
-	for p, i in w.panes {
-		pane_layout(app, p, {w.video_rect.w + f32(i) * pane_w, 0, pane_w, screen.h})
+	n := f32(len(w.panes)) if chats_shown(app) else 0
+	app.assets.chat_background = CHAT_BACKGROUND
+	if chat_overlay_on(app) {
+		// The video fills the screen, the chats over it (chat_overlay.odin).
+		l := &app.layout
+		w.video_rect = screen
+		box := chat_overlay_box(app, screen)
+		w.overlay_rect, w.overlay_screen = box, screen
+		app.assets.chat_background = chat_overlay_background(l.chat_overlay_background)
+		box_pane_w := box.w / max(n, 1)
+		for p, i in w.panes {
+			pane_layout(app, p, {box.x + f32(i) * box_pane_w, box.y, box_pane_w, box.h})
+		}
+	} else {
+		w.overlay_rect, w.overlay_screen = {}, {}
+		pane_w := min(f32(i32(CHAT_WIDTH * app.scale)), screen.w * MAX_CHAT_SHARE / max(n, 1))
+		chats_w := pane_w * n
+		w.video_rect = {0, 0, screen.w - chats_w, screen.h}
+		for p, i in w.panes {
+			pane_layout(app, p, {w.video_rect.w + f32(i) * pane_w, 0, pane_w, screen.h})
+		}
 	}
 
 	// A resize draws the frame again at the new size.
@@ -996,6 +1052,12 @@ draw_watch :: proc(app: ^App) {
 	w := &app.watch
 	video := w.video_rect
 	text_size := BROWSE_CARD_TEXT_SIZE * app.scale
+	// The video's buttons don't light up under the chats over it, which take the
+	// clicks there (watch_click).
+	mouse := app.mouse
+	if on_chat_overlay(app, mouse.x, mouse.y) {
+		app.mouse = {-1, -1}
+	}
 	switch w.status {
 	case .Playing:
 		if quality_playing(watch_quality(app), w.qualities).kind == .Audio {
@@ -1037,10 +1099,13 @@ draw_watch :: proc(app: ^App) {
 	draw_stream_stats(app)
 	draw_volume(app)
 	draw_resume_notice(app)
+	draw_screenshot_notice(app)
 	draw_controls(app)
+	app.mouse = mouse
 	w.hide_button = {}
+	w.overlay_button = {}
 	w.show_tab = {}
-	if !w.show_chat {
+	if !chats_shown(app) {
 		// A tab at the right edge, only while the mouse is near it and has moved
 		// lately, or is on the tab itself.
 		size := SHOW_CHAT_TAB * scale
@@ -1072,6 +1137,9 @@ draw_watch :: proc(app: ^App) {
 	w.hide_button = {h.x, h.y, h.h, h.h}
 	hovered := in_rect(w.hide_button, app.mouse.x, app.mouse.y)
 	draw_centered(r, .Bold, 18 * scale, w.hide_button, "»", BROWSE_TEXT if hovered else BROWSE_DIM_TEXT)
+	// Beside it, the button putting them over the video or back beside it.
+	w.overlay_button = {h.x + h.h, h.y, h.h, h.h}
+	draw_overlay_button(app, w.overlay_button)
 	draw_user_card(app)
 	if w.card.open {
 		screen := Rect{0, 0, w.video_rect.w, w.video_rect.h}
