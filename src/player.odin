@@ -557,7 +557,11 @@ player_render :: proc(p: ^Player) {
 	// Unflipped, the texture's first row is the image's top, which is how the
 	// renderer maps textures.
 	flip_y: i32 = 0
-	params := [?]mpv.Render_Param{{.Opengl_Fbo, &fbo}, {.Flip_Y, &flip_y}, {}}
+	// Not waiting for the frame's display time: the update callback already says
+	// when one is due, and waiting held every redraw (a chat box being dragged,
+	// say) to the video's frame rate on a faster screen.
+	block: i32 = 0
+	params := [?]mpv.Render_Param{{.Opengl_Fbo, &fbo}, {.Flip_Y, &flip_y}, {.Block_For_Target_Time, &block}, {}}
 	mpv.render_context_render(p.render, raw_data(params[:]))
 }
 
