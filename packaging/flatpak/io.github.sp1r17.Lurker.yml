@@ -114,7 +114,9 @@ modules:
       append-path: /usr/lib/sdk/llvm22/bin:/app/odin
       prepend-ld-library-path: /usr/lib/sdk/llvm22/lib
     build-commands:
-      - odin build src -out:lurker -o:speed -no-bounds-check -disable-assert -extra-linker-flags:"-L/app/lib"
+      # With bounds checks: chat and emotes come from anyone, and a parsing bug
+      # should stop Lurker rather than touch memory it doesn't own.
+      - odin build src -out:lurker -o:speed -disable-assert -extra-linker-flags:"-L/app/lib"
       - install -Dm755 lurker ${FLATPAK_DEST}/bin/lurker
       - sed -e "s/^Icon=lurker/Icon=${FLATPAK_ID}/" -e "s/^StartupWMClass=lurker/StartupWMClass=${FLATPAK_ID}/"
         assets/install/lurker.desktop > ${FLATPAK_ID}.desktop

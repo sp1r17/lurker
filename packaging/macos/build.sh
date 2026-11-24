@@ -43,8 +43,8 @@ cp "$ROOT/assets/install/lurker.icns" "$APP/Contents/Resources/lurker.icns"
 cp "$ROOT/LICENSE" "$APP/Contents/Resources/LICENSE"
 
 # Lurker itself, with Homebrew's curl: macOS's own lacks WebSockets, which chat
-# needs.
-odin build "$ROOT/src" -out:"$APP/Contents/MacOS/lurker" -o:speed -no-bounds-check -disable-assert \
+# needs. With bounds checks, as chat and emotes come from anyone.
+odin build "$ROOT/src" -out:"$APP/Contents/MacOS/lurker" -o:speed -disable-assert \
   -minimum-os-version:"$MINIMUM_OS" "-extra-linker-flags:-L$BREW_CURL/lib -L$BREW/lib"
 
 # The libraries it loads (SDL3, SDL3_image, libmpv, libcurl and theirs), copied from
