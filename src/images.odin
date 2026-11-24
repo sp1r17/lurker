@@ -214,9 +214,9 @@ run_image_job :: proc(job: ^Job) {
 	res: Http_Response
 	from_cache, ok: bool
 	if p.cache {
-		res, from_cache, ok = cached_get(p.url)
+		res, from_cache, ok = cached_get(p.url, IMAGE_MAX_BYTES)
 	} else {
-		res, ok = http_request(p.url, allocator = context.temp_allocator)
+		res, ok = http_request(p.url, allocator = context.temp_allocator, max_bytes = IMAGE_MAX_BYTES)
 	}
 	if !ok {
 		return
@@ -225,14 +225,21 @@ run_image_job :: proc(job: ^Job) {
 		log.warnf("image %s: HTTP %d", p.url, res.status)
 		return
 	}
-	anim, still := decode_image(res.body)
-	if anim == nil && still == nil && from_cache {
+	anim, still, refused := decode_image(res.body, p.url)
+	if anim == nil && still == nil && !refused && from_cache {
 		// A damaged cached copy: drop it and download again.
 		cache_forget(p.url)
-		res, _, ok = cached_get(p.url)
+		res, _, ok = cached_get(p.url, IMAGE_MAX_BYTES)
 		if ok && res.status == 200 {
-			anim, still = decode_image(res.body)
+			anim, still, refused = decode_image(res.body, p.url)
 		}
+	}
+	if refused {
+		// A cached copy may just be damaged: the next try downloads it again.
+		if from_cache {
+			cache_forget(p.url)
+		}
+		return
 	}
 	if anim == nil && still == nil {
 		log.warnf("image %s: can't decode: %s", p.url, sdl.GetError())
@@ -253,6 +260,11 @@ run_image_job :: proc(job: ^Job) {
 	} else {
 		p.size = {still.w, still.h}
 		frames, delays = still_frame[:], still_delay[:]
+	}
+	// Its header passed, but what was decoded counts: a header can understate it.
+	if !image_header_allowed({int(p.size.x), int(p.size.y), len(frames)}) {
+		log.warnf("image %s: decoded to %d × %d, %d frames: too big to show", p.url, p.size.x, p.size.y, len(frames))
+		return
 	}
 	for decoded, i in frames {
 		frame := decoded
@@ -283,9 +295,19 @@ run_image_job :: proc(job: ^Job) {
 
 // Every frame of an animated image, or else the one image. SDL_image's
 // animation loader rejects still PNGs in some builds (Windows'), so those load
-// on their own.
+// on their own. `refused`, without decoding it, when its header
+// (image_limits.odin) can't be read or says it's too big.
 @(private = "file")
-decode_image :: proc(body: []byte) -> (anim: ^img.Animation, still: ^sdl.Surface) {
+decode_image :: proc(body: []byte, url: string) -> (anim: ^img.Animation, still: ^sdl.Surface, refused: bool) {
+	header, readable := read_image_header(body)
+	if !readable {
+		log.warnf("image %s: not a PNG, GIF, WebP or JPEG Lurker can read", url)
+		return nil, nil, true
+	}
+	if !image_header_allowed(header) {
+		log.warnf("image %s: %d × %d, %d frames: too big to show", url, header.width, header.height, header.frames)
+		return nil, nil, true
+	}
 	anim = img.LoadAnimation_IO(sdl.IOFromConstMem(raw_data(body), uint(len(body))), true)
 	if anim == nil {
 		still = img.Load_IO(sdl.IOFromConstMem(raw_data(body), uint(len(body))), true)

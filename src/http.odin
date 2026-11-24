@@ -2,12 +2,24 @@ package app
 
 import "base:runtime"
 import "core:c"
+import "core:fmt"
 import "core:log"
 import "core:strings"
 import "core:sync"
 import "vendor:curl"
 
 HTTP_TIMEOUT_SECONDS :: 20
+// A request allowed longer than HTTP_TIMEOUT_SECONDS (a big download) still
+// gives up once it's been slower than this many bytes a second for this long,
+// rather than waiting out a dead connection.
+HTTP_STALL_BYTES_PER_SECOND :: 1024
+HTTP_STALL_SECONDS :: 30
+
+// The most a response can hold, decompressed, unless a request allows more: the
+// largest Lurker expects (emote sets, Twitch's pages and scripts) are a few MB.
+// A server sending more, or a small compressed response that unpacks to
+// gigabytes, has the request fail instead of using up memory.
+HTTP_MAX_BYTES :: 32 * 1024 * 1024
 
 // Set when the app is quitting: requests in flight abort instead of making the
 // quit wait for them.
@@ -49,13 +61,17 @@ Http_Response :: struct {
 }
 
 // A blocking request, for worker threads. A non-empty `post_body` makes it a POST;
-// `method` sets another ("DELETE"). curl.global_init must have been called.
+// `method` sets another ("DELETE"). A response over `max_bytes` fails it, as does
+// taking longer than `timeout_seconds` in all. curl.global_init must have been
+// called.
 http_request :: proc(
 	url: string,
 	headers: []string = nil,
 	post_body := "",
 	allocator := context.allocator,
 	method := "",
+	max_bytes := HTTP_MAX_BYTES,
+	timeout_seconds := HTTP_TIMEOUT_SECONDS,
 ) -> (
 	res: Http_Response,
 	ok: bool,
@@ -75,25 +91,41 @@ http_request :: proc(
 	}
 
 	Sink :: struct {
-		ctx:  runtime.Context,
-		body: [dynamic]byte,
+		ctx:       runtime.Context,
+		body:      [dynamic]byte,
+		max_bytes: int,
+		too_big:   bool,
 	}
 	sink := Sink {
-		ctx  = context,
-		body = make([dynamic]byte, allocator),
+		ctx       = context,
+		body      = make([dynamic]byte, allocator),
+		max_bytes = max_bytes,
 	}
 	write :: proc "c" (buffer: [^]byte, size, count: c.size_t, userdata: rawptr) -> c.size_t {
 		sink := (^Sink)(userdata)
 		context = sink.ctx
-		append(&sink.body, ..buffer[:size * count])
-		return size * count
+		n := int(size * count)
+		// Counted after decompression. Taking less than it was given stops curl.
+		if len(sink.body) + n > sink.max_bytes {
+			sink.too_big = true
+			return 0
+		}
+		append(&sink.body, ..buffer[:n])
+		return c.size_t(n)
 	}
 
 	curl.easy_setopt(h, .URL, strings.clone_to_cstring(url, context.temp_allocator))
 	curl.easy_setopt(h, .WRITEFUNCTION, write)
 	curl.easy_setopt(h, .WRITEDATA, &sink)
+	// Refused at once when the response says it's bigger; the write callback
+	// catches one that doesn't say, or says less.
+	curl.easy_setopt(h, .MAXFILESIZE_LARGE, curl.off_t(max_bytes))
 	curl.easy_setopt(h, .FOLLOWLOCATION, c.long(1))
-	curl.easy_setopt(h, .TIMEOUT, c.long(HTTP_TIMEOUT_SECONDS))
+	curl.easy_setopt(h, .TIMEOUT, c.long(timeout_seconds))
+	if timeout_seconds > HTTP_TIMEOUT_SECONDS {
+		curl.easy_setopt(h, .LOW_SPEED_LIMIT, c.long(HTTP_STALL_BYTES_PER_SECOND))
+		curl.easy_setopt(h, .LOW_SPEED_TIME, c.long(HTTP_STALL_SECONDS))
+	}
 	// Signals are process-wide; curl must not use them for timeouts on worker threads.
 	curl.easy_setopt(h, .NOSIGNAL, c.long(1))
 	curl.easy_setopt(h, .NOPROGRESS, c.long(0))
@@ -120,6 +152,12 @@ http_request :: proc(
 
 	if rc := curl.easy_perform(h); rc != .E_OK {
 		if rc == .E_ABORTED_BY_CALLBACK {
+			delete(sink.body)
+			return {}, false
+		}
+		if sink.too_big || rc == .E_FILESIZE_EXCEEDED {
+			limit := fmt.tprintf("%d MB", max_bytes >> 20) if max_bytes >= 1 << 20 else fmt.tprintf("%d KB", max_bytes >> 10)
+			log.warnf("%s is bigger than the %s allowed; not downloading it", url, limit)
 			delete(sink.body)
 			return {}, false
 		}

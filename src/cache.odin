@@ -41,16 +41,17 @@ cache_path :: proc(url: string) -> (path: string, ok: bool) {
 }
 
 // Like http_request, from the cache when it has the URL; a successful download is
-// stored. The body is allocated with the temp allocator. Blocks: call from a
-// worker thread.
-cached_get :: proc(url: string) -> (res: Http_Response, from_cache: bool, ok: bool) {
+// stored. A cached copy over `max_bytes` (from before there was a limit) counts
+// as not cached. The body is allocated with the temp allocator. Blocks: call from
+// a worker thread.
+cached_get :: proc(url: string, max_bytes := HTTP_MAX_BYTES) -> (res: Http_Response, from_cache: bool, ok: bool) {
 	path, has_path := cache_path(url)
 	if has_path {
-		if data, err := os.read_entire_file(path, context.temp_allocator); err == nil {
+		if data, err := os.read_entire_file(path, context.temp_allocator); err == nil && len(data) <= max_bytes {
 			return {status = 200, body = data}, true, true
 		}
 	}
-	res = http_request(url, allocator = context.temp_allocator) or_return
+	res = http_request(url, allocator = context.temp_allocator, max_bytes = max_bytes) or_return
 	if res.status == 200 && has_path {
 		cache_store(path, res.body)
 	}
