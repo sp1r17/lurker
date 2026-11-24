@@ -1,6 +1,6 @@
 # Roadmap to 1.0
 
-Lurker 0.11.0 covers almost everything people do on Twitch as viewers: browsing,
+Lurker 0.12.0 covers almost everything people do on Twitch as viewers: browsing,
 live streams, past broadcasts and clips, chat with third-party emotes, and basic
 moderation. Lurker is for Twitch only. Every feature planned for 1.0 lands
 before it, since 1.0 starts with a feature freeze; after that, 1.0 is about being
@@ -58,64 +58,33 @@ README, and rely on.
   away, and window dragging on Wayland survives the mouse reconnecting
 - x86-64 only on Linux and Windows for 1.0
 
-## 0.12: Missing viewer features
+## 0.12: Missing viewer features (released)
 
-Left over from 0.11:
+- Watching earns channel points; the balance shows, and bonuses and finished
+  drops are claimed automatically
+- Chat: pinned messages and predictions above it, Shared Chat shown by each
+  channel's picture, whispers, chat over the video in any window (moved and
+  resized with the mouse), more chat options, and 10,000 messages kept
+- Playback: a lower quality when the stream keeps buffering, muted parts on the
+  seek bar, video enhancement, audio normalization, sound output and Bluetooth
+  delay settings, screenshots, and stepping frame by frame
+- Notifications for title and category changes, and the keyboard shortcut list
+  (`?`)
+
+## 0.13: Bigger features
+
+Left over from 0.12:
 
 - Sign the Windows installer and executable, through SignPath Foundation's free
   signing for open-source projects
 - Test window moving, resizing and fullscreen on GNOME (it starts and plays)
 - More testing on Windows, and taking the "new and hasn't had much testing"
   note out of the README once it's earned
+- See working live what couldn't be tested yet: claiming a bonus and a finished
+  drop, drop progress from watching, a real Shared Chat session, and sending a
+  whisper
 
-Channel points and drops. Watching in Lurker earns none today: Twitch counts
-watch time from reports its own player sends, and streamlink sends none.
-
-- Report each minute a live stream plays, as Twitch's player does, so watching
-  earns channel points and drop progress. Paused or buffering minutes don't
-  count, and if Twitch changes how this works, only this stops (done for
-  channel points; drop progress not checked yet)
-- The channel points balance, and claiming the bonus automatically (done;
-  claiming was broken until its request was fixed, and hasn't been seen to work
-  since)
-- Claiming finished drops automatically (done; reading the inventory checked,
-  claiming not yet, with no drop finished to claim)
-
-Chat:
-
-- Pinned chat messages, and polls and predictions shown above the chat (done
-  for pinned messages and predictions; polls aren't in Twitch's GraphQL as far
-  as Lurker can find)
-- Shared Chat: show which channel each message came from, by its profile
-  picture as Twitch does (done; not yet seen in a real Shared Chat session)
-- Chat over the video, switched with O in any window, with its position, size
-  and background adjustable, and moved and resized with the mouse (done)
-- More chat options: hiding badges, highlighting bits and your own messages,
-  lines between messages, the viewer or chatter count above the chat, and still
-  emotes instead of animated ones (done; bits were already highlighted, and the
-  count is chatters)
-- Whispers (done: received in the chat being watched, sent with `/w`; sending
-  not yet checked, as Twitch's answer to a test whisper to yourself was unclear)
-
-Playback and notifications:
-
-- Lower the quality when the stream keeps buffering (done)
-- Muted parts of past broadcasts shown on the seek bar (done)
-- A video enhancement setting: Off, or Balanced, with debanding and a sharper
-  scaler at almost no cost (done; a neural upscaler, FSRCNNX, was tried and
-  dropped: on Twitch's compressed streams it made no visible difference)
-- Audio normalization, evening out loud and quiet streamers and sudden alerts
-  (done)
-- Choosing the audio output device, and an audio delay for Bluetooth
-  headphones (done)
-- Screenshots of the video, without Lurker's UI, at the stream's resolution
-  (done)
-- Stepping frame by frame through past broadcasts and clips (`,` and `.`)
-  (done)
-- Notify when a followed channel changes its title or category (done)
-- Keyboard shortcut list in the app (`?`) (done)
-
-## 0.13: Bigger features
+New:
 
 - Multistream: two to four streams at once, side by side or one large with the
   others small, choosing which one is heard
