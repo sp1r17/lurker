@@ -239,10 +239,11 @@ draw_pane :: proc(app: ^App, p: ^Chat_Pane, focused: bool) {
 	// mentions are unread at its right.
 	draw_rect(r, p.header_rect, CHAT_HEADER)
 	title := p.channel if p.channel != "" else "New split"
-	// The watched channel's viewers, while it's live (Chat_Rules.viewer_count).
+	// How many are in the watched channel's chat, while it's live
+	// (Chat_Rules.chatter_count, chat_banner.odin).
 	w := &app.watch
-	if app.layout.chat.viewer_count && p.channel != "" && p.channel == w.channel && w.has_info && !w.playing_vod && w.info.viewer_count > 0 {
-		title = fmt.tprintf("%s · %s viewers", p.channel, format_viewers(w.info.viewer_count))
+	if app.layout.chat.chatter_count && p.channel != "" && p.channel == w.channel && !w.playing_vod && w.banner.chatters > 0 {
+		title = fmt.tprintf("%s · %s in chat", p.channel, format_viewers(w.banner.chatters))
 	}
 	size := BROWSE_CARD_TEXT_SIZE * scale
 	p.mention_badge = {}

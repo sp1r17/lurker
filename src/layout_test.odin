@@ -113,7 +113,8 @@ layout_reads_chat_display_options :: proc(t: ^testing.T) {
 	testing.expect(t, parse_layout(transmute([]byte)string(`{"splits":{},"chat_hide_badges":true,"chat_separators":true,"chat_viewer_count":true}`), &l))
 	testing.expect(t, l.chat.hide_badges)
 	testing.expect(t, l.chat.separators)
-	testing.expect(t, l.chat.viewer_count)
+	// The option's name before 0.12, still read.
+	testing.expect(t, l.chat.chatter_count)
 	testing.expect(t, !l.chat.highlight_own)
 	testing.expect(t, !l.chat.still_emotes)
 }

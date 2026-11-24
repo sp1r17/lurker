@@ -16,6 +16,8 @@ Chat_Banner :: struct {
 	// The lines shown ("" for none). Owned.
 	pinned:     string,
 	prediction: string,
+	// How many are in the chat (for Chat_Rules.chatter_count); 0 until known.
+	chatters:   int,
 	next_at:    int,
 	pending:    bool,
 }
@@ -59,6 +61,7 @@ Chat_Banner_Job :: struct {
 	client_id, login: string,
 	session:          int,
 	ok:               bool,
+	chatters:         int,
 	// The lines found. Owned.
 	pinned:           string,
 	prediction:       string,
@@ -79,27 +82,31 @@ run_chat_banner_job :: proc(job: ^Job) {
 	body, err := gql_post(
 		p.client_id,
 		"",
-		"query($login: String!) { channel(name: $login) { pinnedChatMessages(first: 1) { edges { node { pinnedMessage { content { text } sender { displayName } } } } } activePredictionEvents { title status outcomes { title totalPoints } } } }",
+		"query($login: String!) { channel(name: $login) { chatters { count } pinnedChatMessages(first: 1) { edges { node { pinnedMessage { content { text } sender { displayName } } } } } activePredictionEvents { title status outcomes { title totalPoints } } } }",
 		variables,
 	)
 	if err != .None {
 		return
 	}
-	pinned, prediction, ok := parse_chat_banner_response(body)
+	pinned, prediction, chatters, ok := parse_chat_banner_response(body)
 	if !ok {
 		return
 	}
 	p.ok = true
+	p.chatters = chatters
 	p.pinned = strings.clone(pinned)
 	p.prediction = strings.clone(prediction)
 }
 
-// The pinned message and the prediction as their lines ("" for none).
-// Allocated with the temp allocator.
-parse_chat_banner_response :: proc(body: []byte) -> (pinned, prediction: string, ok: bool) {
+// The pinned message and the prediction as their lines ("" for none), and how
+// many are in the chat. Allocated with the temp allocator.
+parse_chat_banner_response :: proc(body: []byte) -> (pinned, prediction: string, chatters: int, ok: bool) {
 	r: struct {
 		data: struct {
 			channel: Maybe(struct {
+				chatters:               Maybe(struct {
+					count: int,
+				}),
 				pinnedChatMessages:     Maybe(struct {
 					edges: []struct {
 						node: struct {
@@ -126,11 +133,14 @@ parse_chat_banner_response :: proc(body: []byte) -> (pinned, prediction: string,
 		},
 	}
 	if json.unmarshal(body, &r, allocator = context.temp_allocator) != nil {
-		return "", "", false
+		return "", "", 0, false
 	}
 	channel, has_channel := r.data.channel.?
 	if !has_channel {
-		return "", "", true
+		return "", "", 0, true
+	}
+	if c, has_count := channel.chatters.?; has_count {
+		chatters = c.count
 	}
 	if pins, has_pins := channel.pinnedChatMessages.?; has_pins && len(pins.edges) > 0 {
 		if m, has_message := pins.edges[0].node.pinnedMessage.?; has_message && m.content.text != "" {
@@ -156,7 +166,7 @@ parse_chat_banner_response :: proc(body: []byte) -> (pinned, prediction: string,
 		prediction = strings.to_string(b)
 		break
 	}
-	return pinned, prediction, true
+	return pinned, prediction, chatters, true
 }
 
 finish_chat_banner_job :: proc(app: ^App, p: ^Chat_Banner_Job) {
@@ -172,4 +182,5 @@ finish_chat_banner_job :: proc(app: ^App, p: ^Chat_Banner_Job) {
 	delete(w.banner.prediction)
 	w.banner.pinned, p.pinned = p.pinned, ""
 	w.banner.prediction, p.prediction = p.prediction, ""
+	w.banner.chatters = p.chatters
 }

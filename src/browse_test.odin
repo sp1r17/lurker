@@ -490,13 +490,15 @@ chat_banner_lines_are_made :: proc(t: ^testing.T) {
 	defer free_all(context.temp_allocator)
 	body := `{"data":{"channel":{"pinnedChatMessages":{"edges":[{"node":{"pinnedMessage":{"content":{"text":"Giveaway at 9"},"sender":{"displayName":"Mod"}}}}]},` +
 		`"activePredictionEvents":[{"title":"Win?","status":"LOCKED","outcomes":[{"title":"Yes","totalPoints":300},{"title":"No","totalPoints":100}]}]}}}`
-	pinned, prediction, ok := parse_chat_banner_response(transmute([]byte)body)
+	pinned, prediction, _, ok := parse_chat_banner_response(transmute([]byte)body)
 	testing.expect(t, ok)
 	testing.expect_value(t, pinned, "Pinned · Mod: Giveaway at 9")
 	testing.expect_value(t, prediction, "Prediction (locked) · Win?: Yes 75% · No 25%")
 	// Nothing going on; a resolved prediction no longer shows.
-	pinned, prediction, ok = parse_chat_banner_response(transmute([]byte)string(`{"data":{"channel":{"pinnedChatMessages":{"edges":[]},"activePredictionEvents":[{"title":"Done","status":"RESOLVED","outcomes":[]}]}}}`))
+	chatters: int
+	pinned, prediction, chatters, ok = parse_chat_banner_response(transmute([]byte)string(`{"data":{"channel":{"chatters":{"count":11955},"pinnedChatMessages":{"edges":[]},"activePredictionEvents":[{"title":"Done","status":"RESOLVED","outcomes":[]}]}}}`))
 	testing.expect(t, ok)
 	testing.expect_value(t, pinned, "")
 	testing.expect_value(t, prediction, "")
+	testing.expect_value(t, chatters, 11955)
 }

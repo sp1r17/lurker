@@ -97,8 +97,8 @@ Chat_Rules :: struct {
 	separators:      bool,
 	// Emotes still, on their first frame.
 	still_emotes:    bool,
-	// The watched channel's viewer count above its chat.
-	viewer_count:    bool,
+	// How many are in the watched channel's chat, above it.
+	chatter_count:   bool,
 }
 
 // Chat bots common enough to hide by name (Chat_Rules.hide_bots), lowercase.
