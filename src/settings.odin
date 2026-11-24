@@ -680,7 +680,7 @@ draw_settings :: proc(app: ^App, content: Rect) {
 		}
 		total_h += section_gap
 	}
-	total_h += lh_text + pad
+	total_h += pad
 	scroll := &b.scroll[.Settings]
 	b.max_scroll[.Settings] = max(0, total_h - rest.h)
 	scroll^ = clamp(scroll^, 0, b.max_scroll[.Settings])
@@ -838,7 +838,6 @@ draw_settings :: proc(app: ^App, content: Rect) {
 		}
 		y += section_gap
 	}
-	draw_text(r, .Regular, text_size, x, y, "Right-click a stream, channel or category to block it.", BROWSE_DIM_TEXT)
 	clip_end(r)
 }
 
