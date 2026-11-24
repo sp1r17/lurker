@@ -793,7 +793,7 @@ watch_key :: proc(app: ^App, key: sdl.KeyboardEvent) -> bool {
 			watch_stop(app)
 		}
 	case sdl.K_SPACE:
-		player_command(&app.player, {"cycle", "pause"})
+		player_toggle_pause(&app.player)
 	case sdl.K_M:
 		set_volume(app, app.layout.volume, !app.layout.muted)
 	case sdl.K_UP:

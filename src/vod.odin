@@ -303,9 +303,9 @@ vod_key :: proc(app: ^App, key: sdl.KeyboardEvent) -> bool {
 		player_command(&app.player, {"seek", fmt.ctprintf("%d", VOD_SEEK_SECONDS), "relative"})
 	// A frame back or on, pausing first, as in mpv.
 	case sdl.K_COMMA:
-		player_command(&app.player, {"frame-back-step"})
+		player_frame_step(&app.player, back = true)
 	case sdl.K_PERIOD:
-		player_command(&app.player, {"frame-step"})
+		player_frame_step(&app.player, back = false)
 	case:
 		return false
 	}

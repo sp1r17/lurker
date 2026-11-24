@@ -30,6 +30,9 @@ Player :: struct {
 	position:      Maybe(f64),
 	duration:      Maybe(f64),
 	paused:        bool,
+	// A frame step under way: mpv plays the frame, unpausing for it, and then
+	// pauses again; it counts as paused throughout (player_frame_step).
+	stepping:      bool,
 	// For the stream stats (stream_stats.odin).
 	stats:         Player_Stats,
 	// The audio outputs there are to choose from (audio-device-list), as mpv
@@ -299,6 +302,8 @@ player_load_at :: proc(p: ^Player, url: string, start: f64, online_segments := f
 // loadfile with per-file options, joined with commas.
 @(private = "file")
 load_with_options :: proc(p: ^Player, url: string, options: []string) {
+	// A step through the last video doesn't carry over.
+	p.stepping = false
 	curl := strings.clone_to_cstring(url, context.temp_allocator)
 	if len(options) == 0 {
 		player_command(p, {"loadfile", curl})
@@ -318,9 +323,21 @@ player_duration :: proc(p: ^Player) -> (seconds: f64, ok: bool) {
 	return p.duration.?
 }
 
-// Whether mpv is paused.
+// Whether mpv is paused, or stepping a frame and about to be again.
 player_paused :: proc(p: ^Player) -> bool {
-	return p.paused
+	return p.paused || p.stepping
+}
+
+// A frame on, or back with `back`, pausing first, as in mpv.
+player_frame_step :: proc(p: ^Player, back: bool) {
+	p.stepping = true
+	player_command(p, {"frame-back-step" if back else "frame-step"})
+}
+
+// Pauses, or plays on.
+player_toggle_pause :: proc(p: ^Player) {
+	p.stepping = false
+	player_command(p, {"cycle", "pause"})
 }
 
 @(private = "file")
@@ -376,6 +393,9 @@ property_changed :: proc(p: ^Player, prop: ^mpv.Event_Property) {
 		parse_audio_devices(text, &p.audio_devices)
 	case "pause":
 		p.paused = prop.format == .Flag && (^i32)(prop.data)^ != 0
+		if p.paused {
+			p.stepping = false
+		}
 	}
 }
 
