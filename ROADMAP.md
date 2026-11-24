@@ -97,6 +97,36 @@ New:
   screens
 - Themes
 
+Chat, catching up with Chatterino:
+
+- Selecting and copying chat text, and Copy message on a message's right-click
+  menu
+- Names in dark colors lightened to stay readable on the dark background
+- A sound and a flashing taskbar entry on mentions and highlight phrases, each
+  optional
+- Messages sent with a channel point reward marked with the reward's name, and
+  announcements in their color
+- Polls above the chat, as predictions are
+- Highlighting everyone's messages from chosen people or with a chosen badge
+  (VIPs, subscribers...), each in a color of its own; highlight phrases as
+  whole words, with case, or as regular expressions
+- Ignoring phrases as well as people, or replacing them with other words
+- Nicknames: your own name for someone, shown in place of theirs
+- Search filters in Ctrl+F: `from:`, `has:link`, `is:mention` and the like
+- Moderation from the chat: timeout, ban and delete buttons on each message,
+  AutoMod's held messages to allow or deny, and `/vip`, `/mod`, `/raid`,
+  `/shoutout`, `/announce`, `/poll`, `/marker`, `/slow` and `/color`; for
+  everyone, a note when AutoMod holds your own message
+- A Mentions view: every mention of you, from all the chats open
+- Link previews on hovering a link, off by default: the page's title,
+  description and picture, fetched by Lurker itself (Twitch clips and videos
+  through Twitch's API)
+- Streamer mode: hides whispers, link previews and your account's details
+  while you stream
+- More than one account, switching between them
+- Custom commands, and changing keyboard shortcuts
+- Saving chats to log files
+
 ## 1.0: Release candidate
 
 - Feature freeze; one or two release candidates with bug fixes only
