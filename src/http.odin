@@ -9,6 +9,11 @@ import "core:sync"
 import "vendor:curl"
 
 HTTP_TIMEOUT_SECONDS :: 20
+// A request allowed longer than HTTP_TIMEOUT_SECONDS (a big download) still
+// gives up once it's been slower than this many bytes a second for this long,
+// rather than waiting out a dead connection.
+HTTP_STALL_BYTES_PER_SECOND :: 1024
+HTTP_STALL_SECONDS :: 30
 
 // The most a response can hold, decompressed, unless a request allows more: the
 // largest Lurker expects (emote sets, Twitch's pages and scripts) are a few MB.
@@ -56,8 +61,9 @@ Http_Response :: struct {
 }
 
 // A blocking request, for worker threads. A non-empty `post_body` makes it a POST;
-// `method` sets another ("DELETE"). A response over `max_bytes` fails it.
-// curl.global_init must have been called.
+// `method` sets another ("DELETE"). A response over `max_bytes` fails it, as does
+// taking longer than `timeout_seconds` in all. curl.global_init must have been
+// called.
 http_request :: proc(
 	url: string,
 	headers: []string = nil,
@@ -65,6 +71,7 @@ http_request :: proc(
 	allocator := context.allocator,
 	method := "",
 	max_bytes := HTTP_MAX_BYTES,
+	timeout_seconds := HTTP_TIMEOUT_SECONDS,
 ) -> (
 	res: Http_Response,
 	ok: bool,
@@ -114,7 +121,11 @@ http_request :: proc(
 	// catches one that doesn't say, or says less.
 	curl.easy_setopt(h, .MAXFILESIZE_LARGE, curl.off_t(max_bytes))
 	curl.easy_setopt(h, .FOLLOWLOCATION, c.long(1))
-	curl.easy_setopt(h, .TIMEOUT, c.long(HTTP_TIMEOUT_SECONDS))
+	curl.easy_setopt(h, .TIMEOUT, c.long(timeout_seconds))
+	if timeout_seconds > HTTP_TIMEOUT_SECONDS {
+		curl.easy_setopt(h, .LOW_SPEED_LIMIT, c.long(HTTP_STALL_BYTES_PER_SECOND))
+		curl.easy_setopt(h, .LOW_SPEED_TIME, c.long(HTTP_STALL_SECONDS))
+	}
 	// Signals are process-wide; curl must not use them for timeouts on worker threads.
 	curl.easy_setopt(h, .NOSIGNAL, c.long(1))
 	curl.easy_setopt(h, .NOPROGRESS, c.long(0))
