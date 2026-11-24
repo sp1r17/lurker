@@ -433,8 +433,9 @@ draw_vod_offer :: proc(app: ^App, video: Rect) {
 		if w.vod.game != "" {
 			detail = fmt.tprintf("%s · %s", detail, w.vod.game)
 		}
-		title := fit_text(r, .Bold, title_size, w.vod.title, room)
-		draw_text(r, .Bold, title_size, cx - text_width(r, .Bold, title_size, title) / 2, y, title, BROWSE_TEXT)
+		// Centred, with any emoji as images.
+		title_w := min(text_line_width(&app.assets, .Bold, title_size, w.vod.title), room)
+		draw_text_line(&app.assets, .Bold, title_size, cx - title_w / 2, y, w.vod.title, BROWSE_TEXT, room)
 		y += lh_title
 		detail = fit_text(r, .Regular, size, detail, room)
 		draw_text(r, .Regular, size, cx - text_width(r, .Regular, size, detail) / 2, y, detail, BROWSE_DIM_TEXT)
