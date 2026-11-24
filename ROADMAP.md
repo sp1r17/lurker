@@ -75,7 +75,9 @@ watch time from reports its own player sends, and streamlink sends none.
   earns channel points and drop progress. Paused or buffering minutes don't
   count, and if Twitch changes how this works, only this stops (done for
   channel points; drop progress not checked yet)
-- The channel points balance, and claiming the bonus automatically (done)
+- The channel points balance, and claiming the bonus automatically (done;
+  claiming was broken until its request was fixed, and hasn't been seen to work
+  since)
 - Claiming finished drops automatically (done; reading the inventory checked,
   claiming not yet, with no drop finished to claim)
 
@@ -84,14 +86,14 @@ Chat:
 - Pinned chat messages, and polls and predictions shown above the chat (done
   for pinned messages and predictions; polls aren't in Twitch's GraphQL as far
   as Lurker can find)
-- Shared Chat: show which channel each message came from (done; not yet seen in
-  a real Shared Chat session)
-- Chat over the video in fullscreen, with its position, size and background
-  adjustable (done)
+- Shared Chat: show which channel each message came from, by its profile
+  picture as Twitch does (done; not yet seen in a real Shared Chat session)
+- Chat over the video, switched with O in any window, with its position, size
+  and background adjustable, and moved and resized with the mouse (done)
 - More chat options: hiding badges, highlighting bits and your own messages,
   lines between messages, the viewer or chatter count above the chat, and still
   emotes instead of animated ones (done; bits were already highlighted, and the
-  count is viewers, which needs signing in)
+  count is chatters)
 - Whispers (done: received in the chat being watched, sent with `/w`; sending
   not yet checked, as Twitch's answer to a test whisper to yourself was unclear)
 
