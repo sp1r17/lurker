@@ -1,5 +1,6 @@
 package app
 
+import "core:fmt"
 import "core:strings"
 import "core:testing"
 
@@ -97,4 +98,39 @@ shared_chat_source_is_kept :: proc(t: ^testing.T) {
 	plain := chat("@id=3;room-id=100 :c!c@x PRIVMSG #chan :no shared chat")
 	defer destroy_chat_message(plain)
 	testing.expect_value(t, plain.source_room, "")
+}
+
+@(test)
+old_messages_go_in_batches :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	assets: Assets
+	defer emotes_destroy(&assets.emotes)
+	v: Chat_View
+	defer chat_view_destroy(&v)
+	add :: proc(v: ^Chat_View, a: ^Assets, from, n: int) {
+		for i in from ..< from + n {
+			m := chat(fmt.tprintf("@id=%d :a!a@x PRIVMSG #chan :%d", i, i))
+			chat_view_add(v, a, 1, 300, {m})
+		}
+	}
+	// Past the cap, the oldest stay until a whole batch is over it.
+	add(&v, &assets, 0, CHAT_MAX_MESSAGES + CHAT_TRIM_BATCH - 1)
+	testing.expect_value(t, len(v.messages), CHAT_MAX_MESSAGES + CHAT_TRIM_BATCH - 1)
+	add(&v, &assets, CHAT_MAX_MESSAGES + CHAT_TRIM_BATCH - 1, 1)
+	testing.expect_value(t, len(v.messages), CHAT_MAX_MESSAGES)
+	// The newest are kept, in order.
+	testing.expect_value(t, v.messages[0].id, fmt.tprint(CHAT_TRIM_BATCH))
+	testing.expect_value(t, v.messages[len(v.messages) - 1].id, fmt.tprint(CHAT_MAX_MESSAGES + CHAT_TRIM_BATCH - 1))
+
+	// Someone ignored: theirs go, the rest stay in order.
+	add_one :: proc(v: ^Chat_View, a: ^Assets, line: string) {
+		chat_view_add(v, a, 1, 300, {chat(line)})
+	}
+	add_one(&v, &assets, "@id=x1 :bob!bob@x PRIVMSG #chan :one")
+	add_one(&v, &assets, "@id=x2 :a!a@x PRIVMSG #chan :two")
+	add_one(&v, &assets, "@id=x3 :bob!bob@x PRIVMSG #chan :three")
+	n := len(v.messages)
+	chat_view_remove_user(&v, "bob")
+	testing.expect_value(t, len(v.messages), n - 2)
+	testing.expect_value(t, v.messages[len(v.messages) - 1].id, "x2")
 }

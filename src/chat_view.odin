@@ -6,7 +6,11 @@ import "core:strings"
 import "core:unicode/utf8"
 import sdl "vendor:sdl3"
 
-CHAT_MAX_MESSAGES :: 1000
+// The newest messages each chat keeps (a few MB for a thousand). Once there are
+// CHAT_TRIM_BATCH more, the oldest go all at once: dropping them one by one
+// would move every other message along with each new one.
+CHAT_MAX_MESSAGES :: 10_000
+CHAT_TRIM_BATCH :: 1000
 // Sizes in logical pixels, scaled by the display scale.
 CHAT_WIDTH :: 340
 CHAT_FONT_SIZE :: 17
@@ -351,14 +355,20 @@ chat_view_refresh_badges :: proc(v: ^Chat_View) {
 	}
 }
 
-// Drops `login`'s messages, when they've just been ignored.
+// Drops `login`'s messages, when they've just been ignored, in one pass: the
+// rest move up over them, in order.
 chat_view_remove_user :: proc(v: ^Chat_View, login: string) {
-	for i := len(v.messages) - 1; i >= 0; i -= 1 {
-		if v.messages[i].kind != .System && v.messages[i].login == login {
-			destroy_chat_message(v.messages[i])
-			ordered_remove(&v.messages, i)
+	kept := 0
+	for i in 0 ..< len(v.messages) {
+		m := v.messages[i]
+		if m.kind != .System && m.login == login {
+			destroy_chat_message(m)
+			continue
 		}
+		v.messages[kept] = m
+		kept += 1
 	}
+	resize(&v.messages, kept)
 }
 
 // Whether the message's text has one of the user's highlight phrases, as whole
@@ -399,9 +409,13 @@ contains_words :: proc(text, phrase: string) -> bool {
 	return false
 }
 
-// Keeps the newest CHAT_MAX_MESSAGES.
+// Keeps the newest CHAT_MAX_MESSAGES, dropping the oldest once there are
+// CHAT_TRIM_BATCH more.
 @(private = "file")
 trim_messages :: proc(v: ^Chat_View) {
+	if len(v.messages) < CHAT_MAX_MESSAGES + CHAT_TRIM_BATCH {
+		return
+	}
 	if over := len(v.messages) - CHAT_MAX_MESSAGES; over > 0 {
 		for m in v.messages[:over] {
 			destroy_chat_message(m)
