@@ -20,7 +20,7 @@ SHORTCUTS :: [?]Shortcut {
 	{"Page Up / Page Down", "Previous / next chapter"},
 	{"Home", "Start a resumed video over"},
 	{"F", "Fullscreen"},
-	{"Double-click the video or the top bar", "Maximize / restore"},
+	{"Double-click the video or the top bar", "Fullscreen / back"},
 	{"C", "Show or hide chat"},
 	{"I", "Show or hide the stream stats"},
 	{"S", "Screenshot of the video, saved in Pictures/Lurker"},
