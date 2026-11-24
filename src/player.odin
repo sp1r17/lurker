@@ -161,6 +161,8 @@ player_init :: proc(p: ^Player) -> Player_Error {
 		// Through pipewire-pulse rather than PipeWire directly: mpv 0.41's PipeWire
 		// output can hang for good while closing when the audio graph changes,
 		// taking mpv's core with it. The trailing comma falls back to the others.
+		// The Flatpak's mpv is built without PipeWire too, as mpv also opens it
+		// to list audio devices.
 		mpv.set_option_string(p.handle, "ao", "pulse,")
 	}
 	// "warn" includes a harmless ffmpeg warning for every Twitch segment.
