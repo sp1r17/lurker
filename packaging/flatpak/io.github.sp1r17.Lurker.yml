@@ -90,6 +90,10 @@ modules:
       - -Dlua=disabled
       - -Djavascript=disabled
       - -Dvulkan=disabled
+      # Lurker plays through pipewire-pulse (ao=pulse). mpv 0.41's PipeWire
+      # output can hang for good while closing, and mpv opens and closes it on
+      # every audio-device-list refresh whatever ao is set, freezing the app.
+      - -Dpipewire=disabled
       - -Dmanpage-build=disabled
       - -Dhtml-build=disabled
       - -Dpdf-build=disabled
