@@ -74,7 +74,14 @@ Settings_Page :: struct {
 	log_folder: Rect,
 	// When the Copy log button goes back from saying "Copied", in assets.now_ms.
 	copied_until: int,
+	// What the setting under the mouse does, and since when it's been there
+	// (draw_setting_tip).
+	tip:          string,
+	tip_since:    int,
 }
+
+// How wide a setting's description can be, in logical pixels.
+SETTING_TIP_WIDTH :: 420
 
 LOG_COPIED_MS :: 2000
 
@@ -100,6 +107,7 @@ browse_open_settings :: proc(app: ^App) {
 		browse_search_close(app)
 	}
 	b.settings.back_view = b.view
+	b.settings.tip = ""
 	b.view = .Settings
 	b.hovered = -1
 }
@@ -630,17 +638,57 @@ draw_settings :: proc(app: ^App, content: Rect) {
 		.Notify_For     = "Notify for",
 		.Start_View     = "Start page",
 	}
+	// What each does, shown when it's hovered.
+	switch_tips := [Setting_Switch]string {
+		.Notifications = "A desktop notification when a followed channel goes live. Which channels is under Live notifications.",
+		.Update_Checks = "Looks on GitHub for a newer Lurker when it starts and now and then after, and offers it at the top of the browse screen.",
+		.Low_Latency   = "Plays closer to live: video is fetched before each piece of it is finished, and little is kept in hand. Can stutter on an uneven connection. Starts with the next stream.",
+		.Follow_Raids  = "When the channel you're watching raids another, Lurker goes along to the raided channel.",
+		.Chat_Timestamps      = "The time each chat message was sent, before it.",
+		.Chat_Highlight_Staff = "Makes messages from the streamer and moderators stand out.",
+		.Chat_Hide_Bots       = "Leaves out messages from known bots, such as Nightbot and StreamElements, and messages starting with \"!\".",
+		.Chat_Alternate_Lines = "Every other chat message on a lighter background, to tell them apart.",
+		.Chat_Hide_Badges     = "Leaves out the subscriber, moderator and other badges before names.",
+		.Chat_Highlight_Own   = "Makes your own chat messages stand out.",
+		.Chat_Separators      = "A thin line between chat messages.",
+		.Chat_Still_Emotes    = "Animated emotes stay on their first frame, for a calmer chat.",
+		.Chat_Chatter_Count   = "How many people are in the chat of the channel you're watching, above it.",
+		.Chat_Overlay         = "Chat on top of the video instead of beside it. O turns it on and off while watching.",
+		.Chat_Sync     = "Holds chat back by the stream's delay, so it reacts to what you see instead of ahead of it.",
+		.Next_Clip     = "When a clip ends, the next one in the list plays.",
+		.Watch_Points  = "Tells Twitch each minute you watch a live stream, so you earn channel points as on the website. Paused and buffering time doesn't count.",
+		.Normalize_Audio = "Evens out loudness between streams, and between quiet talk and loud alerts within one.",
+		.Notify_Changes  = "A notification too when a followed channel that's live changes its title or category.",
+		.Auto_Quality    = "When a live stream stalls 3 times in a minute, it plays a step lower until you pick a quality again. The quality you picked stays saved.",
+		.Claim_Bonus     = "Claims the bonus channel points Twitch offers every so often while you watch.",
+		.Claim_Drops     = "Claims drops as soon as you've finished earning them, and says so in chat.",
+	}
+	choice_tips := [Setting_Choice]string {
+		.Latency_Buffer = "With low latency: how much video is kept in hand. More rides out an uneven connection but plays about that much further behind live.",
+		.Max_Quality    = "Streams never play above this, to save bandwidth or spare a slower computer.",
+		.Video_Enhancement = "Balanced smooths the banding Twitch's compression leaves in skies and gradients, and scales more sharply. Uses more of the graphics card.",
+		.Audio_Device   = "Where the sound plays. System default follows whatever your system is set to.",
+		.Audio_Delay    = "Shows the video this much later, to match Bluetooth headphones that play the sound late.",
+		.Chat_Overlay_Position   = "Which corner chat over the video sits in. Drag it on the video to put it anywhere.",
+		.Chat_Overlay_Size       = "How much of the video chat over it covers. Drag its edges on the video for any size.",
+		.Chat_Overlay_Background = "How see-through the background of chat over the video is.",
+		.Notify_For     = "Every followed channel but the ones you mute, or only the ones you choose. The list is below.",
+		.Start_View     = "The tab Lurker opens on.",
+	}
+	TEXT_SIZE_TIP :: "Makes all of Lurker's text larger or smaller. Ctrl and the mouse wheel do it too."
+	LANGUAGE_TIP :: "Streams in other languages are grayed out or hidden in the stream lists. Channels you follow show whatever their language."
+	LOG_TIP :: "What Lurker has been doing, to paste into a bug report or attach to one."
 	lists := [Setting_List]struct {
-		label, hint, none: string,
+		label, hint, none, tip: string,
 	} {
-		.Highlights         = {"Highlight phrases", "Add a word or phrase", "Only mentions of you are highlighted."},
-		.Ignored            = {"Ignored users", "Add a login", "No one is ignored."},
-		.Blocked_Channels   = {"Channels", "Block a channel by its login", "No channels blocked."},
-		.Blocked_Categories = {"Categories", "Block a category by its name", "No categories blocked."},
-		.Notify_Channels    = {"Muted channels", "Mute a channel by its login", "No channels muted."},
+		.Highlights         = {"Highlight phrases", "Add a word or phrase", "Only mentions of you are highlighted.", "Chat messages with any of these in them stand out, as mentions of you do."},
+		.Ignored            = {"Ignored users", "Add a login", "No one is ignored.", "Messages from these people are hidden in every chat."},
+		.Blocked_Channels   = {"Channels", "Block a channel by its login", "No channels blocked.", "Left out of the stream lists, search, your offline follows and live notifications."},
+		.Blocked_Categories = {"Categories", "Block a category by its name", "No categories blocked.", "Left out of the categories, and streams in them out of the stream lists and search."},
+		.Notify_Channels    = {"Muted channels", "Mute a channel by its login", "No channels muted.", "Followed channels that don't notify when they go live."},
 	}
 	if app.layout.notify_only {
-		lists[.Notify_Channels] = {"Chosen channels", "Choose a channel by its login", "No channels chosen: none will notify."}
+		lists[.Notify_Channels] = {"Chosen channels", "Choose a channel by its login", "No channels chosen: none will notify.", "The only channels that notify when they go live."}
 	}
 	Section :: struct {
 		title:    string,
@@ -695,6 +743,11 @@ draw_settings :: proc(app: ^App, content: Rect) {
 	visible :: proc(rect, area: Rect) -> bool {
 		return rect.y + rect.h >= area.y && rect.y <= area.y + area.h
 	}
+	// The row under the mouse, and what its setting does.
+	tip, tip_row := "", Rect{}
+	hovering :: proc(app: ^App, row, area: Rect) -> bool {
+		return in_rect(area, app.mouse.x, app.mouse.y) && in_rect(row, app.mouse.x, app.mouse.y)
+	}
 
 	clip_begin(r, rest)
 	x := rest.x + pad
@@ -712,6 +765,9 @@ draw_settings :: proc(app: ^App, content: Rect) {
 			if visible(row, rest) {
 				p.switches[sw] = rect
 			}
+			if hovering(app, row, rest) {
+				tip, tip_row = switch_tips[sw], row
+			}
 		}
 
 		for c in s.choices {
@@ -728,6 +784,9 @@ draw_settings :: proc(app: ^App, content: Rect) {
 			draw_text(r, .Regular, text_size, button.x, button.y, value, BROWSE_TEXT if hovered else BROWSE_ACCENT)
 			if visible(row, rest) {
 				p.choices[c] = button
+			}
+			if hovering(app, row, rest) {
+				tip, tip_row = choice_tips[c], row
 			}
 		}
 
@@ -752,6 +811,9 @@ draw_settings :: proc(app: ^App, content: Rect) {
 			if visible(row, rest) {
 				p.smaller, p.larger = smaller, larger
 			}
+			if hovering(app, row, rest) {
+				tip, tip_row = TEXT_SIZE_TIP, row
+			}
 		}
 
 		if s.language {
@@ -767,6 +829,9 @@ draw_settings :: proc(app: ^App, content: Rect) {
 			if visible(row, rest) {
 				b.language_button = button
 			}
+			if hovering(app, row, rest) {
+				tip, tip_row = LANGUAGE_TIP, row
+			}
 		}
 
 		for list in s.lists {
@@ -778,6 +843,9 @@ draw_settings :: proc(app: ^App, content: Rect) {
 			draw_text_box(app, &p.inputs[list], &p.box_scroll[list], p.boxes[list], l.hint)
 			if !visible(p.boxes[list], rest) {
 				p.boxes[list] = {}
+			}
+			if hovering(app, row, rest) {
+				tip, tip_row = l.tip, row
 			}
 			entries := settings_entries(app, list)
 			resize(&p.remove[list], len(entries))
@@ -835,10 +903,58 @@ draw_settings :: proc(app: ^App, content: Rect) {
 			if visible(row, rest) {
 				p.copy_log, p.log_folder = copy, folder
 			}
+			if hovering(app, row, rest) {
+				tip, tip_row = LOG_TIP, row
+			}
 		}
 		y += section_gap
 	}
 	clip_end(r)
+	// Not over the language menu, which opens below its row.
+	if b.language_menu.open {
+		tip = ""
+	}
+	draw_setting_tip(app, tip, tip_row, rest, text_size)
+}
+
+// What the hovered setting does, below its row (above it without room there),
+// once the mouse has rested on the row for TOOLTIP_DELAY_MS.
+@(private = "file")
+draw_setting_tip :: proc(app: ^App, tip: string, row, area: Rect, size: f32) {
+	a := &app.assets
+	p := &app.browse.settings
+	if tip != p.tip {
+		p.tip = tip
+		p.tip_since = a.now_ms
+	}
+	if tip == "" {
+		return
+	}
+	if left := p.tip_since + TOOLTIP_DELAY_MS - a.now_ms; left > 0 {
+		if a.next_frame_ms < 0 || left < a.next_frame_ms {
+			a.next_frame_ms = left
+		}
+		return
+	}
+	r := &a.renderer
+	pad := 8 * app.scale
+	gap := 2 * app.scale
+	max_w := min(row.w - 4 * pad, SETTING_TIP_WIDTH * app.scale * r.text_scale)
+	lines := wrap_words(a, .Regular, size, tip, max_w)
+	w: f32
+	for line in lines {
+		w = max(w, text_line_width(a, .Regular, size, line))
+	}
+	lh := line_height(r, .Regular, size)
+	box := Rect{row.x + pad, row.y + row.h + gap, w + 2 * pad, f32(len(lines)) * lh + 2 * pad}
+	if box.y + box.h > area.y + area.h {
+		box.y = row.y - gap - box.h
+	}
+	box.y = max(box.y, area.y)
+	draw_rect(r, box, MENU_HOVER)
+	for line, i in lines {
+		draw_text_line(a, .Regular, size, box.x + pad, box.y + pad + f32(i) * lh, line, BROWSE_TEXT, max_w)
+	}
 }
 
 // A button at the right end of `row`.

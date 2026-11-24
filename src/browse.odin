@@ -1492,7 +1492,6 @@ draw_title_tooltip :: proc(app: ^App, at: Rect, title: string, content: Rect, fo
 
 // Splits `text` into lines no wider than max_w, between words. A word wider
 // than that gets a line of its own.
-@(private = "file")
 wrap_words :: proc(a: ^Assets, font: Font, size: f32, text: string, max_w: f32) -> []string {
 	lines := make([dynamic]string, context.temp_allocator)
 	start, end := -1, 0
