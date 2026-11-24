@@ -25,6 +25,8 @@ LATEST_RELEASE_URL :: "https://api.github.com/repos/sp1r17/lurker/releases/lates
 // "release" environment. Hex.
 UPDATE_PUBLIC_KEY :: "21014b892e94eb9849e3ddddfe532c4bc0498b7d0940dabe36b44d8f082646e8"
 UPDATE_CHECK_MS :: 6 * 3600 * 1000
+// The most the Windows installer can be (0.12.0's is 107 MB).
+UPDATE_MAX_BYTES :: 512 * 1024 * 1024
 UPDATE_INSTALLS_ITSELF :: ODIN_OS == .Windows
 
 Update_State :: enum {
@@ -275,7 +277,7 @@ run_update_download_job :: proc(job: ^Job) {
 		log.warnf("update: SHA256SUMS doesn't list %s", name)
 		return
 	}
-	setup, setup_ok := http_request(p.installer, allocator = context.temp_allocator)
+	setup, setup_ok := http_request(p.installer, allocator = context.temp_allocator, max_bytes = UPDATE_MAX_BYTES)
 	if !setup_ok || setup.status != 200 {
 		log.warn("update: can't download the installer")
 		return
