@@ -1,6 +1,8 @@
 package app
 
+import "core:crypto/ed25519"
 import "core:crypto/sha2"
+import "core:encoding/hex"
 import "core:encoding/json"
 import "core:fmt"
 import "core:log"
@@ -15,6 +17,13 @@ import sdl "vendor:sdl3"
 // updates itself: the installer is downloaded, checked against the release's
 // SHA256SUMS and run silently, and reopens Lurker. Elsewhere the release page opens.
 LATEST_RELEASE_URL :: "https://api.github.com/repos/sp1r17/lurker/releases/latest"
+
+// The Ed25519 public key whose signature (SHA256SUMS.sig) SHA256SUMS must carry
+// before an installer it lists is run, so that a release published by anyone
+// without the private key (a stolen GitHub sign-in, say) can't update Lurker.
+// The release job signs with the private key, kept only in the repository's
+// "release" environment. Hex.
+UPDATE_PUBLIC_KEY :: "21014b892e94eb9849e3ddddfe532c4bc0498b7d0940dabe36b44d8f082646e8"
 UPDATE_CHECK_MS :: 6 * 3600 * 1000
 UPDATE_INSTALLS_ITSELF :: ODIN_OS == .Windows
 
@@ -38,6 +47,7 @@ Updater :: struct {
 	page:       string,
 	installer:  string,
 	sums:       string,
+	signature:  string,
 	// Closed (×) for this run.
 	dismissed:  bool,
 	// From the last draw (zero size when hidden): the bar and its links.
@@ -52,6 +62,7 @@ updater_destroy :: proc(u: ^Updater) {
 	delete(u.page)
 	delete(u.installer)
 	delete(u.sums)
+	delete(u.signature)
 }
 
 // "0.4.1" or "v0.4.1" as numbers. False for anything else.
@@ -112,6 +123,7 @@ Update_Check_Job :: struct {
 	page:      string,
 	installer: string,
 	sums:      string,
+	signature: string,
 }
 
 destroy_update_check_job :: proc(p: ^Update_Check_Job) {
@@ -119,6 +131,7 @@ destroy_update_check_job :: proc(p: ^Update_Check_Job) {
 	delete(p.page)
 	delete(p.installer)
 	delete(p.sums)
+	delete(p.signature)
 }
 
 @(private = "file")
@@ -162,6 +175,8 @@ parse_latest_release :: proc(body: []byte, p: ^Update_Check_Job) -> bool {
 			p.installer = strings.clone(a.browser_download_url)
 		case "SHA256SUMS":
 			p.sums = strings.clone(a.browser_download_url)
+		case "SHA256SUMS.sig":
+			p.signature = strings.clone(a.browser_download_url)
 		}
 	}
 	return true
@@ -183,6 +198,7 @@ finish_update_check_job :: proc(app: ^App, p: ^Update_Check_Job) {
 	u.page, p.page = p.page, ""
 	u.installer, p.installer = p.installer, ""
 	u.sums, p.sums = p.sums, ""
+	u.signature, p.signature = p.signature, ""
 	u.state = .Available
 	log.infof("Lurker %s is available", u.version)
 }
@@ -194,10 +210,11 @@ update_bar_shown :: proc(app: ^App) -> bool {
 }
 
 // The Update button: on Windows, downloads the installer to run it; elsewhere, or
-// without the release's installer and checksums, opens the release page.
+// without the release's installer, checksums and their signature, opens the
+// release page.
 update_start :: proc(app: ^App) {
 	u := &app.update
-	if !UPDATE_INSTALLS_ITSELF || u.state == .Failed || u.installer == "" || u.sums == "" {
+	if !UPDATE_INSTALLS_ITSELF || u.state == .Failed || u.installer == "" || u.sums == "" || u.signature == "" {
 		open_url(u.page)
 		return
 	}
@@ -208,7 +225,12 @@ update_start :: proc(app: ^App) {
 	jobs_add(
 		&app.assets.jobs,
 		run_update_download_job,
-		Update_Download_Job{version = strings.clone(u.version), installer = strings.clone(u.installer), sums = strings.clone(u.sums)},
+		Update_Download_Job {
+			version = strings.clone(u.version),
+			installer = strings.clone(u.installer),
+			sums = strings.clone(u.sums),
+			signature = strings.clone(u.signature),
+		},
 	)
 }
 
@@ -216,6 +238,7 @@ Update_Download_Job :: struct {
 	version:   string,
 	installer: string,
 	sums:      string,
+	signature: string,
 	// Where the checked installer was saved. Owned.
 	path:      string,
 	ok:        bool,
@@ -225,6 +248,7 @@ destroy_update_download_job :: proc(p: ^Update_Download_Job) {
 	delete(p.version)
 	delete(p.installer)
 	delete(p.sums)
+	delete(p.signature)
 	delete(p.path)
 }
 
@@ -235,6 +259,15 @@ run_update_download_job :: proc(job: ^Job) {
 	sums, sums_ok := http_request(p.sums, allocator = context.temp_allocator)
 	if !sums_ok || sums.status != 200 {
 		log.warn("update: can't download SHA256SUMS")
+		return
+	}
+	signature, signature_ok := http_request(p.signature, allocator = context.temp_allocator)
+	if !signature_ok || signature.status != 200 {
+		log.warn("update: can't download SHA256SUMS.sig")
+		return
+	}
+	if !signed_by(UPDATE_PUBLIC_KEY, sums.body, signature.body) {
+		log.error("update: SHA256SUMS isn't signed with Lurker's key; not installing it")
 		return
 	}
 	want, listed := checksum_for(string(sums.body), name)
@@ -265,6 +298,20 @@ run_update_download_job :: proc(job: ^Job) {
 	}
 	p.path = strings.clone(path)
 	p.ok = true
+}
+
+// Whether `signature` is a valid Ed25519 signature of `message` by the key
+// `public_key` (hex).
+signed_by :: proc(public_key: string, message, signature: []byte) -> bool {
+	key_bytes, hex_ok := hex.decode(transmute([]byte)public_key, context.temp_allocator)
+	if !hex_ok || len(key_bytes) != ed25519.PUBLIC_KEY_SIZE || len(signature) != ed25519.SIGNATURE_SIZE {
+		return false
+	}
+	key: ed25519.Public_Key
+	if !ed25519.public_key_set_bytes(&key, key_bytes) {
+		return false
+	}
+	return ed25519.verify(&key, message, signature)
 }
 
 // The SHA-256 that a sha256sum listing gives `name`, lowercase hex.
