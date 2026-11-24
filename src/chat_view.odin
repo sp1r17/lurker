@@ -713,8 +713,8 @@ Layout_Item :: struct {
 	link:    string,
 	// Part of the line saying what a reply replies to: clicking it opens the thread.
 	is_reply: bool,
-	// A badge (`text` is its "set/version") or emote (`text` is its name), which
-	// shows a tooltip when hovered.
+	// A badge (`text` is its "set/version"), emote (`text` is its name) or Shared
+	// Chat channel (`text` is its name), which shows a tooltip when hovered.
 	hint:        Item_Hint,
 	third_party: bool,
 	source:      Emote_Source,
@@ -724,6 +724,7 @@ Item_Hint :: enum {
 	None,
 	Badge,
 	Emote,
+	Room,
 }
 
 // A message laid out for one width, scale and text size. Images that finish loading can change
@@ -818,14 +819,25 @@ message_layout_into :: proc(a: ^Assets, channel: ^Emotes, m: ^Chat_Message, l: ^
 			space(&b, .Regular)
 		}
 	}
-	// Shared Chat: the channel it was sent in, when it's another.
+	// Shared Chat: the channel it was sent in, when it's another: its picture,
+	// like a badge, or its name until there's none to be had.
 	delete(l.source)
 	l.source = ""
 	if m.source_room != "" {
-		if name, ok := room_name(a, m.source_room); ok {
-			l.source = strings.clone(name)
-			put_text(&b, .Bold, CHAT_SYSTEM_TEXT, l.source)
-			space(&b, .Regular)
+		if room, ok := room_info(a, m.source_room); ok {
+			l.source = strings.clone(room.name)
+			image: ^Image
+			if room.image_url != "" {
+				image = image_get(&a.images, &a.jobs, room.image_url, pixel_scale)
+			}
+			if image != nil && image.state != .Failed {
+				put_image(&b, image, BADGE_HEIGHT, 0)
+				hint_last(&b, {hint = .Room, text = l.source})
+				b.x += BADGE_GAP * scale
+			} else {
+				put_text(&b, .Bold, CHAT_SYSTEM_TEXT, l.source)
+				space(&b, .Regular)
+			}
 		}
 	}
 
@@ -1081,6 +1093,9 @@ draw_chat_tooltip :: proc(a: ^Assets, v: ^Chat_View, view_rect, bounds: Rect, x,
 	case .Emote:
 		title, detail = item.text, emote_source_label(item.third_party, item.source)
 		height = TOOLTIP_EMOTE_HEIGHT
+	case .Room:
+		title, detail = item.text, "Shared Chat"
+		height = TOOLTIP_BADGE_HEIGHT
 	}
 
 	r := &a.renderer
