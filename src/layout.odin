@@ -285,9 +285,9 @@ parse_layout :: proc(data: []byte, l: ^Layout) -> bool {
 	l.chat.still_emotes = saved.chat_still_emotes
 	l.chat.chatter_count = saved.chat_chatter_count || saved.chat_viewer_count
 	l.chat_overlay = saved.chat_overlay
-	l.chat_overlay_position = enum_from_name(Chat_Overlay_Position, saved.chat_overlay_position, .Bottom_Right)
-	l.chat_overlay_size = enum_from_name(Chat_Overlay_Size, saved.chat_overlay_size, .Medium)
-	l.chat_overlay_background = enum_from_name(Chat_Overlay_Background, saved.chat_overlay_background, .Dim)
+	l.chat_overlay_position = enum_from_name(Chat_Overlay_Position, saved.chat_overlay_position, Chat_Overlay_Position.Bottom_Right)
+	l.chat_overlay_size = enum_from_name(Chat_Overlay_Size, saved.chat_overlay_size, Chat_Overlay_Size.Medium)
+	l.chat_overlay_background = enum_from_name(Chat_Overlay_Background, saved.chat_overlay_background, Chat_Overlay_Background.Dim)
 	l.chat_overlay_box = saved.chat_overlay_box
 	for phrase in saved.highlights {
 		rule_add(&l.chat.highlights, strings.to_lower(strings.trim_space(phrase), context.temp_allocator))

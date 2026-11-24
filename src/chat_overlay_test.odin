@@ -18,8 +18,8 @@ chat_overlay_goes_in_its_corner :: proc(t: ^testing.T) {
 @(test)
 enum_names_read_back :: proc(t: ^testing.T) {
 	defer free_all(context.temp_allocator)
-	testing.expect_value(t, enum_from_name(Chat_Overlay_Position, "Top_Left", .Bottom_Right), Chat_Overlay_Position.Top_Left)
-	testing.expect_value(t, enum_from_name(Chat_Overlay_Size, "Huge", .Medium), Chat_Overlay_Size.Medium)
+	testing.expect_value(t, enum_from_name(Chat_Overlay_Position, "Top_Left", Chat_Overlay_Position.Bottom_Right), Chat_Overlay_Position.Top_Left)
+	testing.expect_value(t, enum_from_name(Chat_Overlay_Size, "Huge", Chat_Overlay_Size.Medium), Chat_Overlay_Size.Medium)
 }
 
 @(test)
