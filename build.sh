@@ -17,10 +17,10 @@ fi
 case "$MODE" in
   release)
     echo "Building release..."
+    # With bounds checks, as the packages are: chat and emotes come from anyone.
     odin build src \
       -out:"$OUT_DIR/$OUT_NAME" \
       -o:speed \
-      -no-bounds-check \
       -disable-assert \
       "${EXTRA[@]}"
     ;;

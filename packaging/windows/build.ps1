@@ -60,7 +60,8 @@ Remove-Item -Recurse -Force $dist -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $dist | Out-Null
 Push-Location $root
 try {
-	odin build src "-out:$dist\lurker.exe" -o:speed -no-bounds-check -disable-assert -subsystem:windows `
+	# With bounds checks, as chat and emotes come from anyone.
+	odin build src "-out:$dist\lurker.exe" -o:speed -disable-assert -subsystem:windows `
 		"-resource:packaging\windows\lurker.rc" "-extra-linker-flags:/LIBPATH:$deps\mpv"
 	if ($LASTEXITCODE -ne 0) { throw "odin build failed" }
 } finally {

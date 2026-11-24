@@ -15,7 +15,9 @@ jobs:
     name: Flatpak
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-26.08
+      # Pinned by digest, as the tag moves; to update, the digest of the tag's
+      # image index (docker buildx imagetools inspect <image:tag>).
+      image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-26.08@sha256:6ed6921bb5a9e1a916989971844f159b854b7b225880c381fa34f7a158863039
       options: --privileged
       # The image's Flatpak installation on a volume, which Docker fills from the
       # image: updating the SDK renames folders from the image's own layer, which
@@ -39,7 +41,8 @@ jobs:
     needs: flatpak
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-26.08
+      # The same image as the flatpak job's.
+      image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-26.08@sha256:6ed6921bb5a9e1a916989971844f159b854b7b225880c381fa34f7a158863039
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -91,6 +94,9 @@ jobs:
       - name: Install Odin and Inno Setup
         run: |
           Invoke-WebRequest https://github.com/odin-lang/Odin/releases/download/dev-2026-10/odin-windows-amd64-dev-2026-10.zip -OutFile odin.zip
+          if ((Get-FileHash odin.zip -Algorithm SHA256).Hash -ne "b6b2e426a8b6f147b74ec7e18bef8df27cf40fe16193159df7ca09a0cc0c2011") {
+            throw "odin.zip doesn't match its checksum"
+          }
           Expand-Archive odin.zip "$env:RUNNER_TEMP\odin"
           (Get-ChildItem "$env:RUNNER_TEMP\odin" -Recurse -Filter odin.exe)[0].DirectoryName >> $env:GITHUB_PATH
           choco install innosetup -y --no-progress
@@ -117,7 +123,9 @@ jobs:
       - name: Install Odin and the libraries
         run: |
           brew install sdl3 sdl3_image mpv curl dylibbundler
-          curl -sSfL https://github.com/odin-lang/Odin/releases/download/dev-2026-10/odin-macos-arm64-dev-2026-10.tar.gz | tar xz -C "$RUNNER_TEMP"
+          curl -sSfL -o "$RUNNER_TEMP/odin.tar.gz" https://github.com/odin-lang/Odin/releases/download/dev-2026-10/odin-macos-arm64-dev-2026-10.tar.gz
+          echo "b276c6ac87c3eea17446a6ca9080089b6e9f492057fb773591775ee49d92a1cf  $RUNNER_TEMP/odin.tar.gz" | shasum -a 256 -c -
+          tar xzf "$RUNNER_TEMP/odin.tar.gz" -C "$RUNNER_TEMP"
           echo "$RUNNER_TEMP"/odin-macos-arm64-* >> "$GITHUB_PATH"
       - name: Test
         run: ./build.sh test
