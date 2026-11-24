@@ -608,7 +608,7 @@ draw_settings :: proc(app: ^App, content: Rect) {
 		.Chat_Separators      = "Lines between messages",
 		.Chat_Still_Emotes    = "Still emotes instead of animated ones",
 		.Chat_Chatter_Count   = "Show how many are in the chat, above it",
-		.Chat_Overlay         = "Chat over the video in fullscreen",
+		.Chat_Overlay         = "Chat over the video (O)",
 		.Chat_Sync     = "Delay chat to match the stream",
 		.Next_Clip     = "Play the next clip when one ends",
 		.Watch_Points  = "Earn channel points from watch time",

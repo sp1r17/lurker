@@ -22,6 +22,7 @@ SHORTCUTS :: [?]Shortcut {
 	{"F", "Fullscreen"},
 	{"Double-click the video or the top bar", "Fullscreen / back"},
 	{"C", "Show or hide chat"},
+	{"O", "Chat over the video, or beside it"},
 	{"I", "Show or hide the stream stats"},
 	{"S", "Screenshot of the video, saved in Pictures/Lurker"},
 	{"R", "Refresh (or start a frozen stream again)"},

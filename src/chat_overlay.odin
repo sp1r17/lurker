@@ -4,8 +4,8 @@ import "core:fmt"
 import "core:math"
 import sdl "vendor:sdl3"
 
-// Chat over the video in fullscreen (Layout.chat_overlay): the video takes the
-// whole screen, and the chats show in a box over it, in a corner, at a size and
+// Chat over the video (Layout.chat_overlay), in any window, switched with O or
+// the button in the chat's header: the video takes the whole window, and the chats show in a box over it, in a corner, at a size and
 // with a background chosen in Settings. Dragging a header moves the box and
 // dragging its edges resizes it (Layout.chat_overlay_box); choosing a corner or
 // size in Settings puts it back.
@@ -57,11 +57,49 @@ CHAT_OVERLAY_SHARES :: [Chat_Overlay_Size][2]f32 {
 	.Large  = {0.32, 0.8},
 }
 
-// Whether the chats go over the video, fullscreen with the setting on: they show
-// there whether or not they're hidden beside it (Layout.hide_chat), until C
-// hides them for this watch.
+// Whether the chats go over the video rather than beside it: they show there
+// whether or not they're hidden beside it (Layout.hide_chat), until C hides them
+// for this watch.
 chat_overlay_mode :: proc(app: ^App) -> bool {
-	return app.fullscreen && app.layout.chat_overlay
+	return app.layout.chat_overlay
+}
+
+// Puts the chats over the video, or back beside it, and keeps that for next
+// time. Either way they show: that's what switching asks for.
+watch_toggle_overlay :: proc(app: ^App) {
+	w := &app.watch
+	app.layout.chat_overlay = !app.layout.chat_overlay
+	w.overlay_drag = {}
+	if app.layout.chat_overlay {
+		w.overlay_hidden = false
+	} else {
+		watch_show_chat(app, true)
+	}
+	layout_save(&app.layout)
+}
+
+// The header button that switches between the chats over the video and beside
+// it: a window with a box in its corner, or with a column at its side, for
+// where a click puts them.
+draw_overlay_button :: proc(app: ^App, button: Rect) {
+	r := &app.assets.renderer
+	scale := app.scale
+	hovered := in_rect(button, app.mouse.x, app.mouse.y)
+	color := BROWSE_TEXT if hovered else BROWSE_DIM_TEXT
+	line := max(1, math.round(scale))
+	icon := Rect{button.x + button.w / 2 - 7 * scale, button.y + button.h / 2 - 5 * scale, 14 * scale, 10 * scale}
+	icon = {math.round(icon.x), math.round(icon.y), math.round(icon.w), math.round(icon.h)}
+	draw_rect(r, {icon.x, icon.y, icon.w, line}, color)
+	draw_rect(r, {icon.x, icon.y + icon.h - line, icon.w, line}, color)
+	draw_rect(r, {icon.x, icon.y, line, icon.h}, color)
+	draw_rect(r, {icon.x + icon.w - line, icon.y, line, icon.h}, color)
+	if app.layout.chat_overlay {
+		// Beside: a column at the right.
+		draw_rect(r, {icon.x + icon.w - 5 * scale, icon.y, 5 * scale, icon.h}, color)
+	} else {
+		// Over: a box in the corner.
+		draw_rect(r, {icon.x + icon.w - 6 * scale, icon.y + icon.h - 5 * scale, 5 * scale, 4 * scale}, color)
+	}
 }
 
 // Whether the chats show over the video now.
@@ -207,6 +245,9 @@ chat_overlay_grab_at :: proc(app: ^App, x, y: f32) -> (edges: bit_set[Chat_Overl
 		return {}, false
 	}
 	if w.hide_button.w > 0 && in_rect(w.hide_button, x, y) {
+		return {}, false
+	}
+	if w.overlay_button.w > 0 && in_rect(w.overlay_button, x, y) {
 		return {}, false
 	}
 	for p in w.panes {

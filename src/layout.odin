@@ -76,7 +76,7 @@ Layout :: struct {
 	notify_chosen:     [dynamic]string,
 	// Highlight phrases and ignored people, for every chat.
 	chat:              Chat_Rules,
-	// The chats over the video in fullscreen, and where, how big and how
+	// The chats over the video (O), and where, how big and how
 	// see-through (chat_overlay.odin).
 	chat_overlay:            bool,
 	chat_overlay_position:   Chat_Overlay_Position,

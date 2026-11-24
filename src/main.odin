@@ -578,7 +578,8 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 		}
 		x, y := e.button.x * density, e.button.y * density
 		redraw^ = true
-		if window_controls_click(app, x, y) {
+		// Under the chats over the video, they're covered: the chats take it.
+		if !(app.screen == .Watch && on_chat_overlay(app, x, y)) && window_controls_click(app, x, y) {
 			return true
 		}
 		window_press(app, x, y, e.button.clicks)

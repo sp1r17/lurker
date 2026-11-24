@@ -248,6 +248,11 @@ draw_pane :: proc(app: ^App, p: ^Chat_Pane, focused: bool) {
 	size := BROWSE_CARD_TEXT_SIZE * scale
 	p.mention_badge = {}
 	title_room := p.header_rect.w - 16 * scale
+	// The first header has two buttons at its left ("»" and over or beside the
+	// video, draw_watch); the title stays centred, clear of them.
+	if len(w.panes) > 0 && p == w.panes[0] {
+		title_room = p.header_rect.w - 4 * p.header_rect.h - 8 * scale
+	}
 	if p.unread_mentions > 0 {
 		p.mention_badge = draw_mention_badge(app, p.header_rect.x + p.header_rect.w - 6 * scale, p.header_rect.y + p.header_rect.h / 2, p.unread_mentions)
 		// The title stays centred, clear of the badge.

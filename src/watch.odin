@@ -66,6 +66,8 @@ Watch :: struct {
 	overlay_rect:    Rect,
 	overlay_screen:  Rect,
 	overlay_drag:    Chat_Overlay_Drag,
+	// The header button switching between the two, from the last draw.
+	overlay_button:  Rect,
 	// panes[0] is the watched channel's chat; the rest are splits (Ctrl+T).
 	panes:           [dynamic]^Chat_Pane,
 	// The pane keys like Enter and Ctrl+F act on.
@@ -800,6 +802,8 @@ watch_key :: proc(app: ^App, key: sdl.KeyboardEvent) -> bool {
 		set_volume(app, app.layout.volume - VOLUME_STEP, app.layout.muted)
 	case sdl.K_C:
 		watch_toggle_chats(app, !chats_shown(app))
+	case sdl.K_O:
+		watch_toggle_overlay(app)
 	case sdl.K_R:
 		// A frozen or stuttering stream, started again; a video, from where it is.
 		restart_stream(app)
@@ -937,6 +941,10 @@ watch_click :: proc(app: ^App, x, y: f32) {
 	}
 	if chats_shown(app) && w.hide_button.w > 0 && in_rect(w.hide_button, x, y) {
 		watch_toggle_chats(app, false)
+		return
+	}
+	if chats_shown(app) && w.overlay_button.w > 0 && in_rect(w.overlay_button, x, y) {
+		watch_toggle_overlay(app)
 		return
 	}
 	if !chats_shown(app) && w.show_tab.w > 0 && in_rect(w.show_tab, x, y) {
@@ -1095,6 +1103,7 @@ draw_watch :: proc(app: ^App) {
 	draw_controls(app)
 	app.mouse = mouse
 	w.hide_button = {}
+	w.overlay_button = {}
 	w.show_tab = {}
 	if !chats_shown(app) {
 		// A tab at the right edge, only while the mouse is near it and has moved
@@ -1128,6 +1137,9 @@ draw_watch :: proc(app: ^App) {
 	w.hide_button = {h.x, h.y, h.h, h.h}
 	hovered := in_rect(w.hide_button, app.mouse.x, app.mouse.y)
 	draw_centered(r, .Bold, 18 * scale, w.hide_button, "»", BROWSE_TEXT if hovered else BROWSE_DIM_TEXT)
+	// Beside it, the button putting them over the video or back beside it.
+	w.overlay_button = {h.x + h.h, h.y, h.h, h.h}
+	draw_overlay_button(app, w.overlay_button)
 	draw_user_card(app)
 	if w.card.open {
 		screen := Rect{0, 0, w.video_rect.w, w.video_rect.h}
