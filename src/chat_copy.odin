@@ -196,10 +196,9 @@ chat_select_release :: proc(v: ^Chat_View) {
 		return
 	}
 	s.pressed, s.dragging = false, false
-	when ODIN_OS == .Linux {
-		if s.shown {
-			_ = sdl.SetPrimarySelectionText(strings.clone_to_cstring(chat_selection_text(v), context.temp_allocator))
-		}
+	// An `if`, not `when`: elsewhere sdl would be imported unused, which -vet refuses.
+	if ODIN_OS == .Linux && s.shown {
+		_ = sdl.SetPrimarySelectionText(strings.clone_to_cstring(chat_selection_text(v), context.temp_allocator))
 	}
 }
 
