@@ -645,10 +645,12 @@ finish_jobs :: proc(app: ^App) {
 				for pane in app.watch.panes {
 					chat_view_refresh_emotes(&pane.view, a)
 				}
+				chat_banner_refresh_emotes(app)
 			} else if pane := find_pane(app, p.pane); pane != nil {
 				// A channel's set arriving after its pane closed is dropped.
 				finish_emote_set_job(&pane.emotes, &p)
 				chat_view_refresh_emotes(&pane.view, a)
+				chat_banner_refresh_emotes(app)
 			}
 		case Badges_Job:
 			pane := find_pane(app, p.pane)
@@ -657,6 +659,7 @@ finish_jobs :: proc(app: ^App) {
 			for other in app.watch.panes {
 				chat_view_refresh_badges(&other.view)
 			}
+			chat_banner_refresh_emotes(app)
 			apply_auth_check(app, p.check, p.auth)
 		case Streams_Job:
 			apply_auth_check(app, p.check, p.auth)
@@ -732,6 +735,10 @@ finish_jobs :: proc(app: ^App) {
 			finish_rewards_job(app, &p)
 		case Chat_Banner_Job:
 			finish_chat_banner_job(app, &p)
+		case Prediction_Bet_Job:
+			finish_prediction_bet_job(app, &p)
+		case Poll_Vote_Job:
+			finish_poll_vote_job(app, &p)
 		case Whispers_Job:
 			finish_whispers_job(app, &p)
 		case Whisper_Send_Job:

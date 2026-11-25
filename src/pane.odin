@@ -203,7 +203,7 @@ pane_layout :: proc(app: ^App, p: ^Chat_Pane, rect: Rect) {
 	// What's pinned and predicted, on the watched channel's chat.
 	p.banner_rect = {}
 	if p.channel != "" && p.channel == app.watch.channel {
-		if h := chat_banner_height(app, rect.w); h > 0 {
+		if h := chat_banner_height(app, &p.emotes, rect.w); h > 0 {
 			p.banner_rect = {rect.x, top, rect.w, h}
 			top = p.banner_rect.y + p.banner_rect.h
 		}
@@ -277,7 +277,7 @@ draw_pane :: proc(app: ^App, p: ^Chat_Pane, focused: bool) {
 	}
 
 	if p.banner_rect.w > 0 {
-		draw_chat_banner(app, p.banner_rect)
+		draw_chat_banner(app, &p.emotes, p.banner_rect)
 	}
 
 	if p.modes_rect.w > 0 {
@@ -444,8 +444,18 @@ pane_click :: proc(app: ^App, p: ^Chat_Pane, x, y: f32) {
 	if !in_rect(p.input_rect, x, y) {
 		emote_panel_close(app, p)
 	}
-	// The pinned message, prediction or poll expands or minimizes.
+	// The pinned message, prediction or poll expands or minimizes, unless it's
+	// the pinned message's link or sender's name.
 	if p.banner_rect.w > 0 && in_rect(p.banner_rect, x, y) {
+		hits := &app.watch.banner.hits
+		if url, found := chat_view_link_at(hits, x, y); found {
+			open_url(url)
+			return
+		}
+		if login, found := chat_view_name_at(hits, x, y); found {
+			user_card_open(app, p, login, y)
+			return
+		}
 		chat_banner_click(app, x, y)
 		return
 	}

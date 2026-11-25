@@ -510,18 +510,44 @@ finished_drops_are_found :: proc(t: ^testing.T) {
 @(test)
 chat_banner_lines_are_made :: proc(t: ^testing.T) {
 	defer free_all(context.temp_allocator)
-	body := `{"data":{"channel":{"pinnedChatMessages":{"edges":[{"node":{"pinnedMessage":{"content":{"text":"Giveaway at 9"},"sender":{"displayName":"Mod"}}}}]},` +
-		`"activePredictionEvents":[{"title":"Win?","status":"LOCKED","outcomes":[{"title":"Yes","totalPoints":300},{"title":"No","totalPoints":100}]}]}}}`
+	body := `{"data":{"channel":{"pinnedChatMessages":{"edges":[{"node":{"pinnedMessage":{"content":{"text":"Giveaway at 9 Kappa",` +
+		`"fragments":[{"text":"Giveaway at 9 ","content":null},{"text":"Kappa","content":{"__typename":"Emote","id":"25"}}]},` +
+		`"sender":{"login":"mod","displayName":"Mod","chatColor":"#00FF7F","displayBadges":[{"setID":"moderator","version":"1"}]}}}}]},` +
+		`"activePredictionEvents":[{"title":"Win?","status":"LOCKED","outcomes":[{"title":"Yes","totalPoints":300,"color":"BLUE"},{"title":"No","totalPoints":100,"color":"PINK"}]}]}}}`
 	pinned, prediction, _, ok := parse_chat_banner_response(transmute([]byte)body)
+	defer destroy_chat_message(pinned)
+	defer prediction_destroy(&prediction)
 	testing.expect(t, ok)
-	testing.expect_value(t, pinned, "Pinned · Mod: Giveaway at 9")
-	testing.expect_value(t, prediction, "Prediction (locked) · Win?: Yes 75% · No 25%")
+	// The pinned message, as the chat has one: the sender's colour and badges,
+	// and its emotes.
+	testing.expect_value(t, pinned.kind, Chat_Message_Kind.Chat)
+	testing.expect_value(t, pinned.label, "Pinned")
+	testing.expect_value(t, pinned.name, "Mod")
+	testing.expect_value(t, pinned.login, "mod")
+	testing.expect_value(t, pinned.color, Color{0x00, 0xFF, 0x7F, 255})
+	testing.expect_value(t, len(pinned.badges), 1)
+	testing.expect_value(t, pinned.badges[0], "moderator/1")
+	testing.expect_value(t, len(pinned.fragments), 2)
+	testing.expect_value(t, pinned.fragments[0].text, "Giveaway at 9 ")
+	testing.expect_value(t, pinned.fragments[1].kind, Fragment_Kind.Emote)
+	testing.expect_value(t, pinned.fragments[1].url_1x, "https://static-cdn.jtvnw.net/emoticons/v2/25/default/dark/1.0")
+	// The line reads as before, its outcomes in Twitch's blue and pink.
+	line := strings.builder_make(context.temp_allocator)
+	runs := prediction_runs(&prediction)
+	for run in runs {
+		strings.write_string(&line, run.text)
+	}
+	testing.expect_value(t, strings.to_string(line), "Prediction (locked) · Win?: Yes 75% · No 25%")
+	testing.expect_value(t, runs[1].color, PREDICTION_BLUE)
+	testing.expect_value(t, runs[3].color, PREDICTION_PINK)
 	// Nothing going on; a resolved prediction no longer shows.
 	chatters: int
+	destroy_chat_message(pinned)
+	prediction_destroy(&prediction)
 	pinned, prediction, chatters, ok = parse_chat_banner_response(transmute([]byte)string(`{"data":{"channel":{"chatters":{"count":11955},"pinnedChatMessages":{"edges":[]},"activePredictionEvents":[{"title":"Done","status":"RESOLVED","outcomes":[]}]}}}`))
 	testing.expect(t, ok)
-	testing.expect_value(t, pinned, "")
-	testing.expect_value(t, prediction, "")
+	testing.expect_value(t, len(pinned.fragments), 0)
+	testing.expect_value(t, len(prediction.outcomes), 0)
 	testing.expect_value(t, chatters, 11955)
 }
 
@@ -554,7 +580,7 @@ polls_are_read :: proc(t: ^testing.T) {
 	testing.expect(t, !ok)
 
 	one := Poll{choices = make([dynamic]Poll_Choice, context.temp_allocator)}
-	append(&one.choices, Poll_Choice{"A", 1})
+	append(&one.choices, Poll_Choice{title = "A", votes = 1})
 	testing.expect_value(t, poll_status(&one, 125_000), "2:05 left · 1 vote")
 	testing.expect_value(t, poll_status(&one, -300), "Ending · 1 vote")
 }

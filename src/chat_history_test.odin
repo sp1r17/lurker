@@ -133,3 +133,23 @@ hidden_part_of_a_message_isnt_clickable :: proc(t: ^testing.T) {
 	_, below := chat_view_message_at(&v, 150, 110)
 	testing.expect(t, below)
 }
+
+// The banner shows a pinned message's first lines: their height comes from where
+// the layout centred each line's items, an emote's line being taller.
+@(test)
+message_lines_are_measured :: proc(t: ^testing.T) {
+	l: Message_Layout
+	defer delete(l.items)
+	l.height = 70
+	// A 20 tall line, then 30 tall with a 28 tall emote beside text, then 20.
+	append(&l.items, Layout_Item{rect = {0, 0, 40, 20}}, Layout_Item{rect = {50, 0, 30, 20}})
+	append(&l.items, Layout_Item{rect = {0, 25, 40, 20}}, Layout_Item{rect = {50, 21, 28, 28}})
+	append(&l.items, Layout_Item{rect = {0, 50, 40, 20}})
+	height, lines := message_lines_height(&l, 1)
+	testing.expect_value(t, lines, 3)
+	testing.expect_value(t, height, 20)
+	height, _ = message_lines_height(&l, 2)
+	testing.expect_value(t, height, 50)
+	height, _ = message_lines_height(&l, 6)
+	testing.expect_value(t, height, 70)
+}
