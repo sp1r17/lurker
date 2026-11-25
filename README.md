@@ -21,7 +21,7 @@ pre-roll or mid-roll ads.
 ## Features
 
 - Browse followed channels (live and offline), top streams and categories, and
-  search channels and categories
+  search channels and categories; reruns their channels tag as such are marked
 - Chat with 7TV, BTTV and FFZ emotes, badges, replies and an emote picker; open
   other channels' chats as splits beside the video
 - Recent chat history on joining, clickable links, reply threads (click a reply's

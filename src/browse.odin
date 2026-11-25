@@ -40,6 +40,8 @@ BROWSE_TEXT :: Color{0xef, 0xef, 0xf1, 255}
 BROWSE_DIM_TEXT :: Color{0xad, 0xad, 0xb8, 255}
 BROWSE_ACCENT :: Color{0xbf, 0x94, 0xff, 255}
 LIVE_RED :: Color{0xeb, 0x04, 0x00, 255}
+// A rerun's dot, where a live stream's is red.
+RERUN_GREY :: Color{0x9a, 0x9a, 0xa2, 255}
 VIEWERS_BACKGROUND :: Color{0, 0, 0, 180}
 
 Browse_State :: enum {
@@ -1416,8 +1418,17 @@ draw_stream_list :: proc(app: ^App, l: ^Stream_List, content: Rect, empty_messag
 		inset := 6 * scale
 		badge := Rect{thumb.x + inset, thumb.y + thumb.h - inset - lh_text - 4 * scale, dot + 12 * scale + vw, lh_text + 4 * scale}
 		draw_rect(r, badge, VIEWERS_BACKGROUND)
-		draw_rect(r, {badge.x + 5 * scale, badge.y + (badge.h - dot) / 2, dot, dot}, LIVE_RED)
+		// A rerun isn't live, though Twitch lists it so: its dot is grey, and it's
+		// labelled over the top right (the top left has the language badge).
+		draw_rect(r, {badge.x + 5 * scale, badge.y + (badge.h - dot) / 2, dot, dot}, RERUN_GREY if s.rerun else LIVE_RED)
 		draw_text(r, .Regular, text_size, badge.x + dot + 9 * scale, badge.y + 2 * scale, viewers, BROWSE_TEXT)
+		if s.rerun {
+			label := "RERUN"
+			lw := text_width(r, .Bold, text_size, label)
+			tag := Rect{thumb.x + thumb.w - inset - lw - 12 * scale, thumb.y + inset, lw + 12 * scale, lh_text + 4 * scale}
+			draw_rect(r, tag, VIEWERS_BACKGROUND)
+			draw_text(r, .Bold, text_size, tag.x + 6 * scale, tag.y + 2 * scale, label, BROWSE_TEXT)
+		}
 		// How long it's been live, over the bottom right; redrawn as the minutes
 		// go by.
 		if uptime, next_ms, ok := format_card_uptime(s.started_at, now); ok {
