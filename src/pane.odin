@@ -23,6 +23,8 @@ Chat_Pane :: struct {
 	delayed:       [dynamic]Chat_Message,
 	// The channel's own emotes and badges.
 	emotes:        Emotes,
+	// Its channel points rewards' names (rewards.odin).
+	rewards:       Rewards,
 	// The channel's user ID, once the chat has joined.
 	room_id:       string,
 	boxes:         [Box]Text_Input,
@@ -85,6 +87,7 @@ pane_new :: proc(app: ^App) -> ^Chat_Pane {
 	p := new(Chat_Pane)
 	p.id = app.next_pane_id
 	p.view.emotes = &p.emotes
+	p.view.rewards = &p.rewards
 	p.view.rules = &app.layout.chat
 	return p
 }
@@ -112,6 +115,7 @@ pane_destroy :: proc(app: ^App, p: ^Chat_Pane) {
 	chat_view_destroy(&p.view)
 	chat_delay_destroy(p)
 	emotes_destroy(&p.emotes)
+	rewards_destroy(&p.rewards)
 	for &ti in p.boxes {
 		input_destroy(&ti)
 	}
@@ -158,6 +162,7 @@ pane_chat_arrived :: proc(app: ^App, p: ^Chat_Pane) {
 	for source in Emote_Source.Channel_7TV ..= Emote_Source.Channel_FFZ {
 		emotes_request_set(&app.assets.jobs, source, room_id, p.id)
 	}
+	rewards_request(app, p)
 	if app.signed_in {
 		emotes_request_badges(&app.assets.jobs, app.client_id, app.auth, room_id, p.id)
 	}

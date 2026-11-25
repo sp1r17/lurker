@@ -299,6 +299,25 @@ irc_chat_messages :: proc(msg: Irc_Message, out: ^[dynamic]Chat_Message, history
 	case "PRIVMSG":
 		append(out, privmsg_to_chat(msg))
 	case "USERNOTICE":
+		// An announcement: the moderator's message, marked out in its colour.
+		if kind, _ := irc_tag(msg, "msg-id"); kind == "announcement" && len(msg.params) > 1 {
+			m := privmsg_to_chat(msg)
+			color, _ := irc_tag(msg, "msg-param-color")
+			switch color {
+			case "BLUE":
+				m.accent = .Announcement_Blue
+			case "GREEN":
+				m.accent = .Announcement_Green
+			case "ORANGE":
+				m.accent = .Announcement_Orange
+			case:
+				m.accent = .Announcement_Purple
+			}
+			delete(m.label)
+			m.label = strings.clone("Announcement")
+			append(out, m)
+			break
+		}
 		// Subs, gifts, raids: Twitch's own wording, then the user's message if any.
 		if text, has_text := irc_tag(msg, "system-msg"); has_text {
 			append(out, system_message(text))

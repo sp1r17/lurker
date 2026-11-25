@@ -104,7 +104,7 @@ Chat, catching up with Chatterino:
 - A sound and a flashing taskbar entry on mentions and highlight phrases, each
   optional (done)
 - Messages sent with a channel point reward marked with the reward's name, and
-  announcements in their color
+  announcements in their color (done)
 - Polls above the chat, as predictions are
 - Highlighting everyone's messages from chosen people or with a chosen badge
   (VIPs, subscribers...), each in a color of its own; highlight phrases as
