@@ -103,6 +103,11 @@ Chat_Rules :: struct {
 	still_emotes:    bool,
 	// How many are in the watched channel's chat, above it.
 	chatter_count:   bool,
+	// Not showing the pinned message, the prediction or the poll above the
+	// watched channel's chat (chat_banner.odin).
+	pinned_off:      bool,
+	prediction_off:  bool,
+	poll_off:        bool,
 }
 
 // Chat bots common enough to hide by name (Chat_Rules.hide_bots), lowercase.
