@@ -105,3 +105,31 @@ more_bar_covers_messages :: proc(t: ^testing.T) {
 	testing.expect(t, found)
 	testing.expect_value(t, login, "someone")
 }
+
+// The top message can be partly under the header or the pinned message: a click
+// there is theirs, not the hidden part of the message's.
+@(test)
+hidden_part_of_a_message_isnt_clickable :: proc(t: ^testing.T) {
+	v: Chat_View
+	defer chat_view_destroy(&v)
+	// The messages show from y = 100 down; this one starts at 80.
+	v.visible = {0, 100, 300, 400}
+	name := Rect{10, 82, 60, 16}
+	link := Rect{80, 104, 90, 16}
+	append(&v.name_hits, Name_Hit{name, "someone"})
+	append(&v.link_hits, Link_Hit{link, "https://example.com"})
+	append(&v.reply_hits, name)
+	append(&v.message_hits, Message_Hit{rect = {0, 80, 300, 40}, index = 0})
+	append(&v.messages, Chat_Message{})
+
+	_, on_name := chat_view_name_at(&v, 20, 90)
+	testing.expect(t, !on_name)
+	testing.expect(t, !chat_view_reply_at(&v, 20, 90))
+	_, on_message := chat_view_message_at(&v, 150, 90)
+	testing.expect(t, !on_message)
+	// What shows is still clickable.
+	_, on_link := chat_view_link_at(&v, 100, 110)
+	testing.expect(t, on_link)
+	_, below := chat_view_message_at(&v, 150, 110)
+	testing.expect(t, below)
+}

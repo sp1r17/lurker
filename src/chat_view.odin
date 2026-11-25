@@ -216,6 +216,10 @@ Chat_View :: struct {
 	reply_hits:   [dynamic]Rect,
 	// How many messages matched the filter.
 	matches:    int,
+	// Set while drawing: where the messages show. The top one can be partly
+	// under what's above (the header, the pinned message): its hidden part isn't
+	// clickable.
+	visible:    Rect,
 }
 
 Name_Hit :: struct {
@@ -502,9 +506,16 @@ chat_view_under_bar :: proc(v: ^Chat_View, x, y: f32) -> bool {
 	return v.more_bar.w > 0 && in_rect(v.more_bar, x, y)
 }
 
+// Whether a click at (x, y) can't be on a message: outside where they show, or on
+// the "more messages below" bar.
+@(private = "file")
+chat_view_misses :: proc(v: ^Chat_View, x, y: f32) -> bool {
+	return v.visible.w > 0 && !in_rect(v.visible, x, y) || chat_view_under_bar(v, x, y)
+}
+
 // The login of the name at (x, y), if a name is drawn there.
 chat_view_name_at :: proc(v: ^Chat_View, x, y: f32) -> (login: string, found: bool) {
-	if chat_view_under_bar(v, x, y) {
+	if chat_view_misses(v, x, y) {
 		return "", false
 	}
 	for hit in v.name_hits {
@@ -517,7 +528,7 @@ chat_view_name_at :: proc(v: ^Chat_View, x, y: f32) -> (login: string, found: bo
 
 // The message at (x, y), if one is drawn there.
 chat_view_message_at :: proc(v: ^Chat_View, x, y: f32) -> (m: ^Chat_Message, found: bool) {
-	if chat_view_under_bar(v, x, y) {
+	if chat_view_misses(v, x, y) {
 		return nil, false
 	}
 	for hit in v.message_hits {
@@ -535,7 +546,7 @@ chat_view_scroll :: proc(v: ^Chat_View, wheel_y, scale: f32) {
 // The address of the link at (x, y), if one is drawn there. Allocated with the
 // temp allocator.
 chat_view_link_at :: proc(v: ^Chat_View, x, y: f32) -> (url: string, found: bool) {
-	if chat_view_under_bar(v, x, y) {
+	if chat_view_misses(v, x, y) {
 		return "", false
 	}
 	for hit in v.link_hits {
@@ -549,7 +560,7 @@ chat_view_link_at :: proc(v: ^Chat_View, x, y: f32) -> (url: string, found: bool
 
 // Whether (x, y) is on a reply's "Replying to" line.
 chat_view_reply_at :: proc(v: ^Chat_View, x, y: f32) -> bool {
-	if chat_view_under_bar(v, x, y) {
+	if chat_view_misses(v, x, y) {
 		return false
 	}
 	for rect in v.reply_hits {
@@ -583,6 +594,7 @@ draw_chat_view :: proc(a: ^Assets, v: ^Chat_View, rect: Rect, scale: f32, filter
 	clear(&v.message_hits)
 	clear(&v.link_hits)
 	clear(&v.reply_hits)
+	v.visible = rect
 	clip_begin(r, rect)
 	// Messages are laid out from the newest upwards; `bottom` is the next one's
 	// bottom edge.

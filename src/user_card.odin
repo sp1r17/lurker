@@ -322,6 +322,7 @@ draw_user_card :: proc(app: ^App) {
 	clear(&c.hits.message_hits)
 	clear(&c.hits.link_hits)
 	clear(&c.hits.reply_hits)
+	c.hits.visible = c.list_rect
 	clear(&c.rows)
 	if len(shown) == 0 {
 		empty := "Its messages are gone from this chat." if in_thread else "None in this chat yet."
