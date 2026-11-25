@@ -212,6 +212,7 @@ settings are stored in `~/.config/lurker` (`%APPDATA%\lurker` on Windows).
 | Ctrl+T / Ctrl+W | Open / close a chat split |
 | Ctrl+, | Settings (when browsing) |
 | Ctrl+F | Search the chat, or channels when browsing |
+| Ctrl+C | Copy chat text selected by dragging over it |
 | / | Search channels |
 | Ctrl+= / Ctrl+- / Ctrl+0, or Ctrl+scroll | Text size |
 | Esc, or the mouse's back button | Back |
@@ -221,7 +222,8 @@ settings are stored in `~/.config/lurker` (`%APPDATA%\lurker` on Windows).
 On macOS, use Cmd instead of Ctrl, and Option+Left / Right to move by word.
 
 In chat, Tab completes emote and user names, `:` followed by part of a name opens
-the emote picker, and right-clicking a message replies to it.
+the emote picker, dragging over messages selects their text, and right-clicking a
+message offers to reply to it or copy it.
 
 ## Configuration
 

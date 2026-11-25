@@ -100,7 +100,7 @@ New:
 Chat, catching up with Chatterino:
 
 - Selecting and copying chat text, and Copy message on a message's right-click
-  menu
+  menu (done)
 - A sound and a flashing taskbar entry on mentions and highlight phrases, each
   optional
 - Messages sent with a channel point reward marked with the reward's name, and

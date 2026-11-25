@@ -562,7 +562,7 @@ user_card_right_click :: proc(app: ^App, x, y: f32) -> bool {
 	}
 	if p := find_pane(app, c.pane); p != nil {
 		if _, m, found := card_message_at(c, p, x, y); found {
-			pane_reply_start(app, p, m)
+			message_menu_open(app, p, m, x, y)
 		}
 	}
 	return true
