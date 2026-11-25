@@ -17,6 +17,10 @@ import sdl "vendor:sdl3"
 // updates itself: the installer is downloaded, checked against the release's
 // SHA256SUMS and run silently, and reopens Lurker. Elsewhere the release page opens.
 LATEST_RELEASE_URL :: "https://api.github.com/repos/sp1r17/lurker/releases/latest"
+// Where a release's page and downloads must be: anything else in the answer is
+// ignored, so a changed or forged one can't send Lurker (or the browser) elsewhere.
+RELEASE_PAGE_PREFIX :: "https://github.com/sp1r17/lurker/releases/tag/"
+RELEASE_DOWNLOAD_PREFIX :: "https://github.com/sp1r17/lurker/releases/download/"
 
 // The Ed25519 public key whose signature (SHA256SUMS.sig) SHA256SUMS must carry
 // before an installer it lists is run, so that a release published by anyone
@@ -153,6 +157,12 @@ run_update_check_job :: proc(job: ^Job) {
 	p.ok = parse_latest_release(res.body, p)
 }
 
+// Whether `url` is under `prefix`, without ".." to climb out of it.
+@(private = "file")
+release_url :: proc(url, prefix: string) -> bool {
+	return strings.has_prefix(url, prefix) && !strings.contains(url, "..") && !strings.contains_any(url, "\\ ")
+}
+
 // The version, page and Windows downloads of GitHub's latest release, into `p`.
 parse_latest_release :: proc(body: []byte, p: ^Update_Check_Job) -> bool {
 	Asset :: struct {
@@ -168,13 +178,16 @@ parse_latest_release :: proc(body: []byte, p: ^Update_Check_Job) -> bool {
 	if json.unmarshal(body, &r, allocator = context.temp_allocator) != nil {
 		return false
 	}
-	if _, ok := parse_version(r.tag_name); !ok || !strings.has_prefix(r.html_url, "https://github.com/") {
+	if _, ok := parse_version(r.tag_name); !ok || !release_url(r.html_url, RELEASE_PAGE_PREFIX) {
 		return false
 	}
 	p.version = strings.clone(strings.trim_prefix(r.tag_name, "v"))
 	p.page = strings.clone(r.html_url)
 	setup := fmt.tprintf("lurker-%s-x86_64-setup.exe", p.version)
 	for a in r.assets {
+		if !release_url(a.browser_download_url, RELEASE_DOWNLOAD_PREFIX) {
+			continue
+		}
 		switch a.name {
 		case setup:
 			p.installer = strings.clone(a.browser_download_url)
