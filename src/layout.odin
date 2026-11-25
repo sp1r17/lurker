@@ -177,6 +177,8 @@ parse_layout :: proc(data: []byte, l: ^Layout) -> bool {
 		notify_chosen:     []string,
 		highlights:  []string,
 		ignored:     []string,
+		chat_highlight_people: []Saved_Highlight,
+		chat_highlight_badges: []Saved_Highlight,
 		chat_timestamps:      bool,
 		chat_highlight_staff: bool,
 		chat_hide_bots:       bool,
@@ -290,7 +292,22 @@ parse_layout :: proc(data: []byte, l: ^Layout) -> bool {
 	l.chat_overlay_background = enum_from_name(Chat_Overlay_Background, saved.chat_overlay_background, Chat_Overlay_Background.Dim)
 	l.chat_overlay_box = saved.chat_overlay_box
 	for phrase in saved.highlights {
-		rule_add(&l.chat.highlights, strings.to_lower(strings.trim_space(phrase), context.temp_allocator))
+		rule_add(&l.chat.highlights, normalize_phrase(phrase))
+	}
+	for e in saved.chat_highlight_people {
+		login := strings.to_lower(e.name, context.temp_allocator)
+		if valid_login(login) {
+			highlight_entry_add(&l.chat.people, login)
+			last := &l.chat.people[len(l.chat.people) - 1]
+			last.color = enum_from_name(Highlight_Color, e.color, last.color)
+		}
+	}
+	for e in saved.chat_highlight_badges {
+		if set := badge_set_name(e.name); set != "" {
+			highlight_entry_add(&l.chat.badges, set)
+			last := &l.chat.badges[len(l.chat.badges) - 1]
+			last.color = enum_from_name(Highlight_Color, e.color, last.color)
+		}
 	}
 	for login in saved.ignored {
 		if valid_login(login) {
@@ -354,6 +371,8 @@ layout_save :: proc(l: ^Layout) {
 		notify_chosen:     []string,
 		highlights:  []string,
 		ignored:     []string,
+		chat_highlight_people: []Saved_Highlight,
+		chat_highlight_badges: []Saved_Highlight,
 		chat_timestamps:      bool,
 		chat_highlight_staff: bool,
 		chat_hide_bots:       bool,
@@ -372,7 +391,7 @@ layout_save :: proc(l: ^Layout) {
 		skipped_version:   string,
 		language:          string,
 		language_hide:     bool,
-	}{LAYOUT_VERSION, l.splits, l.volume, l.muted, quality_name(l.quality), l.low_latency, l.raids_off, l.stats, l.chat_sync, l.latency_buffer_ms, l.max_height, fmt.tprint(l.video_enhancement), l.next_clip_off, l.points_off, l.normalize_audio, l.auto_quality_off, l.bonus_off, l.drops_off, l.audio_device, l.audio_delay_ms, l.stream_sort, l.start_view, l.hide_chat, l.text_size, l.notifications_off, l.notify_only, l.notify_changes, l.notify_muted[:], l.notify_chosen[:], l.chat.highlights[:], l.chat.ignored[:], l.chat.timestamps, l.chat.highlight_staff, l.chat.hide_bots, l.chat.alternate_lines, l.chat.hide_badges, l.chat.highlight_own, l.chat.separators, l.chat.still_emotes, l.chat.chatter_count, l.chat_overlay, fmt.tprint(l.chat_overlay_position), fmt.tprint(l.chat_overlay_size), fmt.tprint(l.chat_overlay_background), l.chat_overlay_box, l.update_checks_off, l.skipped_version, l.language, l.language_hide}
+	}{LAYOUT_VERSION, l.splits, l.volume, l.muted, quality_name(l.quality), l.low_latency, l.raids_off, l.stats, l.chat_sync, l.latency_buffer_ms, l.max_height, fmt.tprint(l.video_enhancement), l.next_clip_off, l.points_off, l.normalize_audio, l.auto_quality_off, l.bonus_off, l.drops_off, l.audio_device, l.audio_delay_ms, l.stream_sort, l.start_view, l.hide_chat, l.text_size, l.notifications_off, l.notify_only, l.notify_changes, l.notify_muted[:], l.notify_chosen[:], l.chat.highlights[:], l.chat.ignored[:], saved_highlights(l.chat.people[:]), saved_highlights(l.chat.badges[:]), l.chat.timestamps, l.chat.highlight_staff, l.chat.hide_bots, l.chat.alternate_lines, l.chat.hide_badges, l.chat.highlight_own, l.chat.separators, l.chat.still_emotes, l.chat.chatter_count, l.chat_overlay, fmt.tprint(l.chat_overlay_position), fmt.tprint(l.chat_overlay_size), fmt.tprint(l.chat_overlay_background), l.chat_overlay_box, l.update_checks_off, l.skipped_version, l.language, l.language_hide}
 	data, err := json.marshal(saved, {pretty = true, use_enum_names = true}, context.temp_allocator)
 	if err != nil {
 		return
@@ -413,4 +432,20 @@ layout_remember :: proc(app: ^App) {
 layout_splits :: proc(app: ^App, channel: string) -> []string {
 	list, found := app.layout.splits[channel]
 	return list[:] if found else nil
+}
+
+// A chosen person or badge as saved: the colour by name, so a colour added later
+// doesn't shift the others.
+Saved_Highlight :: struct {
+	name:  string,
+	color: string,
+}
+
+@(private = "file")
+saved_highlights :: proc(list: []Highlight_Entry) -> []Saved_Highlight {
+	out := make([]Saved_Highlight, len(list), context.temp_allocator)
+	for e, i in list {
+		out[i] = {e.name, fmt.tprint(e.color)}
+	}
+	return out
 }

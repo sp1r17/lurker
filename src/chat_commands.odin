@@ -15,7 +15,7 @@ pane_command :: proc(app: ^App, p: ^Chat_Pane, text: string) -> bool {
 	rules := &app.layout.chat
 	switch name {
 	case "/highlight":
-		phrase := strings.to_lower(arg, context.temp_allocator)
+		phrase := normalize_phrase(arg)
 		if phrase == "" {
 			pane_notice(app, p, "Highlight messages with a word or phrase: /highlight phrase")
 			return true
@@ -24,7 +24,7 @@ pane_command :: proc(app: ^App, p: ^Chat_Pane, text: string) -> bool {
 		layout_save(&app.layout)
 		pane_notice(app, p, fmt.tprintf("Messages with \"%s\" are highlighted now.", phrase))
 	case "/unhighlight":
-		phrase := strings.to_lower(arg, context.temp_allocator)
+		phrase := normalize_phrase(arg)
 		if !rule_remove(&rules.highlights, phrase) {
 			pane_notice(app, p, fmt.tprintf("\"%s\" isn't highlighted. /highlights lists what is.", phrase))
 			return true

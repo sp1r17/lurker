@@ -28,7 +28,8 @@ pre-roll or mid-roll ads.
   "Replying to" line), and the chat's modes (slow, subscribers only...) above the
   chat box
 - Mentions are highlighted, with a count of unread ones on each chat; add your own
-  highlight phrases and hide people's messages, in Settings or with
+  highlight phrases (or `/regular expressions/`), highlight chosen people or
+  badges in colours of their own, and hide people's messages, in Settings or with
   `/highlight` and `/ignore`
 - User cards with everything someone said in the chat; moderators can time out,
   ban and delete from them, or with `/timeout`, `/ban` and `/clear`

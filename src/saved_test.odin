@@ -73,6 +73,10 @@ layout_saves_its_version_and_reads_back :: proc(t: ^testing.T) {
 	l.volume = 42
 	l.low_latency = true
 	rule_add(&l.chat.highlights, "giveaway")
+	rule_add(&l.chat.highlights, normalize_phrase("/Clip ?It/i"))
+	highlight_entry_add(&l.chat.people, "alice")
+	highlight_entry_add(&l.chat.badges, "vip")
+	highlight_entry_recolor(&l.chat.badges, 0)
 	layout_save(&l)
 	version, _ := saved_version(transmute([]byte)read("layout.json"))
 	testing.expect_value(t, version, LAYOUT_VERSION)
@@ -81,7 +85,13 @@ layout_saves_its_version_and_reads_back :: proc(t: ^testing.T) {
 	defer layout_destroy(&again)
 	testing.expect_value(t, again.volume, 42)
 	testing.expect(t, again.low_latency)
-	testing.expect_value(t, len(again.chat.highlights), 1)
+	testing.expect_value(t, len(again.chat.highlights), 2)
+	// An expression keeps its case, and the colours their names.
+	testing.expect_value(t, again.chat.highlights[1], "/Clip ?It/i")
+	testing.expect_value(t, len(again.chat.people), 1)
+	testing.expect_value(t, again.chat.people[0].name, "alice")
+	testing.expect_value(t, len(again.chat.badges), 1)
+	testing.expect_value(t, again.chat.badges[0].color, Highlight_Color.Orange)
 	// Only the file itself: the temporary one was renamed into place.
 	entries, _ := os.read_all_directory_by_path(dir, context.temp_allocator)
 	testing.expect_value(t, len(entries), 1)
