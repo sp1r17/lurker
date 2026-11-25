@@ -82,10 +82,11 @@ chat_delay_tick :: proc(app: ^App) -> (wait_ms: int) {
 	shown := make([dynamic]Chat_Message, context.temp_allocator)
 	append(&shown, ..p.delayed[:due])
 	remove_range(&p.delayed, 0, due)
-	added := chat_view_add(&p.view, &app.assets, app.scale, pane_text_width(app, p), shown[:], app.auth.login if app.signed_in else "")
+	added, alerts := chat_view_add(&p.view, &app.assets, app.scale, pane_text_width(app, p), shown[:], app.auth.login if app.signed_in else "")
 	if !pane_seen(app, p) {
 		p.unread_mentions += added
 	}
+	mention_alert(app, alerts)
 	return 0
 }
 

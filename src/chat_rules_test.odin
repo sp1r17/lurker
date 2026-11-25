@@ -41,7 +41,7 @@ rules_highlight_and_ignore :: proc(t: ^testing.T) {
 		chat("@id=3 :bob!bob@x PRIVMSG #chan :hi"),
 		chat("@id=4 :me!me@x PRIVMSG #chan :my giveaway"),
 	}
-	added := chat_view_add(&v, &assets, 1, 300, incoming, "me")
+	added, _ := chat_view_add(&v, &assets, 1, 300, incoming, "me")
 	testing.expect_value(t, len(v.messages), 3)
 	testing.expect(t, v.messages[0].mention)
 	testing.expect(t, !v.messages[1].mention)
@@ -133,4 +133,19 @@ old_messages_go_in_batches :: proc(t: ^testing.T) {
 	chat_view_remove_user(&v, "bob")
 	testing.expect_value(t, len(v.messages), n - 2)
 	testing.expect_value(t, v.messages[len(v.messages) - 1].id, "x2")
+}
+
+@(test)
+only_live_mentions_alert :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	assets: Assets
+	defer emotes_destroy(&assets.emotes)
+	v: Chat_View
+	defer chat_view_destroy(&v)
+	// Said before the chat joined: counted, but no sound for it.
+	old := chat("@id=1 :alice!alice@x PRIVMSG #chan :hi @me")
+	old.historical = true
+	added, alerts := chat_view_add(&v, &assets, 1, 300, []Chat_Message{old, chat("@id=2 :bob!bob@x PRIVMSG #chan :@me hello"), chat("@id=3 :carol!carol@x PRIVMSG #chan :hi")}, "me")
+	testing.expect_value(t, added, 2)
+	testing.expect_value(t, alerts, 1)
 }

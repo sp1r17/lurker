@@ -103,6 +103,10 @@ Chat_Rules :: struct {
 	still_emotes:    bool,
 	// How many are in the watched channel's chat, above it.
 	chatter_count:   bool,
+	// Mentions and highlight phrases play a sound, and flash Lurker in the
+	// taskbar while it isn't focused (mention_alert.odin).
+	mention_sound:   bool,
+	mention_flash:   bool,
 }
 
 // Chat bots common enough to hide by name (Chat_Rules.hide_bots), lowercase.
@@ -256,8 +260,10 @@ chat_view_destroy :: proc(v: ^Chat_View) {
 // what they remove; messages mentioning `self_login`, or a highlight phrase, are
 // highlighted, and ignored people's are dropped. When the view
 // is scrolled up, it moves by the new messages' height so the messages being read
-// stay put. Returns how many of them mention `self_login`.
-chat_view_add :: proc(v: ^Chat_View, a: ^Assets, scale, width: f32, new_messages: []Chat_Message, self_login := "") -> (mentions_added: int) {
+// stay put. Returns how many of them mention `self_login` (or have a highlight
+// phrase), and how many of those were said just now rather than before the chat
+// joined, to alert about.
+chat_view_add :: proc(v: ^Chat_View, a: ^Assets, scale, width: f32, new_messages: []Chat_Message, self_login := "") -> (mentions_added, alerts: int) {
 	for m in new_messages {
 		if v.rules != nil && m.kind != .System && slice.contains(v.rules.ignored[:], m.login) {
 			destroy_chat_message(m)
@@ -283,6 +289,9 @@ chat_view_add :: proc(v: ^Chat_View, a: ^Assets, scale, width: f32, new_messages
 		added.mention = mentions(added, self_login) || (!mine && highlighted(added, v.rules))
 		if added.mention {
 			mentions_added += 1
+			if !added.historical {
+				alerts += 1
+			}
 		}
 		if v.scroll > 0 {
 			v.scroll += message_layout(a, v.emotes, added, scale, width).height + CHAT_MESSAGE_GAP * scale
