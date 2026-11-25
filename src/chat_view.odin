@@ -89,8 +89,15 @@ Assets :: struct {
 // and people whose messages are hidden (lowercase and owned); and how messages
 // are shown.
 Chat_Rules :: struct {
+	// Phrases (chat_highlights.odin): lowercase words, or /regular expressions/.
 	highlights:      [dynamic]string,
 	ignored:         [dynamic]string,
+	// Everyone's messages from these people, or with these badges, highlighted
+	// in each one's colour (chat_highlights.odin).
+	people:          [dynamic]Highlight_Entry,
+	badges:          [dynamic]Highlight_Entry,
+	// The highlights made ready to match, kept in step with them.
+	compiled:        [dynamic]Compiled_Phrase,
 	// The time each was sent, before it.
 	timestamps:      bool,
 	// The streamer's and moderators' messages, marked out.
@@ -207,6 +214,10 @@ chat_rules_destroy :: proc(r: ^Chat_Rules) {
 		delete(s)
 	}
 	delete(r.ignored)
+	highlight_entries_destroy(&r.people)
+	highlight_entries_destroy(&r.badges)
+	compiled_phrases_destroy(r)
+	delete(r.compiled)
 }
 
 // The scrolling list of chat messages. `scroll` is how far the view is above the
@@ -402,21 +413,6 @@ chat_view_remove_user :: proc(v: ^Chat_View, login: string) {
 	}
 	resize(&v.messages, kept)
 	v.selection = {}
-}
-
-// Whether the message's text has one of the user's highlight phrases, as whole
-// words, ignoring case.
-highlighted :: proc(m: ^Chat_Message, rules: ^Chat_Rules) -> bool {
-	if rules == nil || len(rules.highlights) == 0 || m.kind == .System {
-		return false
-	}
-	text := strings.to_lower(message_plain_text(m), context.temp_allocator)
-	for phrase in rules.highlights {
-		if contains_words(text, phrase) {
-			return true
-		}
-	}
-	return false
 }
 
 // Whether `phrase` is in `text` with no letter or digit right before or after it.
@@ -657,9 +653,12 @@ draw_chat_view :: proc(a: ^Assets, v: ^Chat_View, rect: Rect, scale: f32, filter
 				}
 			}
 			staff, is_staff := staff_background(m)
+			chosen, is_chosen := custom_highlight(m, v.rules)
 			switch {
 			case m.mention:
 				draw_rect(r, line, CHAT_MENTION_BACKGROUND)
+			case is_chosen:
+				draw_rect(r, line, chosen)
 			case m.accent != .None:
 				draw_rect(r, line, CHAT_ACCENT_BACKGROUNDS[m.accent])
 			case v.rules != nil && v.rules.highlight_own && m.own:

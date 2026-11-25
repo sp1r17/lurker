@@ -54,6 +54,9 @@ Setting_Choice :: enum {
 // entry to take it out.
 Setting_List :: enum {
 	Highlights,
+	// Chosen people and badges, each in a colour (chat_highlights.odin).
+	Highlight_People,
+	Highlight_Badges,
 	Ignored,
 	Blocked_Channels,
 	Blocked_Categories,
@@ -71,6 +74,8 @@ Settings_Page :: struct {
 	// Set while drawing.
 	boxes:      [Setting_List]Rect,
 	remove:     [Setting_List][dynamic]Rect,
+	// Each chosen person's or badge's colour, clicked to change it.
+	swatches:   [Setting_List][dynamic]Rect,
 	switches:   [Setting_Switch]Rect,
 	choices:    [Setting_Choice]Rect,
 	smaller:    Rect,
@@ -100,6 +105,7 @@ settings_page_destroy :: proc(p: ^Settings_Page) {
 	for list in Setting_List {
 		input_destroy(&p.inputs[list])
 		delete(p.remove[list])
+		delete(p.swatches[list])
 	}
 }
 
@@ -189,6 +195,10 @@ settings_entries :: proc(app: ^App, list: Setting_List) -> []string {
 	switch list {
 	case .Highlights:
 		return app.layout.chat.highlights[:]
+	case .Highlight_People:
+		return highlight_entry_names(app.layout.chat.people[:])
+	case .Highlight_Badges:
+		return highlight_entry_names(app.layout.chat.badges[:])
 	case .Ignored:
 		return app.layout.chat.ignored[:]
 	case .Blocked_Channels:
@@ -208,11 +218,27 @@ settings_add :: proc(app: ^App, list: Setting_List, typed: string) -> bool {
 	text := strings.trim_space(typed)
 	switch list {
 	case .Highlights:
-		phrase := strings.to_lower(text, context.temp_allocator)
+		phrase := normalize_phrase(text)
 		if phrase == "" {
 			return false
 		}
 		rule_add(&app.layout.chat.highlights, phrase)
+		layout_save(&app.layout)
+		return true
+	case .Highlight_People:
+		login := strings.to_lower(strings.trim_left(text, "@"), context.temp_allocator)
+		if !valid_login(login) {
+			return false
+		}
+		highlight_entry_add(&app.layout.chat.people, login)
+		layout_save(&app.layout)
+		return true
+	case .Highlight_Badges:
+		set := badge_set_name(text)
+		if set == "" {
+			return false
+		}
+		highlight_entry_add(&app.layout.chat.badges, set)
 		layout_save(&app.layout)
 		return true
 	case .Ignored:
@@ -249,6 +275,12 @@ settings_remove :: proc(app: ^App, list: Setting_List, i: int) {
 	switch list {
 	case .Highlights:
 		rule_remove(&app.layout.chat.highlights, strings.clone(entries[i], context.temp_allocator))
+		layout_save(&app.layout)
+	case .Highlight_People:
+		highlight_entry_remove(&app.layout.chat.people, i)
+		layout_save(&app.layout)
+	case .Highlight_Badges:
+		highlight_entry_remove(&app.layout.chat.badges, i)
 		layout_save(&app.layout)
 	case .Ignored:
 		chat_unignore(app, strings.clone(entries[i], context.temp_allocator))
@@ -589,6 +621,13 @@ settings_click :: proc(app: ^App, x, y: f32) -> bool {
 				return true
 			}
 		}
+		for rect, i in p.swatches[list] {
+			if rect.w > 0 && in_rect(rect, x, y) {
+				highlight_entry_recolor(&app.layout.chat.people if list == .Highlight_People else &app.layout.chat.badges, i)
+				layout_save(&app.layout)
+				return true
+			}
+		}
 	}
 	return false
 }
@@ -725,7 +764,9 @@ draw_settings :: proc(app: ^App, content: Rect) {
 	lists := [Setting_List]struct {
 		label, hint, none, tip: string,
 	} {
-		.Highlights         = {"Highlight phrases", "Add a word or phrase", "Only mentions of you are highlighted.", "Chat messages with any of these in them stand out, as mentions of you do."},
+		.Highlights         = {"Highlight phrases", "Add a word or phrase", "Only mentions of you are highlighted.", "Chat messages with any of these in them stand out, as mentions of you do. Whole words, ignoring case; or write a regular expression between slashes, /like this/, with an i after it to ignore case."},
+		.Highlight_People   = {"Highlighted people", "Add a login", "No one is highlighted.", "Everyone's messages from these people stand out, each in its own colour. Click a colour to change it."},
+		.Highlight_Badges   = {"Highlighted badges", "vip, sub, mod, founder...", "No badges are highlighted.", "Messages from everyone with one of these badges stand out, each in its own colour. Click a colour to change it."},
 		.Ignored            = {"Ignored users", "Add a login", "No one is ignored.", "Messages from these people are hidden in every chat."},
 		.Blocked_Channels   = {"Channels", "Block a channel by its login", "No channels blocked.", "Left out of the stream lists, search, your offline follows and live notifications."},
 		.Blocked_Categories = {"Categories", "Block a category by its name", "No categories blocked.", "Left out of the categories, and streams in them out of the stream lists and search."},
@@ -749,7 +790,7 @@ draw_settings :: proc(app: ^App, content: Rect) {
 		{title = "General", switches = general_switches, choices = {.Start_View}, text_size = true},
 		{title = "Streams", switches = {.Low_Latency, .Auto_Quality, .Normalize_Audio, .Follow_Raids, .Next_Clip, .Watch_Points, .Claim_Bonus, .Claim_Drops}, choices = {.Latency_Buffer, .Max_Quality, .Video_Enhancement, .Audio_Device, .Audio_Delay}, language = true},
 		{title = "Live notifications", switches = {.Notify_Changes}, choices = {.Notify_For}, lists = {.Notify_Channels}, notifications = true},
-		{title = "Chat", switches = {.Chat_Sync, .Chat_Timestamps, .Chat_Highlight_Staff, .Chat_Highlight_Own, .Chat_Hide_Bots, .Chat_Hide_Badges, .Chat_Alternate_Lines, .Chat_Separators, .Chat_Still_Emotes, .Chat_Chatter_Count, .Chat_Mention_Sound, .Chat_Mention_Flash, .Chat_Pinned, .Chat_Prediction, .Chat_Poll, .Chat_Overlay}, choices = {.Chat_Overlay_Position, .Chat_Overlay_Size, .Chat_Overlay_Background}, lists = {.Highlights, .Ignored}},
+		{title = "Chat", switches = {.Chat_Sync, .Chat_Timestamps, .Chat_Highlight_Staff, .Chat_Highlight_Own, .Chat_Hide_Bots, .Chat_Hide_Badges, .Chat_Alternate_Lines, .Chat_Separators, .Chat_Still_Emotes, .Chat_Chatter_Count, .Chat_Mention_Sound, .Chat_Mention_Flash, .Chat_Pinned, .Chat_Prediction, .Chat_Poll, .Chat_Overlay}, choices = {.Chat_Overlay_Position, .Chat_Overlay_Size, .Chat_Overlay_Background}, lists = {.Highlights, .Highlight_People, .Highlight_Badges, .Ignored}},
 		{title = "Blocked", lists = {.Blocked_Channels, .Blocked_Categories}},
 		{title = "Account", account = true},
 		{title = "Bug reports", log = true},
@@ -893,6 +934,7 @@ draw_settings :: proc(app: ^App, content: Rect) {
 			}
 			entries := settings_entries(app, list)
 			resize(&p.remove[list], len(entries))
+			resize(&p.swatches[list], len(entries) if list == .Highlight_People || list == .Highlight_Badges else 0)
 			if len(entries) == 0 {
 				draw_text(r, .Regular, text_size, x + row_pad, y, l.none, BROWSE_DIM_TEXT)
 				y += lh_text + row_gap
@@ -901,6 +943,9 @@ draw_settings :: proc(app: ^App, content: Rect) {
 				entry := Rect{x, y, list_w, entry_h}
 				y += entry_h + row_gap
 				p.remove[list][i] = {}
+				if i < len(p.swatches[list]) {
+					p.swatches[list][i] = {}
+				}
 				if !visible(entry, rest) {
 					continue
 				}
@@ -912,6 +957,18 @@ draw_settings :: proc(app: ^App, content: Rect) {
 				draw_rect(r, button, SIGN_IN_BUTTON_HOVER if hovered else SIGN_IN_BUTTON)
 				draw_centered(r, .Bold, text_size, button, label, BROWSE_TEXT)
 				tw := button.x - 12 * scale - (entry.x + row_pad)
+				// A chosen person or badge: its colour, before Remove.
+				if i < len(p.swatches[list]) {
+					colors := app.layout.chat.people[:] if list == .Highlight_People else app.layout.chat.badges[:]
+					side := button.h
+					swatch := Rect{button.x - 10 * scale - side, button.y, side, side}
+					p.swatches[list][i] = swatch
+					if in_rect(swatch, app.mouse.x, app.mouse.y) {
+						draw_rect(r, {swatch.x - 2 * scale, swatch.y - 2 * scale, swatch.w + 4 * scale, swatch.h + 4 * scale}, BROWSE_TEXT)
+					}
+					draw_rect(r, swatch, highlight_swatch(colors[i].color))
+					tw = swatch.x - 12 * scale - (entry.x + row_pad)
+				}
 				draw_text(r, .Bold, name_size, entry.x + row_pad, entry.y + row_pad, fit_text(r, .Bold, name_size, name, tw), BROWSE_TEXT)
 			}
 		}

@@ -108,7 +108,7 @@ Chat, catching up with Chatterino:
 - Polls above the chat, as predictions are (done)
 - Highlighting everyone's messages from chosen people or with a chosen badge
   (VIPs, subscribers...), each in a color of its own; highlight phrases as
-  whole words, with case, or as regular expressions
+  whole words, with case, or as regular expressions (done)
 - Ignoring phrases as well as people, or replacing them with other words
 - Nicknames: your own name for someone, shown in place of theirs
 - Search filters in Ctrl+F: `from:`, `has:link`, `is:mention` and the like
