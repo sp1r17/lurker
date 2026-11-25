@@ -154,6 +154,16 @@ Message_Accent :: enum {
 	Cheer,
 	// A paid, pinned message (Hype Chat).
 	Paid,
+	// Sent with the "Highlight my message" channel points reward.
+	Highlighted,
+	// Sent with a channel's own channel points reward (Chat_Message.reward_id).
+	Reward,
+	// A moderator's announcement, in the colour they chose (Twitch's "primary"
+	// is the channel's colour, which isn't known here: purple, Twitch's own).
+	Announcement_Blue,
+	Announcement_Green,
+	Announcement_Orange,
+	Announcement_Purple,
 }
 
 Fragment_Kind :: enum {
@@ -213,6 +223,8 @@ Chat_Message :: struct {
 	// Why it's marked out ("First message"), shown above it, or "".
 	accent:    Message_Accent,
 	label:     string,
+	// The channel points reward it was sent with (Twitch's ID), or "". Owned.
+	reward_id: string,
 	// For moderation messages: what to clear when this arrives, and whose
 	// (a message ID or a login).
 	clear:     Clear_Kind,
@@ -251,6 +263,7 @@ destroy_chat_message :: proc(m: Chat_Message) {
 	delete(m.reply_parent)
 	delete(m.thread)
 	delete(m.label)
+	delete(m.reward_id)
 	delete(m.source_room)
 	for b in m.badges {
 		delete(b)
@@ -358,6 +371,14 @@ privmsg_to_chat :: proc(msg: Irc_Message) -> Chat_Message {
 	} else if bits, cheer := irc_tag(msg, "bits"); cheer {
 		m.accent = .Cheer
 		m.label = fmt.aprintf("Cheered %s bits", bits)
+	} else if msg_id, _ := irc_tag(msg, "msg-id"); msg_id == "highlighted-message" {
+		m.accent = .Highlighted
+		m.label = strings.clone("Highlighted message")
+	} else if reward, _ := irc_tag(msg, "custom-reward-id"); reward != "" {
+		// Named once the channel's rewards are known (rewards.odin).
+		m.accent = .Reward
+		m.reward_id = strings.clone(reward)
+		m.label = reward_label(nil, reward)
 	} else if first, _ := irc_tag(msg, "first-msg"); first == "1" {
 		m.accent = .First
 		m.label = strings.clone("First message")

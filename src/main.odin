@@ -715,6 +715,8 @@ finish_jobs :: proc(app: ^App) {
 			finish_drops_job(app, &p)
 		case Room_Name_Job:
 			finish_room_name_job(&app.assets, &p)
+		case Rewards_Job:
+			finish_rewards_job(app, &p)
 		case Chat_Banner_Job:
 			finish_chat_banner_job(app, &p)
 		case Whispers_Job:

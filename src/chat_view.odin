@@ -41,10 +41,16 @@ CHAT_LINK :: Color{0x8c, 0xb4, 0xff, 255}
 // Backgrounds for messages Twitch marks out (Message_Accent).
 @(rodata)
 CHAT_ACCENT_BACKGROUNDS := [Message_Accent]Color {
-	.None  = {},
-	.First = {0x2e, 0x9d, 0x5f, 60},
-	.Cheer = {0x91, 0x47, 0xff, 60},
-	.Paid  = {0xd8, 0x8a, 0x0e, 70},
+	.None                = {},
+	.First               = {0x2e, 0x9d, 0x5f, 60},
+	.Cheer               = {0x91, 0x47, 0xff, 60},
+	.Paid                = {0xd8, 0x8a, 0x0e, 70},
+	.Highlighted         = {0x00, 0xc8, 0xaf, 60},
+	.Reward              = {0x6e, 0x76, 0x90, 45},
+	.Announcement_Blue   = {0x1e, 0x90, 0xff, 65},
+	.Announcement_Green  = {0x00, 0xb0, 0x5a, 65},
+	.Announcement_Orange = {0xff, 0x8c, 0x1a, 65},
+	.Announcement_Purple = {0x91, 0x47, 0xff, 65},
 }
 // How opaque messages removed by a moderator, and ones from before joining, are drawn.
 CHAT_DELETED_ALPHA :: 90
@@ -202,6 +208,8 @@ Chat_View :: struct {
 	emotes:     ^Emotes,
 	// The user's highlights and ignores (owned by the app), or nil.
 	rules:      ^Chat_Rules,
+	// The channel's reward names (owned by the pane), or nil.
+	rewards:    ^Rewards,
 	scroll:     f32,
 	// Set while drawing: the furthest the view can scroll, where the "more
 	// messages below" bar is (zero size when hidden), and where names are.
@@ -278,6 +286,7 @@ chat_view_add :: proc(v: ^Chat_View, a: ^Assets, scale, width: f32, new_messages
 		own := added.id == "" && added.kind != .System && self_login != "" && added.login == self_login
 		apply_third_party_emotes(added, v.emotes, &a.emotes, &a.user_emotes if own else nil)
 		apply_emoji(added, &a.emoji)
+		apply_reward_label(v.rewards, added)
 		mine := self_login != "" && added.login == self_login
 		added.own = mine && added.kind != .System
 		added.mention = mentions(added, self_login) || (!mine && highlighted(added, v.rules))
