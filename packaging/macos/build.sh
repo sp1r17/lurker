@@ -17,11 +17,10 @@ BREW="$(brew --prefix)"
 BREW_CURL="$(brew --prefix curl)"
 MINIMUM_OS="$(sw_vers -productVersion | cut -d. -f1).0"
 
-# A relocatable Python from python-build-standalone, and the streamlink the other
-# builds use.
+# A relocatable Python from python-build-standalone. streamlink, the version the
+# other builds use, and what it needs are pinned in streamlink-requirements.txt.
 PYTHON_URL="https://github.com/astral-sh/python-build-standalone/releases/download/20261110/cpython-3.14.10%2B20261110-aarch64-apple-darwin-install_only.tar.gz"
 PYTHON_SHA="42031ed5f0d38777335252c8c77d64708c8010dd67c128246bdec25000672666"
-STREAMLINK_VERSION="8.6.2"
 
 # Downloads $1 to $3 unless it's there already, and checks it against $2.
 fetch() {
@@ -73,9 +72,19 @@ STREAMLINK="$APP/Contents/Resources/streamlink"
 mkdir -p "$STREAMLINK"
 tar xzf "$DEPS/python.tar.gz" -C "$STREAMLINK"
 "$STREAMLINK/python/bin/python3" -m pip install --quiet --disable-pip-version-check --no-cache-dir \
-  --only-binary=:all: "streamlink==$STREAMLINK_VERSION"
+  --only-binary=:all: --require-hashes -r "$ROOT/packaging/macos/streamlink-requirements.txt"
 rm -rf "$STREAMLINK/python/lib/python3."*/test "$STREAMLINK/python/lib/python3."*/idlelib
 cp "$ROOT/packaging/macos/streamlink" "$STREAMLINK/streamlink"
+
+# Homebrew's libraries aren't pinned (its bottles are checked against its signed
+# index, but the versions are whatever it has that day), so the app records the
+# ones it was built with, for checking a build later.
+FORMULAE=(sdl3 sdl3_image mpv curl)
+# shellcheck disable=SC2046
+brew list --versions "${FORMULAE[@]}" $(brew deps --union "${FORMULAE[@]}") | sort -u \
+  > "$APP/Contents/Resources/homebrew-versions.txt"
+echo "Homebrew libraries:"
+cat "$APP/Contents/Resources/homebrew-versions.txt"
 
 # Ad hoc signatures: the libraries first, then the app around them.
 codesign --force --sign - "$APP/Contents/Frameworks/"*.dylib
