@@ -524,3 +524,37 @@ chat_banner_lines_are_made :: proc(t: ^testing.T) {
 	testing.expect_value(t, prediction, "")
 	testing.expect_value(t, chatters, 11955)
 }
+
+@(test)
+polls_are_read :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	// As Twitch answered for a real poll, while it ran and in the minute after.
+	active := `{"data":{"user":{"viewablePoll":{"title":"QUE LE DAMOS","status":"ACTIVE","remainingDurationMilliseconds":55404,"choices":[{"title":"GTA","votes":{"total":9}},{"title":"WARZONE","votes":{"total":21}}]}}}}`
+	poll, ok := parse_poll_response(transmute([]byte)string(active))
+	testing.expect(t, ok)
+	testing.expect_value(t, poll.title, "QUE LE DAMOS")
+	testing.expect(t, !poll.ended)
+	testing.expect_value(t, poll.remaining_ms, 55404)
+	testing.expect_value(t, len(poll.choices), 2)
+	testing.expect_value(t, poll.choices[1].title, "WARZONE")
+	testing.expect_value(t, poll.choices[1].votes, 21)
+	testing.expect_value(t, poll_status(&poll, 55404), "0:56 left · 30 votes")
+	poll_destroy(&poll)
+
+	completed := `{"data":{"user":{"viewablePoll":{"title":"QUE LE DAMOS","status":"COMPLETED","remainingDurationMilliseconds":0,"choices":[{"title":"GTA","votes":{"total":9}},{"title":"WARZONE","votes":{"total":21}}]}}}}`
+	poll, ok = parse_poll_response(transmute([]byte)string(completed))
+	testing.expect(t, ok && poll.ended)
+	testing.expect_value(t, poll_status(&poll, 0), "Ended · 30 votes")
+	poll_destroy(&poll)
+
+	// Then gone, which is no choices; and a changed answer isn't taken for that.
+	poll, ok = parse_poll_response(transmute([]byte)string(`{"data":{"user":{"viewablePoll":null}}}`))
+	testing.expect(t, ok && len(poll.choices) == 0)
+	_, ok = parse_poll_response(transmute([]byte)string(`not json`))
+	testing.expect(t, !ok)
+
+	one := Poll{choices = make([dynamic]Poll_Choice, context.temp_allocator)}
+	append(&one.choices, Poll_Choice{"A", 1})
+	testing.expect_value(t, poll_status(&one, 125_000), "2:05 left · 1 vote")
+	testing.expect_value(t, poll_status(&one, -300), "Ending · 1 vote")
+}

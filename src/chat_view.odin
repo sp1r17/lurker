@@ -113,6 +113,11 @@ Chat_Rules :: struct {
 	// taskbar while it isn't focused (mention_alert.odin).
 	mention_sound:   bool,
 	mention_flash:   bool,
+	// Not showing the pinned message, the prediction or the poll above the
+	// watched channel's chat (chat_banner.odin).
+	pinned_off:      bool,
+	prediction_off:  bool,
+	poll_off:        bool,
 }
 
 // Chat bots common enough to hide by name (Chat_Rules.hide_bots), lowercase.

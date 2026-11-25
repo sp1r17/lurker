@@ -22,6 +22,9 @@ Setting_Switch :: enum {
 	Chat_Chatter_Count,
 	Chat_Mention_Sound,
 	Chat_Mention_Flash,
+	Chat_Pinned,
+	Chat_Prediction,
+	Chat_Poll,
 	Chat_Overlay,
 	Chat_Sync,
 	Next_Clip,
@@ -292,6 +295,12 @@ setting_on :: proc(app: ^App, s: Setting_Switch) -> bool {
 		return l.chat.mention_sound
 	case .Chat_Mention_Flash:
 		return l.chat.mention_flash
+	case .Chat_Pinned:
+		return !l.chat.pinned_off
+	case .Chat_Prediction:
+		return !l.chat.prediction_off
+	case .Chat_Poll:
+		return !l.chat.poll_off
 	case .Chat_Overlay:
 		return l.chat_overlay
 	case .Chat_Sync:
@@ -492,6 +501,15 @@ setting_toggle :: proc(app: ^App, s: Setting_Switch) {
 	case .Chat_Mention_Flash:
 		app.layout.chat.mention_flash = !app.layout.chat.mention_flash
 		layout_save(&app.layout)
+	case .Chat_Pinned:
+		app.layout.chat.pinned_off = !app.layout.chat.pinned_off
+		layout_save(&app.layout)
+	case .Chat_Prediction:
+		app.layout.chat.prediction_off = !app.layout.chat.prediction_off
+		layout_save(&app.layout)
+	case .Chat_Poll:
+		app.layout.chat.poll_off = !app.layout.chat.poll_off
+		layout_save(&app.layout)
 	case .Chat_Overlay:
 		app.layout.chat_overlay = !app.layout.chat_overlay
 		layout_save(&app.layout)
@@ -634,6 +652,9 @@ draw_settings :: proc(app: ^App, content: Rect) {
 		.Chat_Chatter_Count   = "Show how many are in the chat, above it",
 		.Chat_Mention_Sound   = "Sound on mentions",
 		.Chat_Mention_Flash   = "Flash in the taskbar on mentions",
+		.Chat_Pinned          = "Show the pinned message above the chat",
+		.Chat_Prediction      = "Show predictions above the chat",
+		.Chat_Poll            = "Show polls above the chat",
 		.Chat_Overlay         = "Chat over the video (O)",
 		.Chat_Sync     = "Delay chat to match the stream",
 		.Next_Clip     = "Play the next clip when one ends",
@@ -673,6 +694,9 @@ draw_settings :: proc(app: ^App, content: Rect) {
 		.Chat_Chatter_Count   = "How many people are in the chat of the channel you're watching, above it.",
 		.Chat_Mention_Sound   = "A short chime when a message mentions you or has one of your highlight phrases.",
 		.Chat_Mention_Flash   = "Lurker's taskbar entry flashes when a message mentions you or has one of your highlight phrases, until you switch to it.",
+		.Chat_Pinned          = "The message the channel's moderators pinned, above its chat. Click it to minimize or expand it.",
+		.Chat_Prediction      = "A running prediction and how the channel points are split, above the chat. Click it to minimize or expand it.",
+		.Chat_Poll            = "A running poll with a bar for each choice, and its result for a minute after. Click it to minimize or expand it.",
 		.Chat_Overlay         = "Chat on top of the video instead of beside it. O turns it on and off while watching.",
 		.Chat_Sync     = "Holds chat back by the stream's delay, so it reacts to what you see instead of ahead of it.",
 		.Next_Clip     = "When a clip ends, the next one in the list plays.",
@@ -725,7 +749,7 @@ draw_settings :: proc(app: ^App, content: Rect) {
 		{title = "General", switches = general_switches, choices = {.Start_View}, text_size = true},
 		{title = "Streams", switches = {.Low_Latency, .Auto_Quality, .Normalize_Audio, .Follow_Raids, .Next_Clip, .Watch_Points, .Claim_Bonus, .Claim_Drops}, choices = {.Latency_Buffer, .Max_Quality, .Video_Enhancement, .Audio_Device, .Audio_Delay}, language = true},
 		{title = "Live notifications", switches = {.Notify_Changes}, choices = {.Notify_For}, lists = {.Notify_Channels}, notifications = true},
-		{title = "Chat", switches = {.Chat_Sync, .Chat_Timestamps, .Chat_Highlight_Staff, .Chat_Highlight_Own, .Chat_Hide_Bots, .Chat_Hide_Badges, .Chat_Alternate_Lines, .Chat_Separators, .Chat_Still_Emotes, .Chat_Chatter_Count, .Chat_Mention_Sound, .Chat_Mention_Flash, .Chat_Overlay}, choices = {.Chat_Overlay_Position, .Chat_Overlay_Size, .Chat_Overlay_Background}, lists = {.Highlights, .Ignored}},
+		{title = "Chat", switches = {.Chat_Sync, .Chat_Timestamps, .Chat_Highlight_Staff, .Chat_Highlight_Own, .Chat_Hide_Bots, .Chat_Hide_Badges, .Chat_Alternate_Lines, .Chat_Separators, .Chat_Still_Emotes, .Chat_Chatter_Count, .Chat_Mention_Sound, .Chat_Mention_Flash, .Chat_Pinned, .Chat_Prediction, .Chat_Poll, .Chat_Overlay}, choices = {.Chat_Overlay_Position, .Chat_Overlay_Size, .Chat_Overlay_Background}, lists = {.Highlights, .Ignored}},
 		{title = "Blocked", lists = {.Blocked_Channels, .Blocked_Categories}},
 		{title = "Account", account = true},
 		{title = "Bug reports", log = true},

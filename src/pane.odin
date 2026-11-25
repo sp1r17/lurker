@@ -203,9 +203,8 @@ pane_layout :: proc(app: ^App, p: ^Chat_Pane, rect: Rect) {
 	// What's pinned and predicted, on the watched channel's chat.
 	p.banner_rect = {}
 	if p.channel != "" && p.channel == app.watch.channel {
-		if _, n := chat_banner_lines(&app.watch.banner); n > 0 {
-			line_h := line_height(&app.assets.renderer, .Regular, BROWSE_CARD_TEXT_SIZE * scale) + pad / 2
-			p.banner_rect = {rect.x, top, rect.w, f32(n) * line_h + pad / 2}
+		if h := chat_banner_height(app, rect.w); h > 0 {
+			p.banner_rect = {rect.x, top, rect.w, h}
 			top = p.banner_rect.y + p.banner_rect.h
 		}
 	}
@@ -278,14 +277,7 @@ draw_pane :: proc(app: ^App, p: ^Chat_Pane, focused: bool) {
 	}
 
 	if p.banner_rect.w > 0 {
-		draw_rect(r, p.banner_rect, CHAT_HEADER)
-		lines, n := chat_banner_lines(&app.watch.banner)
-		line_h := line_height(r, .Regular, size) + CHAT_PADDING * scale / 2
-		for line, i in lines[:n] {
-			x := p.banner_rect.x + 8 * scale
-			y := p.banner_rect.y + CHAT_PADDING * scale / 4 + f32(i) * line_h
-			draw_text(r, .Regular, size, x, y, fit_text(r, .Regular, size, line, p.banner_rect.w - 16 * scale), CHAT_TEXT)
-		}
+		draw_chat_banner(app, p.banner_rect)
 	}
 
 	if p.modes_rect.w > 0 {
@@ -451,6 +443,11 @@ pane_click :: proc(app: ^App, p: ^Chat_Pane, x, y: f32) {
 	// go on typing.
 	if !in_rect(p.input_rect, x, y) {
 		emote_panel_close(app, p)
+	}
+	// The pinned message, prediction or poll expands or minimizes.
+	if p.banner_rect.w > 0 && in_rect(p.banner_rect, x, y) {
+		chat_banner_click(app, x, y)
+		return
 	}
 	// Back to the newest messages, which marks the mentions read.
 	if p.mention_badge.w > 0 && in_rect(p.mention_badge, x, y) {
