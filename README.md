@@ -27,9 +27,9 @@ pre-roll or mid-roll ads.
 - Recent chat history on joining, clickable links, reply threads (click a reply's
   "Replying to" line), and the chat's modes (slow, subscribers only...) above the
   chat box
-- Mentions are highlighted, with a count of unread ones on each chat; add your own
-  highlight phrases and hide people's messages, in Settings or with
-  `/highlight` and `/ignore`
+- Mentions are highlighted, with a count of unread ones on each chat, and can
+  play a sound or flash Lurker in the taskbar; add your own highlight phrases and
+  hide people's messages, in Settings or with `/highlight` and `/ignore`
 - User cards with everything someone said in the chat; moderators can time out,
   ban and delete from them, or with `/timeout`, `/ban` and `/clear`
 - Whispers show in the chat you're watching; send one with `/w name message`

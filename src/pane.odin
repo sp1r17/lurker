@@ -141,10 +141,11 @@ pane_chat_arrived :: proc(app: ^App, p: ^Chat_Pane) {
 	}
 	chat_delay_hold(app, p, &arrived)
 	if len(arrived) > 0 {
-		added := chat_view_add(&p.view, &app.assets, app.scale, pane_text_width(app, p), arrived[:], app.auth.login if app.signed_in else "")
+		added, alerts := chat_view_add(&p.view, &app.assets, app.scale, pane_text_width(app, p), arrived[:], app.auth.login if app.signed_in else "")
 		if !pane_seen(app, p) {
 			p.unread_mentions += added
 		}
+		mention_alert(app, alerts)
 	}
 	if p.room_id != "" {
 		return

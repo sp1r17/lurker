@@ -52,7 +52,7 @@ moderation_fades_messages :: proc(t: ^testing.T) {
 		moderation("@login=friend;target-msg-id=m3 :tmi.twitch.tv CLEARMSG #chan :hi"),
 		moderation("@ban-duration=60 :tmi.twitch.tv CLEARCHAT #chan :spammer"),
 	}
-	added := chat_view_add(&v, &assets, 1, 300, incoming, self_login = "me")
+	added, _ := chat_view_add(&v, &assets, 1, 300, incoming, self_login = "me")
 	// For the header's unread count.
 	testing.expect_value(t, added, 1)
 	// The CLEARMSG leaves no line; the timeout does.
