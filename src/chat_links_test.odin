@@ -24,7 +24,9 @@ chat_link_finds_links :: proc(t: ^testing.T) {
 
 @(test)
 chat_link_skips_words :: proc(t: ^testing.T) {
-	for word in ([]string{"hello", "end.of", "v1.2", "3.14", "a..com", ".com", "https://", "https://nodot", "e.g.", "file.exe", "@name"}) {
+	for word in ([]string{"hello", "end.of", "v1.2", "3.14", "a..com", ".com", "https://", "https://nodot", "e.g.", "file.exe", "@name",
+		// Lookalikes: non-Latin letters (Cyrillic "раураl.com") and a name before an @.
+		"раураl.com", "https://раураl.com/login", "https://twitch.tv@evil.example/", "twitch.tv@evil.example"}) {
 		_, _, ok := chat_link(word)
 		testing.expectf(t, !ok, "%q isn't a link", word)
 	}
