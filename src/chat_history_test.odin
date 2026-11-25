@@ -88,7 +88,7 @@ more_bar_covers_messages :: proc(t: ^testing.T) {
 	append(&v.name_hits, Name_Hit{under, "someone"})
 	append(&v.link_hits, Link_Hit{under, "https://example.com"})
 	append(&v.reply_hits, under)
-	append(&v.message_hits, Message_Hit{under, 0})
+	append(&v.message_hits, Message_Hit{rect = under, index = 0})
 	v.scroll = 50
 	v.more_bar = {0, 80, 100, 30}
 

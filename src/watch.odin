@@ -73,6 +73,8 @@ Watch :: struct {
 	// The pane keys like Enter and Ctrl+F act on.
 	focus:           int,
 	card:            User_Card,
+	// The right-click menu for a chat message (chat_copy.odin).
+	message_menu:    Message_Menu,
 	// When recent messages were sent (Assets.now_ms), for the rate limit.
 	sent_at:         [dynamic]int,
 	// The stream's title, game, viewers and start time, if known; when they were
@@ -254,6 +256,7 @@ watch_stop :: proc(app: ^App) {
 	// So the next channel doesn't start on this one's last frame.
 	player_clear(&app.player)
 	user_card_close(app)
+	message_menu_close(&w.message_menu)
 	box_unfocus(app)
 	for p in w.panes {
 		pane_destroy(app, p)
@@ -773,6 +776,12 @@ watch_key :: proc(app: ^App, key: sdl.KeyboardEvent) -> bool {
 			watch_add_pane(app)
 		case sdl.K_W:
 			watch_close_pane(app, focused)
+		case sdl.K_C:
+			for p in w.panes {
+				if p.view.selection.shown {
+					copy_text(chat_selection_text(&p.view))
+				}
+			}
 		case:
 			return false
 		}
@@ -785,6 +794,8 @@ watch_key :: proc(app: ^App, key: sdl.KeyboardEvent) -> bool {
 			w.quality_menu = false
 		case w.chapter_menu:
 			w.chapter_menu = false
+		case w.message_menu.open:
+			message_menu_close(&w.message_menu)
 		case w.card.open:
 			user_card_close(app)
 		case focused.searching:
@@ -927,6 +938,9 @@ pane_at :: proc(app: ^App, x, y: f32) -> (p: ^Chat_Pane, index: int) {
 
 watch_click :: proc(app: ^App, x, y: f32) {
 	w := &app.watch
+	if message_menu_click(app, x, y) {
+		return
+	}
 	if w.card.open && in_rect(w.card.rect, x, y) {
 		user_card_click(app, x, y)
 		return
@@ -966,8 +980,9 @@ watch_click :: proc(app: ^App, x, y: f32) {
 	pane_click(app, p, x, y)
 }
 
-// A right-click: on a chat message, starts a reply to it.
+// A right-click: on a chat message, its menu.
 watch_right_click :: proc(app: ^App, x, y: f32) {
+	message_menu_close(&app.watch.message_menu)
 	if user_card_right_click(app, x, y) {
 		return
 	}
@@ -977,7 +992,7 @@ watch_right_click :: proc(app: ^App, x, y: f32) {
 	}
 	if m, found := chat_view_message_at(&p.view, x, y); found {
 		app.watch.focus = i
-		pane_reply_start(app, p, m)
+		message_menu_open(app, p, m, x, y)
 	}
 }
 
@@ -1158,4 +1173,10 @@ draw_watch :: proc(app: ^App) {
 			}
 		}
 	}
+	screen := Rect{0, 0, w.video_rect.w, w.video_rect.h}
+	for p in w.panes {
+		screen.w = max(screen.w, p.rect.x + p.rect.w)
+		screen.h = max(screen.h, p.rect.y + p.rect.h)
+	}
+	draw_message_menu(app, screen)
 }

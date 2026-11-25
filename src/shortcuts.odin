@@ -30,6 +30,7 @@ SHORTCUTS :: [?]Shortcut {
 	{"Ctrl+T / Ctrl+W", "Open / close a chat split"},
 	{"Ctrl+,", "Settings (when browsing)"},
 	{"Ctrl+F", "Search the chat, or channels when browsing"},
+	{"Ctrl+C", "Copy chat text selected by dragging over it"},
 	{"/", "Search channels"},
 	{"Ctrl+= / Ctrl+- / Ctrl+0, or Ctrl+scroll", "Text size"},
 	{"Esc, or the mouse's back button", "Back"},

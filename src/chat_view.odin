@@ -216,6 +216,8 @@ Chat_View :: struct {
 	reply_hits:   [dynamic]Rect,
 	// How many messages matched the filter.
 	matches:    int,
+	// Text selected by dragging (chat_copy.odin).
+	selection:  Chat_Selection,
 }
 
 Name_Hit :: struct {
@@ -230,8 +232,10 @@ Image_Hit :: struct {
 }
 
 Message_Hit :: struct {
-	rect:  Rect,
-	index: int,
+	rect:   Rect,
+	index:  int,
+	// Where its layout's (0, 0) was drawn.
+	origin: [2]f32,
 }
 
 Link_Hit :: struct {
@@ -314,11 +318,12 @@ chat_view_prepend :: proc(v: ^Chat_View, a: ^Assets, scale, width: f32, older: [
 	defer delete(newer)
 	v.messages = make([dynamic]Chat_Message, 0, len(keep) + len(newer))
 	// Measured from the newest message, so older ones don't move the view.
-	scroll := v.scroll
-	v.scroll = 0
+	scroll, selection := v.scroll, v.selection
+	v.scroll, v.selection = 0, {}
 	chat_view_add(v, a, scale, width, keep[:], self_login)
-	v.scroll = scroll
+	v.scroll, v.selection = scroll, selection
 	append(&v.messages, ..newer[:])
+	chat_selection_shift(v, len(v.messages) - len(newer))
 	// Numbered again from the oldest, now there are older ones.
 	for i in 0 ..< len(v.messages) {
 		number_line(v, i)
@@ -369,6 +374,7 @@ chat_view_remove_user :: proc(v: ^Chat_View, login: string) {
 		kept += 1
 	}
 	resize(&v.messages, kept)
+	v.selection = {}
 }
 
 // Whether the message's text has one of the user's highlight phrases, as whole
@@ -421,6 +427,7 @@ trim_messages :: proc(v: ^Chat_View) {
 			destroy_chat_message(m)
 		}
 		remove_range(&v.messages, 0, over)
+		chat_selection_shift(v, -over)
 	}
 }
 
@@ -437,6 +444,7 @@ chat_view_clear :: proc(v: ^Chat_View) {
 	clear(&v.reply_hits)
 	v.scroll = 0
 	v.max_scroll = 0
+	v.selection = {}
 }
 
 // A parsed chat filter: words the message must contain, and optionally whose it
@@ -627,8 +635,8 @@ draw_chat_view :: proc(a: ^Assets, v: ^Chat_View, rect: Rect, scale: f32, filter
 			if v.rules != nil && v.rules.separators {
 				draw_rect(r, {line.x, line.y, line.w, max(1, scale)}, CHAT_SEPARATOR)
 			}
-			draw_message(a, v, m, layout, rect.x + pad, top)
-			append(&v.message_hits, Message_Hit{{rect.x, top - gap / 2, rect.w, layout.height + gap}, i})
+			draw_message(a, v, m, layout, rect.x + pad, top, i)
+			append(&v.message_hits, Message_Hit{{rect.x, top - gap / 2, rect.w, layout.height + gap}, i, {rect.x + pad, top}})
 		}
 		total += layout.height + gap
 		bottom = top - gap
@@ -663,12 +671,16 @@ draw_chat_view :: proc(a: ^Assets, v: ^Chat_View, rect: Rect, scale: f32, filter
 }
 
 // Draws a laid-out message with its top left at (x, y), noting in `v` where its
-// name, badges, emotes and links are.
-draw_message :: proc(a: ^Assets, v: ^Chat_View, m: ^Chat_Message, layout: ^Message_Layout, x, y: f32) {
+// name, badges, emotes and links are. With its `index` in `v.messages`, what's
+// selected of it is highlighted.
+draw_message :: proc(a: ^Assets, v: ^Chat_View, m: ^Chat_Message, layout: ^Message_Layout, x, y: f32, index := -1) {
 	size := CHAT_FONT_SIZE * layout.scale
 	alpha: u8 = CHAT_DELETED_ALPHA if m.deleted else CHAT_HISTORICAL_ALPHA if m.historical else 255
-	for item in layout.items {
+	for item, j in layout.items {
 		rect := Rect{x + item.rect.x, y + item.rect.y, item.rect.w, item.rect.h}
+		if index >= 0 {
+			draw_selection(a, v, layout, index, j, rect)
+		}
 		if item.is_name {
 			append(&v.name_hits, Name_Hit{rect, m.login})
 		}
@@ -907,6 +919,8 @@ message_layout_into :: proc(a: ^Assets, channel: ^Emotes, m: ^Chat_Message, l: ^
 					space(&b, .Regular)
 				}
 				put_image(&b, image, EMOJI_HEIGHT, 0)
+				// For copying: the emoji itself.
+				b.l.items[len(b.l.items) - 1].text = f.text
 			case:
 				space(&b, .Regular)
 				put_image(&b, image, EMOTE_HEIGHT, EMOTE_OVERHANG)

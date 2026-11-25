@@ -484,7 +484,17 @@ pane_click :: proc(app: ^App, p: ^Chat_Pane, x, y: f32) {
 		}
 	}
 	user_card_dismiss(app)
-	chat_view_click(&p.view, x, y)
+	if chat_view_click(&p.view, x, y) {
+		return
+	}
+	// Elsewhere on the messages, dragging selects text; only one chat has a
+	// selection, for Ctrl+C.
+	for other in app.watch.panes {
+		other.view.selection = {}
+	}
+	if in_rect(p.messages_rect, x, y) {
+		chat_select_press(&app.assets, &p.view, x, y)
+	}
 }
 
 pane_text_input :: proc(app: ^App, text: string) {
@@ -641,7 +651,6 @@ pane_submit_channel :: proc(app: ^App, p: ^Chat_Pane) {
 	layout_remember(app)
 }
 
-@(private = "file")
 copy_text :: proc(text: string) {
 	if !sdl.SetClipboardText(strings.clone_to_cstring(text, context.temp_allocator)) {
 		log.warnf("can't copy: %s", sdl.GetError())
@@ -770,8 +779,14 @@ pane_subs_only :: proc(p: ^Chat_Pane) -> bool {
 
 // Starts a reply to `m` (on a right-click), if it can have one: it's from
 // someone else, with an ID, and there's a sign-in to chat with.
+// Whether `m` can be replied to from `p`: signed in, live, and a message from
+// someone that's still there.
+can_reply :: proc(app: ^App, p: ^Chat_Pane, m: ^Chat_Message) -> bool {
+	return !pane_replaying(app, p) && app.signed_in && p.channel != "" && m.id != "" && m.kind != .System && !m.deleted
+}
+
 pane_reply_start :: proc(app: ^App, p: ^Chat_Pane, m: ^Chat_Message) {
-	if pane_replaying(app, p) || !app.signed_in || p.channel == "" || m.id == "" || m.kind == .System || m.deleted {
+	if !can_reply(app, p, m) {
 		return
 	}
 	pane_reply_cancel(p)

@@ -507,6 +507,11 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 		if .LEFT in e.motion.state {
 			window_drag_motion(app, app.mouse.x, app.mouse.y)
 			chat_overlay_drag_motion(app, app.mouse.x, app.mouse.y)
+			if app.screen == .Watch {
+				for p in app.watch.panes {
+					_ = chat_select_motion(&app.assets, &p.view, p.messages_rect, app.mouse.x, app.mouse.y, app.scale)
+				}
+			}
 		} else {
 			app.drag_armed = false
 		}
@@ -551,6 +556,11 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 		app.drag_armed = false
 		if e.button.button == sdl.BUTTON_LEFT {
 			chat_overlay_release(app)
+			if app.screen == .Watch {
+				for p in app.watch.panes {
+					chat_select_release(&p.view)
+				}
+			}
 			chat_overlay_update_cursor(app)
 			redraw^ = true
 		}
@@ -561,7 +571,7 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 			redraw^ = true
 			return true
 		}
-		// A right-click on a chat message replies to it.
+		// A right-click on a chat message opens its menu.
 		if e.button.button == sdl.BUTTON_RIGHT && app.screen == .Watch {
 			watch_right_click(app, e.button.x * density, e.button.y * density)
 			redraw^ = true
