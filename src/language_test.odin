@@ -1,5 +1,6 @@
 package app
 
+import "core:strings"
 import "core:testing"
 
 @(test)
@@ -14,7 +15,8 @@ other_languages_gray_out_or_hide :: proc(t: ^testing.T) {
 	testing.expect(t, !language_grayed(&app, .Top, es))
 	testing.expect_value(t, language_fetch_filter(&app, .Top), "")
 
-	app.layout.language = "en"
+	// Owned, as when loaded.
+	app.layout.language = strings.clone("en")
 	testing.expect(t, language_grayed(&app, .Top, es))
 	testing.expect(t, language_grayed(&app, .Category, es))
 	testing.expect(t, !language_grayed(&app, .Top, en))
