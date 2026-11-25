@@ -32,6 +32,28 @@ streams_page_has_cursor :: proc(t: ^testing.T) {
 }
 
 @(test)
+reruns_are_known_by_their_tags :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	body := `{"data":[` +
+		`{"user_login":"a","type":"live","tags":["English","ReRun"]},` +
+		`{"user_login":"b","type":"live","tags":["English","Speedrun"]},` +
+		`{"user_login":"c","type":"live","tags":null},` +
+		`{"user_login":"d","type":"live","tags":["replay"]}],"pagination":{}}`
+	streams, _, err := parse_streams_page(transmute([]byte)body)
+	testing.expect_value(t, err, Twitch_Error.None)
+	testing.expect_value(t, len(streams), 4)
+	testing.expect(t, streams[0].rerun)
+	// "Speedrun" ends in "run", but isn't a rerun.
+	testing.expect(t, !streams[1].rerun)
+	testing.expect(t, !streams[2].rerun)
+	testing.expect(t, streams[3].rerun)
+	for tag in ([]string{"Rerun", "RERUN", "Reruns", "re-run"}) {
+		testing.expectf(t, rerun_tagged({"x", tag}), "%s marks a rerun", tag)
+	}
+	testing.expect(t, !rerun_tagged({"VOD", "24/7", "Rerunning"}))
+}
+
+@(test)
 uptime_reads_as_hours_minutes_seconds :: proc(t: ^testing.T) {
 	defer free_all(context.temp_allocator)
 	now, _ := time.rfc3339_to_time_utc("2026-10-20T15:05:09Z")

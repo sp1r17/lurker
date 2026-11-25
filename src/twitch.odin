@@ -34,6 +34,8 @@ Stream :: struct {
 	started_at:    string,
 	// With "{width}" and "{height}" placeholders.
 	thumbnail_url: string,
+	// A rebroadcast, by its tags (rerun_tagged): Twitch shows reruns as live.
+	rerun:         bool,
 }
 
 clone_stream :: proc(s: Stream) -> Stream {
@@ -48,6 +50,7 @@ clone_stream :: proc(s: Stream) -> Stream {
 		viewer_count = s.viewer_count,
 		started_at = strings.clone(s.started_at),
 		thumbnail_url = strings.clone(s.thumbnail_url),
+		rerun = s.rerun,
 	}
 }
 
@@ -205,7 +208,32 @@ parse_streams_page :: proc(body: []byte) -> (streams: []Stream, cursor: string, 
 	if json.unmarshal(body, &r, allocator = context.temp_allocator) != nil {
 		return nil, "", .Bad_Json
 	}
+	// The tags only say whether it's a rerun, so they aren't kept with it.
+	Tags_Response :: struct {
+		data: []struct {
+			tags: []string,
+		},
+	}
+	tags: Tags_Response
+	if json.unmarshal(body, &tags, allocator = context.temp_allocator) == nil && len(tags.data) == len(r.data) {
+		for &s, i in r.data {
+			s.rerun = rerun_tagged(tags.data[i].tags)
+		}
+	}
 	return r.data, r.pagination.cursor, .None
+}
+
+// Whether a stream's tags mark it as a rebroadcast. Twitch has no rerun type any
+// more (every stream's is "live"), but rerun channels tag themselves: "Rerun",
+// "ReRun", "Reruns" and "Replay" are the ones in use.
+rerun_tagged :: proc(tags: []string) -> bool {
+	for tag in tags {
+		switch strings.to_lower(tag, context.temp_allocator) {
+		case "rerun", "reruns", "re-run", "replay":
+			return true
+		}
+	}
+	return false
 }
 
 // The live channels a user follows, most viewers first, allocated with the temp
