@@ -967,6 +967,32 @@ message_layout_into :: proc(a: ^Assets, channel: ^Emotes, m: ^Chat_Message, l: ^
 	return l
 }
 
+// How tall the first `n` lines of a laid-out message are (all of it, with no more
+// than that), and how many lines it has. end_line centres each line's items on
+// it, and the lines touch, so each one's bottom is as far below its centre as
+// its top is above.
+message_lines_height :: proc(l: ^Message_Layout, n: int) -> (height: f32, lines: int) {
+	top, centre: f32
+	for item in l.items {
+		c := item.rect.y + item.rect.h / 2
+		if lines > 0 && c < centre + 0.5 {
+			continue
+		}
+		if lines > 0 {
+			top = 2 * centre - top
+		}
+		lines += 1
+		centre = c
+		if lines == n {
+			height = 2 * c - top
+		}
+	}
+	if lines <= n {
+		height = l.height
+	}
+	return
+}
+
 @(private = "file")
 Builder :: struct {
 	a:          ^Assets,
