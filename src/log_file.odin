@@ -52,8 +52,124 @@ log_tail :: proc(text: string, limit: int) -> string {
 	return tail
 }
 
-// Both logs' ends, for a bug report, with the version and platform first.
+PRIVATE_OPEN :: "‹"
+PRIVATE_CLOSE :: "›"
+
+// Marks something in a log line that says who uses Lurker or what they watch (a
+// channel, a drop, a link they opened). The log file keeps it, but "Copy log"
+// puts a number in its place, since that copy goes into public bug reports.
 // Allocated with the temp allocator.
+log_private :: proc(value: string) -> string {
+	return fmt.tprintf("%s%s%s", PRIVATE_OPEN, value, PRIVATE_CLOSE)
+}
+
+@(private = "file")
+url_token_end :: proc(c: byte) -> bool {
+	switch c {
+	case ' ', '\t', '\n', '\r', '"', '\'', '<', '>', '(', ')', '[', ']', ',':
+		return true
+	}
+	return false
+}
+
+@(private = "file")
+name_byte :: proc(c: byte) -> bool {
+	switch c {
+	case 'a' ..= 'z', 'A' ..= 'Z', '0' ..= '9', '_', '-', '.', 0x80 ..= 0xff:
+		return true
+	}
+	return false
+}
+
+// `text` without what would tell strangers who sent it: each log_private value
+// becomes ‹1›, ‹2›… (the same number for the same value, so a report can still
+// tell one channel from two), those values in URLs too, the `home` folder
+// becomes ~, and URLs lose their query (user IDs, logins, playback tokens).
+// Allocated with the temp allocator.
+log_scrub :: proc(text, home: string) -> string {
+	numbers := make(map[string]int, context.temp_allocator)
+	values := make([dynamic]string, context.temp_allocator)
+	b := strings.builder_make(context.temp_allocator)
+	rest := text
+	for {
+		open := strings.index(rest, PRIVATE_OPEN)
+		if open < 0 {
+			break
+		}
+		after := rest[open + len(PRIVATE_OPEN):]
+		close := strings.index(after, PRIVATE_CLOSE)
+		// Unmatched on its line: not one of ours, so it stays.
+		if close < 0 || strings.index_byte(after[:close], '\n') >= 0 {
+			strings.write_string(&b, rest[:open + len(PRIVATE_OPEN)])
+			rest = after
+			continue
+		}
+		value := after[:close]
+		n, seen := numbers[value]
+		if !seen {
+			n = len(numbers) + 1
+			numbers[value] = n
+			append(&values, value)
+		}
+		fmt.sbprintf(&b, "%s%s%d%s", rest[:open], PRIVATE_OPEN, n, PRIVATE_CLOSE)
+		rest = after[close + len(PRIVATE_CLOSE):]
+	}
+	strings.write_string(&b, rest)
+	out := strings.to_string(b)
+
+	if home != "" && home != "/" {
+		hb := strings.builder_make(context.temp_allocator)
+		rest = out
+		for {
+			at := strings.index(rest, home)
+			if at < 0 {
+				break
+			}
+			end := at + len(home)
+			// /home/al isn't part of /home/alice.
+			whole := end == len(rest) || !name_byte(rest[end])
+			strings.write_string(&hb, rest[:at])
+			strings.write_string(&hb, "~" if whole else home)
+			rest = rest[end:]
+		}
+		strings.write_string(&hb, rest)
+		out = strings.to_string(hb)
+	}
+
+	ub := strings.builder_make(context.temp_allocator)
+	for i := 0; i < len(out); {
+		if url_token_end(out[i]) {
+			strings.write_byte(&ub, out[i])
+			i += 1
+			continue
+		}
+		start := i
+		for i < len(out) && !url_token_end(out[i]) {
+			i += 1
+		}
+		token := out[start:i]
+		if strings.contains(token, "://") || strings.has_prefix(token, "/") {
+			if q := strings.index_byte(token, '?'); q >= 0 {
+				token = fmt.tprintf("%s?…", token[:q])
+			}
+			for value in values {
+				n := numbers[value]
+				number := fmt.tprintf("%s%d%s", PRIVATE_OPEN, n, PRIVATE_CLOSE)
+				// Logins are lowercase in URLs, display names may not be.
+				for form in ([2]string{value, strings.to_lower(value, context.temp_allocator)}) {
+					if len(form) >= 3 {
+						token, _ = strings.replace_all(token, form, number, context.temp_allocator)
+					}
+				}
+			}
+		}
+		strings.write_string(&ub, token)
+	}
+	return strings.to_string(ub)
+}
+
+// Both logs' ends, for a bug report, with the version and platform first, and
+// scrubbed with log_scrub. Allocated with the temp allocator.
 log_report :: proc() -> string {
 	b := strings.builder_make(context.temp_allocator)
 	fmt.sbprintf(&b, "Lurker %s on %v %v\n", APP_VERSION, ODIN_OS, ODIN_ARCH)
@@ -69,7 +185,8 @@ log_report :: proc() -> string {
 		fmt.sbprintf(&b, "\n--- %s ---\n", "previous run" if i == 0 else "this run")
 		strings.write_string(&b, log_tail(string(data), COPIED_LOG_BYTES))
 	}
-	return strings.to_string(b)
+	home, _ := os.user_home_dir(context.temp_allocator)
+	return log_scrub(strings.to_string(b), home)
 }
 
 // Copies the logs for a bug report. Returns whether it worked.

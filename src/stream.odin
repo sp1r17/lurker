@@ -115,7 +115,7 @@ streamlink_vod_url :: proc(
 ) {
 	streams, listed := streamlink_streams(vod_page(vod_id, kind), client_id, token)
 	if !listed {
-		log.errorf("streamlink can't find broadcast %s", vod_id)
+		log.errorf("streamlink can't find broadcast %s", log_private(vod_id))
 		return "", {}, false
 	}
 	names := make([dynamic]string, context.temp_allocator)
@@ -209,7 +209,10 @@ streamlink_streams :: proc(page: string, client_id, token: string) -> (streams: 
 		return nil, false
 	}
 	if state.exit_code != 0 {
-		log.debugf("streamlink can't find %s: %s", page, strings.trim_space(string(stderr)))
+		// streamlink names the page in its message too.
+		marked := log_private(page)
+		message, _ := strings.replace_all(strings.trim_space(string(stderr)), page, marked, context.temp_allocator)
+		log.debugf("streamlink can't find %s: %s", marked, message)
 		return nil, false
 	}
 	Stream :: struct {

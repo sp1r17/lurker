@@ -146,7 +146,7 @@ run_link_job :: proc(job: ^Job) {
 finish_link_job :: proc(app: ^App, p: ^Link_Job) {
 	what := "clip" if p.kind == .Clip else "video"
 	if !p.ok {
-		log.errorf("can't find %v %s", p.kind, p.id)
+		log.errorf("can't find %v %s", p.kind, log_private(p.id))
 		// Not static: the text and the reason are put together here.
 		delete(app.browse.link_failure)
 		if p.err == .None {

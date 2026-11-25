@@ -677,7 +677,7 @@ draw_settings :: proc(app: ^App, content: Rect) {
 	}
 	TEXT_SIZE_TIP :: "Makes all of Lurker's text larger or smaller. Ctrl and the mouse wheel do it too."
 	LANGUAGE_TIP :: "Streams in other languages are grayed out or hidden in the stream lists. Channels you follow show whatever their language."
-	LOG_TIP :: "What Lurker has been doing, to paste into a bug report or attach to one."
+	LOG_TIP :: "What Lurker has been doing, to paste into a bug report. The copy leaves out the channels you watched, links you opened and your account and folder names; the files in the log folder keep everything."
 	lists := [Setting_List]struct {
 		label, hint, none, tip: string,
 	} {

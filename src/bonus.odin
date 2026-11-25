@@ -95,6 +95,6 @@ finish_bonus_job :: proc(app: ^App, p: ^Bonus_Job) {
 	}
 	w.bonus.balance = p.balance
 	if p.claimed > 0 {
-		log.infof("claimed %d bonus channel points on %s", p.claimed, p.login)
+		log.infof("claimed %d bonus channel points on %s", p.claimed, log_private(p.login))
 	}
 }
