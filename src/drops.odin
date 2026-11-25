@@ -72,7 +72,7 @@ finish_drops_job :: proc(app: ^App, p: ^Drops_Job) {
 	}
 	w.drops.pending = false
 	for name in p.claimed {
-		log.infof("claimed the drop %s", name)
+		log.infof("claimed the drop %s", log_private(name))
 		pane_notice(app, w.panes[0], fmt.tprintf("Claimed the drop %s.", name))
 	}
 }

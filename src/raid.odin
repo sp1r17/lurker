@@ -263,7 +263,7 @@ raid_events_arrived :: proc(app: ^App) {
 			from := e.from_name if e.from_name != "" else w.channel
 			from = strings.clone(from, context.temp_allocator)
 			to := e.to_name if e.to_name != "" else e.to_login
-			log.infof("following the raid from %s to %s", from, to)
+			log.infof("following the raid from %s to %s", log_private(from), log_private(to))
 			watch_start(app, e.to_login)
 			pane_notice(app, app.watch.panes[0], fmt.tprintf("Followed the raid from %s.", from))
 			// The rest were for the channel left.
@@ -312,7 +312,7 @@ run_raid_subscribe_job :: proc(job: ^Job) {
 finish_raid_subscribe_job :: proc(app: ^App, p: ^Raid_Subscribe_Job) {
 	apply_auth_check(app, p.check, p.auth)
 	if !p.ok {
-		log.warnf("can't listen for %s's raids", p.login)
+		log.warnf("can't listen for %s's raids", log_private(p.login))
 	}
 }
 

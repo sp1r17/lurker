@@ -839,7 +839,7 @@ WORD_MOD :: sdl.KMOD_ALT when ODIN_OS == .Darwin else sdl.KMOD_CTRL
 
 open_url :: proc(url: string) {
 	if !sdl.OpenURL(strings.clone_to_cstring(url, context.temp_allocator)) {
-		log.warnf("can't open %s: %s", url, sdl.GetError())
+		log.warnf("can't open %s: %s", log_private(url), sdl.GetError())
 	}
 }
 

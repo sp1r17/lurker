@@ -2,6 +2,7 @@ package app
 
 import "core:crypto/ed25519"
 import "core:encoding/hex"
+import "core:fmt"
 import "core:strings"
 import "core:testing"
 
@@ -31,21 +32,49 @@ version_matches_metainfo :: proc(t: ^testing.T) {
 latest_release_parses :: proc(t: ^testing.T) {
 	defer free_all(context.temp_allocator)
 	body := `{"tag_name":"v0.5.0","html_url":"https://github.com/sp1r17/lurker/releases/tag/v0.5.0","assets":[
-		{"name":"lurker-0.5.0-x86_64.flatpak","browser_download_url":"https://github.com/x/flatpak"},
-		{"name":"lurker-0.5.0-x86_64-setup.exe","browser_download_url":"https://github.com/x/setup"},
-		{"name":"SHA256SUMS","browser_download_url":"https://github.com/x/sums"},
-		{"name":"SHA256SUMS.sig","browser_download_url":"https://github.com/x/sig"}]}`
+		{"name":"lurker-0.5.0-x86_64.flatpak","browser_download_url":"https://github.com/sp1r17/lurker/releases/download/v0.5.0/lurker-0.5.0-x86_64.flatpak"},
+		{"name":"lurker-0.5.0-x86_64-setup.exe","browser_download_url":"https://github.com/sp1r17/lurker/releases/download/v0.5.0/lurker-0.5.0-x86_64-setup.exe"},
+		{"name":"SHA256SUMS","browser_download_url":"https://github.com/sp1r17/lurker/releases/download/v0.5.0/SHA256SUMS"},
+		{"name":"SHA256SUMS.sig","browser_download_url":"https://github.com/sp1r17/lurker/releases/download/v0.5.0/SHA256SUMS.sig"}]}`
 	p: Update_Check_Job
 	defer destroy_update_check_job(&p)
 	testing.expect(t, parse_latest_release(transmute([]byte)string(body), &p))
 	testing.expect_value(t, p.version, "0.5.0")
-	testing.expect_value(t, p.installer, "https://github.com/x/setup")
-	testing.expect_value(t, p.sums, "https://github.com/x/sums")
-	testing.expect_value(t, p.signature, "https://github.com/x/sig")
+	testing.expect_value(t, p.installer, "https://github.com/sp1r17/lurker/releases/download/v0.5.0/lurker-0.5.0-x86_64-setup.exe")
+	testing.expect_value(t, p.sums, "https://github.com/sp1r17/lurker/releases/download/v0.5.0/SHA256SUMS")
+	testing.expect_value(t, p.signature, "https://github.com/sp1r17/lurker/releases/download/v0.5.0/SHA256SUMS.sig")
 
 	bad: Update_Check_Job
 	defer destroy_update_check_job(&bad)
 	testing.expect(t, !parse_latest_release(transmute([]byte)string(`{"tag_name":"nightly","html_url":"https://github.com/x"}`), &bad))
+}
+
+@(test)
+latest_release_stays_on_lurkers_releases :: proc(t: ^testing.T) {
+	defer free_all(context.temp_allocator)
+	for page in ([]string{
+		"https://github.com/someone/else/releases/tag/v0.5.0",
+		"https://github.com/sp1r17/lurker/releases/tag/../../../evil",
+		"https://github.com.evil.example/sp1r17/lurker/releases/tag/v0.5.0",
+		"http://github.com/sp1r17/lurker/releases/tag/v0.5.0",
+	}) {
+		p: Update_Check_Job
+		body := fmt.tprintf(`{{"tag_name":"v0.5.0","html_url":"%s"}}`, page)
+		testing.expectf(t, !parse_latest_release(transmute([]byte)body, &p), "%s isn't Lurker's release page", page)
+		destroy_update_check_job(&p)
+	}
+
+	// A download from elsewhere is left out, so the page opens instead of it.
+	body := `{"tag_name":"v0.5.0","html_url":"https://github.com/sp1r17/lurker/releases/tag/v0.5.0","assets":[
+		{"name":"lurker-0.5.0-x86_64-setup.exe","browser_download_url":"https://evil.example/setup.exe"},
+		{"name":"SHA256SUMS","browser_download_url":"https://github.com/sp1r17/lurker/releases/download/v0.5.0/../../../../x/SHA256SUMS"},
+		{"name":"SHA256SUMS.sig","browser_download_url":"https://github.com/sp1r17/lurker/releases/download/v0.5.0/SHA256SUMS.sig"}]}`
+	p: Update_Check_Job
+	defer destroy_update_check_job(&p)
+	testing.expect(t, parse_latest_release(transmute([]byte)string(body), &p))
+	testing.expect_value(t, p.installer, "")
+	testing.expect_value(t, p.sums, "")
+	testing.expect_value(t, p.signature, "https://github.com/sp1r17/lurker/releases/download/v0.5.0/SHA256SUMS.sig")
 }
 
 @(test)

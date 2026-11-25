@@ -240,7 +240,7 @@ finish_points_job :: proc(app: ^App, p: ^Points_Job) {
 		pts.urls, p.urls = p.urls, {}
 	}
 	if p.sent {
-		log.debugf("channel points: reported a minute of %s to %s", p.login, pts.urls[0])
+		log.debugf("channel points: reported a minute of %s to %s", log_private(p.login), pts.urls[0])
 		if pts.warned {
 			log.info("channel points: reporting watch time again")
 			pts.warned = false
