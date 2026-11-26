@@ -21,15 +21,16 @@ pre-roll or mid-roll ads.
 ## Features
 
 - Browse followed channels (live and offline), top streams and categories, and
-  search channels and categories
+  search channels and categories; reruns their channels tag as such are marked
 - Chat with 7TV, BTTV and FFZ emotes, badges, replies and an emote picker; open
   other channels' chats as splits beside the video
 - Recent chat history on joining, clickable links, reply threads (click a reply's
   "Replying to" line), and the chat's modes (slow, subscribers only...) above the
   chat box
-- Mentions are highlighted, with a count of unread ones on each chat; add your own
-  highlight phrases and hide people's messages, in Settings or with
-  `/highlight` and `/ignore`
+- Mentions are highlighted, with a count of unread ones on each chat, and can
+  play a sound or flash Lurker in the taskbar; add your own highlight phrases (or
+  `/regular expressions/`), highlight chosen people or badges in colours of their
+  own, and hide people's messages, in Settings or with `/highlight` and `/ignore`
 - User cards with everything someone said in the chat; moderators can time out,
   ban and delete from them, or with `/timeout`, `/ban` and `/clear`
 - Whispers show in the chat you're watching; send one with `/w name message`
@@ -210,8 +211,9 @@ settings are stored in `~/.config/lurker` (`%APPDATA%\lurker` on Windows).
 | R | Refresh (or start a frozen stream again) |
 | Enter | Chat in the focused split, or play an offline channel's last broadcast |
 | Ctrl+T / Ctrl+W | Open / close a chat split |
-| Ctrl+, | Settings (when browsing) |
+| Ctrl+, | Settings, over the stream while watching |
 | Ctrl+F | Search the chat, or channels when browsing |
+| Ctrl+C | Copy chat text selected by dragging over it |
 | / | Search channels |
 | Ctrl+= / Ctrl+- / Ctrl+0, or Ctrl+scroll | Text size |
 | Esc, or the mouse's back button | Back |
@@ -221,7 +223,8 @@ settings are stored in `~/.config/lurker` (`%APPDATA%\lurker` on Windows).
 On macOS, use Cmd instead of Ctrl, and Option+Left / Right to move by word.
 
 In chat, Tab completes emote and user names, `:` followed by part of a name opens
-the emote picker, and right-clicking a message replies to it.
+the emote picker, dragging over messages selects their text, and right-clicking a
+message offers to reply to it or copy it.
 
 ## Configuration
 

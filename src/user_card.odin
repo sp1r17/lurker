@@ -322,6 +322,7 @@ draw_user_card :: proc(app: ^App) {
 	clear(&c.hits.message_hits)
 	clear(&c.hits.link_hits)
 	clear(&c.hits.reply_hits)
+	c.hits.visible = c.list_rect
 	clear(&c.rows)
 	if len(shown) == 0 {
 		empty := "Its messages are gone from this chat." if in_thread else "None in this chat yet."
@@ -561,7 +562,7 @@ user_card_right_click :: proc(app: ^App, x, y: f32) -> bool {
 	}
 	if p := find_pane(app, c.pane); p != nil {
 		if _, m, found := card_message_at(c, p, x, y); found {
-			pane_reply_start(app, p, m)
+			message_menu_open(app, p, m, x, y)
 		}
 	}
 	return true

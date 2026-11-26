@@ -20,6 +20,11 @@ Setting_Switch :: enum {
 	Chat_Separators,
 	Chat_Still_Emotes,
 	Chat_Chatter_Count,
+	Chat_Mention_Sound,
+	Chat_Mention_Flash,
+	Chat_Pinned,
+	Chat_Prediction,
+	Chat_Poll,
 	Chat_Overlay,
 	Chat_Sync,
 	Next_Clip,
@@ -49,7 +54,14 @@ Setting_Choice :: enum {
 // entry to take it out.
 Setting_List :: enum {
 	Highlights,
+	// Chosen people and badges, each in a colour (chat_highlights.odin).
+	Highlight_People,
+	Highlight_Badges,
 	Ignored,
+	// Phrases that hide messages, or are replaced (chat_ignores.odin).
+	Ignored_Phrases,
+	// Names of the user's own for people (chat_nicknames.odin).
+	Nicknames,
 	Blocked_Channels,
 	Blocked_Categories,
 	// The channels muted, or chosen, for live notifications (Layout.notify_only).
@@ -66,6 +78,8 @@ Settings_Page :: struct {
 	// Set while drawing.
 	boxes:      [Setting_List]Rect,
 	remove:     [Setting_List][dynamic]Rect,
+	// Each chosen person's or badge's colour, clicked to change it.
+	swatches:   [Setting_List][dynamic]Rect,
 	switches:   [Setting_Switch]Rect,
 	choices:    [Setting_Choice]Rect,
 	smaller:    Rect,
@@ -95,6 +109,7 @@ settings_page_destroy :: proc(p: ^Settings_Page) {
 	for list in Setting_List {
 		input_destroy(&p.inputs[list])
 		delete(p.remove[list])
+		delete(p.swatches[list])
 	}
 }
 
@@ -184,8 +199,16 @@ settings_entries :: proc(app: ^App, list: Setting_List) -> []string {
 	switch list {
 	case .Highlights:
 		return app.layout.chat.highlights[:]
+	case .Highlight_People:
+		return highlight_entry_names(app.layout.chat.people[:])
+	case .Highlight_Badges:
+		return highlight_entry_names(app.layout.chat.badges[:])
 	case .Ignored:
 		return app.layout.chat.ignored[:]
+	case .Ignored_Phrases:
+		return app.layout.chat.ignored_phrases[:]
+	case .Nicknames:
+		return nickname_entries(app.layout.chat.nicknames[:])
 	case .Blocked_Channels:
 		return blocked_list(&app.blocked, .Channel)[:]
 	case .Blocked_Categories:
@@ -203,11 +226,27 @@ settings_add :: proc(app: ^App, list: Setting_List, typed: string) -> bool {
 	text := strings.trim_space(typed)
 	switch list {
 	case .Highlights:
-		phrase := strings.to_lower(text, context.temp_allocator)
+		phrase := normalize_phrase(text)
 		if phrase == "" {
 			return false
 		}
 		rule_add(&app.layout.chat.highlights, phrase)
+		layout_save(&app.layout)
+		return true
+	case .Highlight_People:
+		login := strings.to_lower(strings.trim_left(text, "@"), context.temp_allocator)
+		if !valid_login(login) {
+			return false
+		}
+		highlight_entry_add(&app.layout.chat.people, login)
+		layout_save(&app.layout)
+		return true
+	case .Highlight_Badges:
+		set := badge_set_name(text)
+		if set == "" {
+			return false
+		}
+		highlight_entry_add(&app.layout.chat.badges, set)
 		layout_save(&app.layout)
 		return true
 	case .Ignored:
@@ -216,6 +255,21 @@ settings_add :: proc(app: ^App, list: Setting_List, typed: string) -> bool {
 			return false
 		}
 		chat_ignore(app, login)
+		return true
+	case .Ignored_Phrases:
+		phrase := normalize_ignore(text)
+		if phrase == "" {
+			return false
+		}
+		chat_ignore_phrase(app, phrase)
+		return true
+	case .Nicknames:
+		login, nickname, ok := parse_nickname(text)
+		if !ok {
+			return false
+		}
+		nickname_set(&app.layout.chat.nicknames, login, nickname)
+		chat_nicknames_changed(app)
 		return true
 	case .Blocked_Channels:
 		return block(app, .Channel, text)
@@ -245,8 +299,20 @@ settings_remove :: proc(app: ^App, list: Setting_List, i: int) {
 	case .Highlights:
 		rule_remove(&app.layout.chat.highlights, strings.clone(entries[i], context.temp_allocator))
 		layout_save(&app.layout)
+	case .Highlight_People:
+		highlight_entry_remove(&app.layout.chat.people, i)
+		layout_save(&app.layout)
+	case .Highlight_Badges:
+		highlight_entry_remove(&app.layout.chat.badges, i)
+		layout_save(&app.layout)
 	case .Ignored:
 		chat_unignore(app, strings.clone(entries[i], context.temp_allocator))
+	case .Ignored_Phrases:
+		rule_remove(&app.layout.chat.ignored_phrases, strings.clone(entries[i], context.temp_allocator))
+		layout_save(&app.layout)
+	case .Nicknames:
+		nickname_remove(&app.layout.chat.nicknames, i)
+		chat_nicknames_changed(app)
 	case .Blocked_Channels:
 		unblock(app, .Channel, i)
 	case .Blocked_Categories:
@@ -286,6 +352,16 @@ setting_on :: proc(app: ^App, s: Setting_Switch) -> bool {
 		return l.chat.still_emotes
 	case .Chat_Chatter_Count:
 		return l.chat.chatter_count
+	case .Chat_Mention_Sound:
+		return l.chat.mention_sound
+	case .Chat_Mention_Flash:
+		return l.chat.mention_flash
+	case .Chat_Pinned:
+		return !l.chat.pinned_off
+	case .Chat_Prediction:
+		return !l.chat.prediction_off
+	case .Chat_Poll:
+		return !l.chat.poll_off
 	case .Chat_Overlay:
 		return l.chat_overlay
 	case .Chat_Sync:
@@ -377,11 +453,17 @@ setting_next :: proc(app: ^App, c: Setting_Choice) {
 	case .Latency_Buffer:
 		buffers := LOW_LATENCY_BUFFERS
 		l.latency_buffer_ms = next(buffers[:], l.latency_buffer_ms)
+		// Only low latency keeps a buffer.
+		if l.low_latency {
+			settings_stream_changed(app)
+		}
 	case .Max_Quality:
 		heights := MAX_HEIGHTS
 		l.max_height = next(heights[:], l.max_height)
+		settings_stream_changed(app)
 	case .Video_Enhancement:
 		l.video_enhancement = Video_Enhancement((int(l.video_enhancement) + 1) % len(Video_Enhancement))
+		settings_stream_changed(app)
 	case .Audio_Device:
 		// The system's choice, then each output; one no longer there goes back to
 		// the system's.
@@ -430,7 +512,8 @@ setting_next :: proc(app: ^App, c: Setting_Choice) {
 		}
 		l.start_view = views[(at + 1) % len(views)]
 	}
-	// Nothing is playing while browsing: the next stream picks it up.
+	// The stream settings start a stream playing again (settings_stream_changed);
+	// otherwise the next stream picks them up.
 	layout_save(l)
 }
 
@@ -442,9 +525,9 @@ setting_toggle :: proc(app: ^App, s: Setting_Switch) {
 	case .Update_Checks:
 		update_checks_toggle(app)
 	case .Low_Latency:
-		// Nothing is playing while browsing: the next stream picks it up.
 		app.layout.low_latency = !app.layout.low_latency
 		layout_save(&app.layout)
+		settings_stream_changed(app)
 	case .Follow_Raids:
 		app.layout.raids_off = !app.layout.raids_off
 		layout_save(&app.layout)
@@ -476,9 +559,33 @@ setting_toggle :: proc(app: ^App, s: Setting_Switch) {
 	case .Chat_Chatter_Count:
 		app.layout.chat.chatter_count = !app.layout.chat.chatter_count
 		layout_save(&app.layout)
-	case .Chat_Overlay:
-		app.layout.chat_overlay = !app.layout.chat_overlay
+	case .Chat_Mention_Sound:
+		app.layout.chat.mention_sound = !app.layout.chat.mention_sound
 		layout_save(&app.layout)
+		// Played once on switching it on, to hear what it sounds like.
+		if app.layout.chat.mention_sound {
+			mention_alert(app, 1)
+		}
+	case .Chat_Mention_Flash:
+		app.layout.chat.mention_flash = !app.layout.chat.mention_flash
+		layout_save(&app.layout)
+	case .Chat_Pinned:
+		app.layout.chat.pinned_off = !app.layout.chat.pinned_off
+		layout_save(&app.layout)
+	case .Chat_Prediction:
+		app.layout.chat.prediction_off = !app.layout.chat.prediction_off
+		layout_save(&app.layout)
+	case .Chat_Poll:
+		app.layout.chat.poll_off = !app.layout.chat.poll_off
+		layout_save(&app.layout)
+	case .Chat_Overlay:
+		if app.screen == .Watch {
+			// As O does, showing the chats again when they come back beside it.
+			watch_toggle_overlay(app)
+		} else {
+			app.layout.chat_overlay = !app.layout.chat_overlay
+			layout_save(&app.layout)
+		}
 	case .Chat_Sync:
 		app.layout.chat_sync = !app.layout.chat_sync
 		layout_save(&app.layout)
@@ -555,6 +662,13 @@ settings_click :: proc(app: ^App, x, y: f32) -> bool {
 				return true
 			}
 		}
+		for rect, i in p.swatches[list] {
+			if rect.w > 0 && in_rect(rect, x, y) {
+				highlight_entry_recolor(&app.layout.chat.people if list == .Highlight_People else &app.layout.chat.badges, i)
+				layout_save(&app.layout)
+				return true
+			}
+		}
 	}
 	return false
 }
@@ -569,7 +683,10 @@ language_setting_label :: proc(app: ^App) -> string {
 	return fmt.tprintf("%s, %s", language_name(app.layout.language), others)
 }
 
-draw_settings :: proc(app: ^App, content: Rect) {
+// The Settings page in `content`: the browse screen's, or `floating` in the
+// settings window over a stream (settings_window.odin), with a close button
+// rather than a back button and no account row. Returns its heading's strip.
+draw_settings :: proc(app: ^App, content: Rect, floating := false) -> (heading: Rect) {
 	r := &app.assets.renderer
 	b := &app.browse
 	p := &b.settings
@@ -581,13 +698,21 @@ draw_settings :: proc(app: ^App, content: Rect) {
 	lh := line_height(r, .Bold, tab_size)
 	heading_h := lh + pad
 
-	// A back button and the heading, like a category's.
-	b.back_button = {content.x + pad / 2, content.y + pad / 2, 36 * scale * r.text_scale, heading_h}
+	// A back button and the heading, like a category's; floating, the heading
+	// and a close button at the right.
+	heading = {content.x, content.y, content.w, pad / 2 + heading_h}
+	button_w := 36 * scale * r.text_scale
+	if floating {
+		b.back_button = {content.x + content.w - pad / 2 - button_w, content.y + pad / 2, button_w, heading_h}
+	} else {
+		b.back_button = {content.x + pad / 2, content.y + pad / 2, button_w, heading_h}
+	}
 	if in_rect(b.back_button, app.mouse.x, app.mouse.y) {
 		draw_rect(r, b.back_button, BROWSE_CARD_HOVER)
 	}
-	draw_centered(r, .Bold, tab_size * 1.6, b.back_button, "‹", BROWSE_TEXT)
-	draw_text(r, .Bold, tab_size, b.back_button.x + b.back_button.w + 8 * scale, content.y + pad / 2 + (heading_h - lh) / 2, "Settings", BROWSE_TEXT)
+	draw_centered(r, .Bold, tab_size * (1.2 if floating else 1.6), b.back_button, "×" if floating else "‹", BROWSE_TEXT)
+	title_x := content.x + pad if floating else b.back_button.x + b.back_button.w + 8 * scale
+	draw_text(r, .Bold, tab_size, title_x, content.y + pad / 2 + (heading_h - lh) / 2, "Settings", BROWSE_TEXT)
 	top := content.y + pad / 2 + heading_h
 	rest := Rect{content.x, top, content.w, content.y + content.h - top}
 
@@ -616,6 +741,11 @@ draw_settings :: proc(app: ^App, content: Rect) {
 		.Chat_Separators      = "Lines between messages",
 		.Chat_Still_Emotes    = "Still emotes instead of animated ones",
 		.Chat_Chatter_Count   = "Show how many are in the chat, above it",
+		.Chat_Mention_Sound   = "Sound on mentions",
+		.Chat_Mention_Flash   = "Flash in the taskbar on mentions",
+		.Chat_Pinned          = "Show the pinned message above the chat",
+		.Chat_Prediction      = "Show predictions above the chat",
+		.Chat_Poll            = "Show polls above the chat",
 		.Chat_Overlay         = "Chat over the video (O)",
 		.Chat_Sync     = "Delay chat to match the stream",
 		.Next_Clip     = "Play the next clip when one ends",
@@ -653,6 +783,11 @@ draw_settings :: proc(app: ^App, content: Rect) {
 		.Chat_Separators      = "A thin line between chat messages.",
 		.Chat_Still_Emotes    = "Animated emotes stay on their first frame, for a calmer chat.",
 		.Chat_Chatter_Count   = "How many people are in the chat of the channel you're watching, above it.",
+		.Chat_Mention_Sound   = "A short chime when a message mentions you or has one of your highlight phrases.",
+		.Chat_Mention_Flash   = "Lurker's taskbar entry flashes when a message mentions you or has one of your highlight phrases, until you switch to it.",
+		.Chat_Pinned          = "The message the channel's moderators pinned, above its chat. Click it to minimize or expand it.",
+		.Chat_Prediction      = "A running prediction and how the channel points are split, above the chat. Click it to minimize or expand it.",
+		.Chat_Poll            = "A running poll with a bar for each choice, and its result for a minute after. Click it to minimize or expand it.",
 		.Chat_Overlay         = "Chat on top of the video instead of beside it. O turns it on and off while watching.",
 		.Chat_Sync     = "Holds chat back by the stream's delay, so it reacts to what you see instead of ahead of it.",
 		.Next_Clip     = "When a clip ends, the next one in the list plays.",
@@ -681,8 +816,12 @@ draw_settings :: proc(app: ^App, content: Rect) {
 	lists := [Setting_List]struct {
 		label, hint, none, tip: string,
 	} {
-		.Highlights         = {"Highlight phrases", "Add a word or phrase", "Only mentions of you are highlighted.", "Chat messages with any of these in them stand out, as mentions of you do."},
+		.Highlights         = {"Highlight phrases", "Add a word or phrase", "Only mentions of you are highlighted.", "Chat messages with any of these in them stand out, as mentions of you do. Whole words, ignoring case; or write a regular expression between slashes, /like this/, with an i after it to ignore case."},
+		.Highlight_People   = {"Highlighted people", "Add a login", "No one is highlighted.", "Everyone's messages from these people stand out, each in its own colour. Click a colour to change it."},
+		.Highlight_Badges   = {"Highlighted badges", "vip, sub, mod, founder...", "No badges are highlighted.", "Messages from everyone with one of these badges stand out, each in its own colour. Click a colour to change it."},
 		.Ignored            = {"Ignored users", "Add a login", "No one is ignored.", "Messages from these people are hidden in every chat."},
+		.Ignored_Phrases    = {"Ignored phrases", "Add a phrase, or phrase -> words", "No phrases are ignored.", "Chat messages with any of these in them are hidden. Write phrase -> other words to show those words in its place instead, or phrase -> to take it out. Phrases are as highlight phrases are: whole words ignoring case, or /a regular expression/."},
+		.Nicknames          = {"Nicknames", "name -> nickname", "No one has a nickname.", "Your own names for people, shown in chat in place of theirs. Replies and mentions still use their real name; Ctrl+F finds them by either."},
 		.Blocked_Channels   = {"Channels", "Block a channel by its login", "No channels blocked.", "Left out of the stream lists, search, your offline follows and live notifications."},
 		.Blocked_Categories = {"Categories", "Block a category by its name", "No categories blocked.", "Left out of the categories, and streams in them out of the stream lists and search."},
 		.Notify_Channels    = {"Muted channels", "Mute a channel by its login", "No channels muted.", "Followed channels that don't notify when they go live."},
@@ -705,14 +844,15 @@ draw_settings :: proc(app: ^App, content: Rect) {
 		{title = "General", switches = general_switches, choices = {.Start_View}, text_size = true},
 		{title = "Streams", switches = {.Low_Latency, .Auto_Quality, .Normalize_Audio, .Follow_Raids, .Next_Clip, .Watch_Points, .Claim_Bonus, .Claim_Drops}, choices = {.Latency_Buffer, .Max_Quality, .Video_Enhancement, .Audio_Device, .Audio_Delay}, language = true},
 		{title = "Live notifications", switches = {.Notify_Changes}, choices = {.Notify_For}, lists = {.Notify_Channels}, notifications = true},
-		{title = "Chat", switches = {.Chat_Sync, .Chat_Timestamps, .Chat_Highlight_Staff, .Chat_Highlight_Own, .Chat_Hide_Bots, .Chat_Hide_Badges, .Chat_Alternate_Lines, .Chat_Separators, .Chat_Still_Emotes, .Chat_Chatter_Count, .Chat_Overlay}, choices = {.Chat_Overlay_Position, .Chat_Overlay_Size, .Chat_Overlay_Background}, lists = {.Highlights, .Ignored}},
+		{title = "Chat", switches = {.Chat_Sync, .Chat_Timestamps, .Chat_Highlight_Staff, .Chat_Highlight_Own, .Chat_Hide_Bots, .Chat_Hide_Badges, .Chat_Alternate_Lines, .Chat_Separators, .Chat_Still_Emotes, .Chat_Chatter_Count, .Chat_Mention_Sound, .Chat_Mention_Flash, .Chat_Pinned, .Chat_Prediction, .Chat_Poll, .Chat_Overlay}, choices = {.Chat_Overlay_Position, .Chat_Overlay_Size, .Chat_Overlay_Background}, lists = {.Highlights, .Highlight_People, .Highlight_Badges, .Ignored, .Ignored_Phrases, .Nicknames}},
 		{title = "Blocked", lists = {.Blocked_Channels, .Blocked_Categories}},
 		{title = "Account", account = true},
 		{title = "Bug reports", log = true},
 	}
 	sections := make([dynamic]Section, context.temp_allocator)
 	for s in all_sections {
-		if NOTIFICATIONS_SUPPORTED || !s.notifications {
+		// Signing out mid-stream is left to the browse screen's page.
+		if (NOTIFICATIONS_SUPPORTED || !s.notifications) && !(floating && s.account) {
 			append(&sections, s)
 		}
 	}
@@ -849,6 +989,7 @@ draw_settings :: proc(app: ^App, content: Rect) {
 			}
 			entries := settings_entries(app, list)
 			resize(&p.remove[list], len(entries))
+			resize(&p.swatches[list], len(entries) if list == .Highlight_People || list == .Highlight_Badges else 0)
 			if len(entries) == 0 {
 				draw_text(r, .Regular, text_size, x + row_pad, y, l.none, BROWSE_DIM_TEXT)
 				y += lh_text + row_gap
@@ -857,6 +998,9 @@ draw_settings :: proc(app: ^App, content: Rect) {
 				entry := Rect{x, y, list_w, entry_h}
 				y += entry_h + row_gap
 				p.remove[list][i] = {}
+				if i < len(p.swatches[list]) {
+					p.swatches[list][i] = {}
+				}
 				if !visible(entry, rest) {
 					continue
 				}
@@ -868,6 +1012,18 @@ draw_settings :: proc(app: ^App, content: Rect) {
 				draw_rect(r, button, SIGN_IN_BUTTON_HOVER if hovered else SIGN_IN_BUTTON)
 				draw_centered(r, .Bold, text_size, button, label, BROWSE_TEXT)
 				tw := button.x - 12 * scale - (entry.x + row_pad)
+				// A chosen person or badge: its colour, before Remove.
+				if i < len(p.swatches[list]) {
+					colors := app.layout.chat.people[:] if list == .Highlight_People else app.layout.chat.badges[:]
+					side := button.h
+					swatch := Rect{button.x - 10 * scale - side, button.y, side, side}
+					p.swatches[list][i] = swatch
+					if in_rect(swatch, app.mouse.x, app.mouse.y) {
+						draw_rect(r, {swatch.x - 2 * scale, swatch.y - 2 * scale, swatch.w + 4 * scale, swatch.h + 4 * scale}, BROWSE_TEXT)
+					}
+					draw_rect(r, swatch, highlight_swatch(colors[i].color))
+					tw = swatch.x - 12 * scale - (entry.x + row_pad)
+				}
 				draw_text(r, .Bold, name_size, entry.x + row_pad, entry.y + row_pad, fit_text(r, .Bold, name_size, name, tw), BROWSE_TEXT)
 			}
 		}
@@ -915,6 +1071,7 @@ draw_settings :: proc(app: ^App, content: Rect) {
 		tip = ""
 	}
 	draw_setting_tip(app, tip, tip_row, rest, text_size)
+	return
 }
 
 // What the hovered setting does, below its row (above it without room there),

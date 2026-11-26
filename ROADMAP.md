@@ -100,17 +100,18 @@ New:
 Chat, catching up with Chatterino:
 
 - Selecting and copying chat text, and Copy message on a message's right-click
-  menu
+  menu (done)
 - A sound and a flashing taskbar entry on mentions and highlight phrases, each
-  optional
+  optional (done)
 - Messages sent with a channel point reward marked with the reward's name, and
-  announcements in their color
-- Polls above the chat, as predictions are
+  announcements in their color (done)
+- Polls above the chat, as predictions are (done)
 - Highlighting everyone's messages from chosen people or with a chosen badge
   (VIPs, subscribers...), each in a color of its own; highlight phrases as
-  whole words, with case, or as regular expressions
+  whole words, with case, or as regular expressions (done)
 - Ignoring phrases as well as people, or replacing them with other words
-- Nicknames: your own name for someone, shown in place of theirs
+  (done)
+- Nicknames: your own name for someone, shown in place of theirs (done)
 - Search filters in Ctrl+F: `from:`, `has:link`, `is:mention` and the like
 - Moderation from the chat: timeout, ban and delete buttons on each message,
   AutoMod's held messages to allow or deny, and `/vip`, `/mod`, `/raid`,

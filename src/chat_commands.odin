@@ -15,7 +15,7 @@ pane_command :: proc(app: ^App, p: ^Chat_Pane, text: string) -> bool {
 	rules := &app.layout.chat
 	switch name {
 	case "/highlight":
-		phrase := strings.to_lower(arg, context.temp_allocator)
+		phrase := normalize_phrase(arg)
 		if phrase == "" {
 			pane_notice(app, p, "Highlight messages with a word or phrase: /highlight phrase")
 			return true
@@ -24,7 +24,7 @@ pane_command :: proc(app: ^App, p: ^Chat_Pane, text: string) -> bool {
 		layout_save(&app.layout)
 		pane_notice(app, p, fmt.tprintf("Messages with \"%s\" are highlighted now.", phrase))
 	case "/unhighlight":
-		phrase := strings.to_lower(arg, context.temp_allocator)
+		phrase := normalize_phrase(arg)
 		if !rule_remove(&rules.highlights, phrase) {
 			pane_notice(app, p, fmt.tprintf("\"%s\" isn't highlighted. /highlights lists what is.", phrase))
 			return true
@@ -113,6 +113,17 @@ chat_unignore :: proc(app: ^App, login: string) -> bool {
 	}
 	layout_save(&app.layout)
 	return true
+}
+
+// Hides messages with `phrase` in every chat, from now on and those showing, or
+// puts other words in its place in new ones (chat_ignores.odin). `phrase` is
+// normalized (normalize_ignore).
+chat_ignore_phrase :: proc(app: ^App, phrase: string) {
+	rule_add(&app.layout.chat.ignored_phrases, phrase)
+	layout_save(&app.layout)
+	for p in app.watch.panes {
+		chat_view_remove_phrases(&p.view)
+	}
 }
 
 chat_ignored :: proc(app: ^App, login: string) -> bool {

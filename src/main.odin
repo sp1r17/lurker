@@ -179,6 +179,8 @@ App :: struct {
 	// notify_windows.odin, notify_darwin.odin).
 	notifications:       Notifications,
 	update:              Updater,
+	// The sound and taskbar flash on mentions (mention_alert.odin).
+	mention_alert:       Mention_Alert,
 	// Watch time reported for channel points (points.odin).
 	points:              Points,
 }
@@ -294,6 +296,7 @@ run :: proc(channels: []string, config: Config, video: Maybe(Twitch_Link) = nil)
 	notifications_init(&app)
 	defer notifications_destroy(&app)
 	defer updater_destroy(&app.update)
+	defer mention_sound_close(&app.mention_alert)
 	defer points_destroy(&app.points)
 	defer sign_in_destroy(&app.sign_in)
 	defer if app.screen == .Watch {
@@ -320,7 +323,7 @@ run :: proc(channels: []string, config: Config, video: Maybe(Twitch_Link) = nil)
 		// Wake up for the next animation frame, browse refresh or sign-in poll,
 		// whichever is due first.
 		wait := a.next_frame_ms if a.next_frame_ms >= 0 else -1
-		dues := []int{-1, -1, volume_osd_wait(&app), controls_wait(&app), stream_info_tick(&app), stream_end_tick(&app), stream_retry_tick(&app), text_size_osd_wait(&app), replay_tick(&app), watched_tick(&app), resume_notice_wait(&app), screenshot_notice_wait(&app), buffering_tick(&app), bonus_tick(&app), drops_tick(&app), chat_banner_tick(&app), whispers_tick(&app), live_poll_tick(&app), update_tick(&app), ping_tick(&app), latency_tick(&app), chat_delay_tick(&app), settings_wait(&app), points_tick(&app)}
+		dues := []int{-1, -1, volume_osd_wait(&app), controls_wait(&app), stream_info_tick(&app), stream_end_tick(&app), stream_retry_tick(&app), text_size_osd_wait(&app), replay_tick(&app), watched_tick(&app), resume_notice_wait(&app), screenshot_notice_wait(&app), buffering_tick(&app), bonus_tick(&app), drops_tick(&app), chat_banner_tick(&app), whispers_tick(&app), live_poll_tick(&app), update_tick(&app), ping_tick(&app), latency_tick(&app), chat_delay_tick(&app), settings_wait(&app), settings_restart_tick(&app), points_tick(&app), mention_sound_tick(&app)}
 		if app.screen == .Browse {
 			dues[0], dues[1] = browse_tick(&app), sign_in_tick(&app)
 		}
@@ -403,7 +406,10 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 	case e.type == .WINDOW_EXPOSED || e.type == .WINDOW_PIXEL_SIZE_CHANGED:
 		redraw^ = true
 	case e.type == .TEXT_INPUT:
-		if app.screen == .Watch {
+		if app.screen == .Watch && settings_typing(&app.browse) {
+			settings_text(app, string(e.text.text))
+			redraw^ = true
+		} else if app.screen == .Watch {
 			pane_text_input(app, string(e.text.text))
 			redraw^ = true
 		} else if app.browse.search.focused {
@@ -420,6 +426,10 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 		redraw^ = true
 	case e.type == .MOUSE_BUTTON_DOWN && app.shortcuts_open:
 		app.shortcuts_open = false
+		redraw^ = true
+	case e.type == .KEY_DOWN && app.screen == .Watch && settings_typing(&app.browse):
+		// Typing in the settings window's boxes.
+		settings_key(app, e.key)
 		redraw^ = true
 	case e.type == .KEY_DOWN && app.screen == .Watch && is_typing(app):
 		// Typing: every key goes to the box.
@@ -507,6 +517,12 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 		if .LEFT in e.motion.state {
 			window_drag_motion(app, app.mouse.x, app.mouse.y)
 			chat_overlay_drag_motion(app, app.mouse.x, app.mouse.y)
+			settings_window_drag_motion(app, app.mouse.x, app.mouse.y)
+			if app.screen == .Watch {
+				for p in app.watch.panes {
+					_ = chat_select_motion(&app.assets, &p.view, p.messages_rect, app.mouse.x, app.mouse.y, app.scale)
+				}
+			}
 		} else {
 			app.drag_armed = false
 		}
@@ -551,6 +567,12 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 		app.drag_armed = false
 		if e.button.button == sdl.BUTTON_LEFT {
 			chat_overlay_release(app)
+			settings_window_release(app)
+			if app.screen == .Watch {
+				for p in app.watch.panes {
+					chat_select_release(&p.view)
+				}
+			}
 			chat_overlay_update_cursor(app)
 			redraw^ = true
 		}
@@ -561,7 +583,7 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 			redraw^ = true
 			return true
 		}
-		// A right-click on a chat message replies to it.
+		// A right-click on a chat message opens its menu.
 		if e.button.button == sdl.BUTTON_RIGHT && app.screen == .Watch {
 			watch_right_click(app, e.button.x * density, e.button.y * density)
 			redraw^ = true
@@ -579,7 +601,7 @@ handle_event :: proc(app: ^App, e: sdl.Event, redraw: ^bool) -> bool {
 		x, y := e.button.x * density, e.button.y * density
 		redraw^ = true
 		// Under the chats over the video, they're covered: the chats take it.
-		if !(app.screen == .Watch && on_chat_overlay(app, x, y)) && window_controls_click(app, x, y) {
+		if !(app.screen == .Watch && (on_chat_overlay(app, x, y) || on_settings_window(app, x, y))) && window_controls_click(app, x, y) {
 			return true
 		}
 		window_press(app, x, y, e.button.clicks)
@@ -632,10 +654,12 @@ finish_jobs :: proc(app: ^App) {
 				for pane in app.watch.panes {
 					chat_view_refresh_emotes(&pane.view, a)
 				}
+				chat_banner_refresh_emotes(app)
 			} else if pane := find_pane(app, p.pane); pane != nil {
 				// A channel's set arriving after its pane closed is dropped.
 				finish_emote_set_job(&pane.emotes, &p)
 				chat_view_refresh_emotes(&pane.view, a)
+				chat_banner_refresh_emotes(app)
 			}
 		case Badges_Job:
 			pane := find_pane(app, p.pane)
@@ -644,6 +668,7 @@ finish_jobs :: proc(app: ^App) {
 			for other in app.watch.panes {
 				chat_view_refresh_badges(&other.view)
 			}
+			chat_banner_refresh_emotes(app)
 			apply_auth_check(app, p.check, p.auth)
 		case Streams_Job:
 			apply_auth_check(app, p.check, p.auth)
@@ -715,8 +740,14 @@ finish_jobs :: proc(app: ^App) {
 			finish_drops_job(app, &p)
 		case Room_Name_Job:
 			finish_room_name_job(&app.assets, &p)
+		case Rewards_Job:
+			finish_rewards_job(app, &p)
 		case Chat_Banner_Job:
 			finish_chat_banner_job(app, &p)
+		case Prediction_Bet_Job:
+			finish_prediction_bet_job(app, &p)
+		case Poll_Vote_Job:
+			finish_poll_vote_job(app, &p)
 		case Whispers_Job:
 			finish_whispers_job(app, &p)
 		case Whisper_Send_Job:
@@ -784,6 +815,7 @@ draw :: proc(app: ^App) {
 			draw_browse(app, screen)
 		case .Watch:
 			draw_watch(app)
+			draw_settings_window(app, screen)
 		}
 		draw_text_size_osd(app, screen)
 		draw_shortcuts(app, screen)
@@ -837,6 +869,7 @@ update_cursor :: proc(app: ^App) {
 	hide :=
 		app.screen == .Watch &&
 		!controls_visible(app) &&
+		!on_settings_window(app, app.mouse.x, app.mouse.y) &&
 		in_rect(app.watch.video_rect, app.mouse.x, app.mouse.y)
 	if hide == app.cursor_hidden {
 		return

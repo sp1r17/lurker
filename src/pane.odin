@@ -23,6 +23,8 @@ Chat_Pane :: struct {
 	delayed:       [dynamic]Chat_Message,
 	// The channel's own emotes and badges.
 	emotes:        Emotes,
+	// Its channel points rewards' names (rewards.odin).
+	rewards:       Rewards,
 	// The channel's user ID, once the chat has joined.
 	room_id:       string,
 	boxes:         [Box]Text_Input,
@@ -85,6 +87,7 @@ pane_new :: proc(app: ^App) -> ^Chat_Pane {
 	p := new(Chat_Pane)
 	p.id = app.next_pane_id
 	p.view.emotes = &p.emotes
+	p.view.rewards = &p.rewards
 	p.view.rules = &app.layout.chat
 	return p
 }
@@ -112,6 +115,7 @@ pane_destroy :: proc(app: ^App, p: ^Chat_Pane) {
 	chat_view_destroy(&p.view)
 	chat_delay_destroy(p)
 	emotes_destroy(&p.emotes)
+	rewards_destroy(&p.rewards)
 	for &ti in p.boxes {
 		input_destroy(&ti)
 	}
@@ -141,10 +145,11 @@ pane_chat_arrived :: proc(app: ^App, p: ^Chat_Pane) {
 	}
 	chat_delay_hold(app, p, &arrived)
 	if len(arrived) > 0 {
-		added := chat_view_add(&p.view, &app.assets, app.scale, pane_text_width(app, p), arrived[:], app.auth.login if app.signed_in else "")
+		added, alerts := chat_view_add(&p.view, &app.assets, app.scale, pane_text_width(app, p), arrived[:], app.auth.login if app.signed_in else "")
 		if !pane_seen(app, p) {
 			p.unread_mentions += added
 		}
+		mention_alert(app, alerts)
 	}
 	if p.room_id != "" {
 		return
@@ -157,6 +162,7 @@ pane_chat_arrived :: proc(app: ^App, p: ^Chat_Pane) {
 	for source in Emote_Source.Channel_7TV ..= Emote_Source.Channel_FFZ {
 		emotes_request_set(&app.assets.jobs, source, room_id, p.id)
 	}
+	rewards_request(app, p)
 	if app.signed_in {
 		emotes_request_badges(&app.assets.jobs, app.client_id, app.auth, room_id, p.id)
 	}
@@ -197,9 +203,8 @@ pane_layout :: proc(app: ^App, p: ^Chat_Pane, rect: Rect) {
 	// What's pinned and predicted, on the watched channel's chat.
 	p.banner_rect = {}
 	if p.channel != "" && p.channel == app.watch.channel {
-		if _, n := chat_banner_lines(&app.watch.banner); n > 0 {
-			line_h := line_height(&app.assets.renderer, .Regular, BROWSE_CARD_TEXT_SIZE * scale) + pad / 2
-			p.banner_rect = {rect.x, top, rect.w, f32(n) * line_h + pad / 2}
+		if h := chat_banner_height(app, &p.emotes, rect.w); h > 0 {
+			p.banner_rect = {rect.x, top, rect.w, h}
 			top = p.banner_rect.y + p.banner_rect.h
 		}
 	}
@@ -272,14 +277,7 @@ draw_pane :: proc(app: ^App, p: ^Chat_Pane, focused: bool) {
 	}
 
 	if p.banner_rect.w > 0 {
-		draw_rect(r, p.banner_rect, CHAT_HEADER)
-		lines, n := chat_banner_lines(&app.watch.banner)
-		line_h := line_height(r, .Regular, size) + CHAT_PADDING * scale / 2
-		for line, i in lines[:n] {
-			x := p.banner_rect.x + 8 * scale
-			y := p.banner_rect.y + CHAT_PADDING * scale / 4 + f32(i) * line_h
-			draw_text(r, .Regular, size, x, y, fit_text(r, .Regular, size, line, p.banner_rect.w - 16 * scale), CHAT_TEXT)
-		}
+		draw_chat_banner(app, &p.emotes, p.banner_rect)
 	}
 
 	if p.modes_rect.w > 0 {
@@ -446,6 +444,21 @@ pane_click :: proc(app: ^App, p: ^Chat_Pane, x, y: f32) {
 	if !in_rect(p.input_rect, x, y) {
 		emote_panel_close(app, p)
 	}
+	// The pinned message, prediction or poll expands or minimizes, unless it's
+	// the pinned message's link or sender's name.
+	if p.banner_rect.w > 0 && in_rect(p.banner_rect, x, y) {
+		hits := &app.watch.banner.hits
+		if url, found := chat_view_link_at(hits, x, y); found {
+			open_url(url)
+			return
+		}
+		if login, found := chat_view_name_at(hits, x, y); found {
+			user_card_open(app, p, login, y)
+			return
+		}
+		chat_banner_click(app, x, y)
+		return
+	}
 	// Back to the newest messages, which marks the mentions read.
 	if p.mention_badge.w > 0 && in_rect(p.mention_badge, x, y) {
 		p.view.scroll = 0
@@ -484,7 +497,17 @@ pane_click :: proc(app: ^App, p: ^Chat_Pane, x, y: f32) {
 		}
 	}
 	user_card_dismiss(app)
-	chat_view_click(&p.view, x, y)
+	if chat_view_click(&p.view, x, y) {
+		return
+	}
+	// Elsewhere on the messages, dragging selects text; only one chat has a
+	// selection, for Ctrl+C.
+	for other in app.watch.panes {
+		other.view.selection = {}
+	}
+	if in_rect(p.messages_rect, x, y) {
+		chat_select_press(&app.assets, &p.view, x, y)
+	}
 }
 
 pane_text_input :: proc(app: ^App, text: string) {
@@ -641,7 +664,6 @@ pane_submit_channel :: proc(app: ^App, p: ^Chat_Pane) {
 	layout_remember(app)
 }
 
-@(private = "file")
 copy_text :: proc(text: string) {
 	if !sdl.SetClipboardText(strings.clone_to_cstring(text, context.temp_allocator)) {
 		log.warnf("can't copy: %s", sdl.GetError())
@@ -770,8 +792,14 @@ pane_subs_only :: proc(p: ^Chat_Pane) -> bool {
 
 // Starts a reply to `m` (on a right-click), if it can have one: it's from
 // someone else, with an ID, and there's a sign-in to chat with.
+// Whether `m` can be replied to from `p`: signed in, live, and a message from
+// someone that's still there.
+can_reply :: proc(app: ^App, p: ^Chat_Pane, m: ^Chat_Message) -> bool {
+	return !pane_replaying(app, p) && app.signed_in && p.channel != "" && m.id != "" && m.kind != .System && !m.deleted
+}
+
 pane_reply_start :: proc(app: ^App, p: ^Chat_Pane, m: ^Chat_Message) {
-	if pane_replaying(app, p) || !app.signed_in || p.channel == "" || m.id == "" || m.kind == .System || m.deleted {
+	if !can_reply(app, p, m) {
 		return
 	}
 	pane_reply_cancel(p)
