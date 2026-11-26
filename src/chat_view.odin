@@ -103,6 +103,9 @@ Chat_Rules :: struct {
 	// them.
 	compiled:         [dynamic]Compiled_Phrase,
 	compiled_ignores: [dynamic]Compiled_Phrase,
+	// Names of the user's own for people, shown in place of theirs
+	// (chat_nicknames.odin).
+	nicknames:       [dynamic]Nickname,
 	// The time each was sent, before it.
 	timestamps:      bool,
 	// The streamer's and moderators' messages, marked out.
@@ -229,6 +232,7 @@ chat_rules_destroy :: proc(r: ^Chat_Rules) {
 	delete(r.compiled)
 	compiled_phrases_destroy(&r.compiled_ignores)
 	delete(r.compiled_ignores)
+	nicknames_destroy(&r.nicknames)
 }
 
 // The scrolling list of chat messages. `scroll` is how far the view is above the
@@ -516,12 +520,14 @@ parse_filter :: proc(filter: string) -> (f: Chat_Filter) {
 	return
 }
 
-// Whether the message is from `from` (by login prefix, or display name) and
-// contains every word, in its text or the sender's name, ignoring case.
-message_matches :: proc(m: ^Chat_Message, f: Chat_Filter) -> bool {
+// Whether the message is from `from` (by login prefix, display name or
+// nickname) and contains every word, in its text or the sender's name, ignoring
+// case.
+message_matches :: proc(m: ^Chat_Message, f: Chat_Filter, rules: ^Chat_Rules = nil) -> bool {
 	name := strings.to_lower(m.name, context.temp_allocator)
+	nickname := strings.to_lower(shown_name(m, rules), context.temp_allocator)
 	if f.from != "" {
-		if m.kind == .System || (!strings.has_prefix(m.login, f.from) && !strings.has_prefix(name, f.from)) {
+		if m.kind == .System || (!strings.has_prefix(m.login, f.from) && !strings.has_prefix(name, f.from) && !strings.has_prefix(nickname, f.from)) {
 			return false
 		}
 	}
@@ -530,7 +536,7 @@ message_matches :: proc(m: ^Chat_Message, f: Chat_Filter) -> bool {
 	}
 	text := strings.to_lower(message_plain_text(m), context.temp_allocator)
 	for word in f.words {
-		if !strings.contains(text, word) && !strings.contains(name, word) {
+		if !strings.contains(text, word) && !strings.contains(name, word) && !strings.contains(nickname, word) {
 			return false
 		}
 	}
@@ -661,7 +667,7 @@ draw_chat_view :: proc(a: ^Assets, v: ^Chat_View, rect: Rect, scale: f32, filter
 			continue
 		}
 		if filter != "" {
-			if !message_matches(m, query) {
+			if !message_matches(m, query, v.rules) {
 				continue
 			}
 			v.matches += 1
@@ -944,15 +950,16 @@ message_layout_into :: proc(a: ^Assets, channel: ^Emotes, m: ^Chat_Message, l: ^
 	}
 
 	text_color := CHAT_TEXT
+	name := shown_name(m, a.rules)
 	switch m.kind {
 	case .Chat:
 		b.in_name = m.login != ""
-		put_words(&b, .Bold, m.color, m.name)
+		put_words(&b, .Bold, m.color, name)
 		b.in_name = false
 		put_text(&b, .Bold, m.color, ":")
 	case .Action:
 		b.in_name = m.login != ""
-		put_words(&b, .Bold, m.color, m.name)
+		put_words(&b, .Bold, m.color, name)
 		b.in_name = false
 		text_color = m.color
 	case .System:
