@@ -111,7 +111,7 @@ Chat, catching up with Chatterino:
   whole words, with case, or as regular expressions (done)
 - Ignoring phrases as well as people, or replacing them with other words
   (done)
-- Nicknames: your own name for someone, shown in place of theirs
+- Nicknames: your own name for someone, shown in place of theirs (done)
 - Search filters in Ctrl+F: `from:`, `has:link`, `is:mention` and the like
 - Moderation from the chat: timeout, ban and delete buttons on each message,
   AutoMod's held messages to allow or deny, and `/vip`, `/mod`, `/raid`,
