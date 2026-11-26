@@ -133,6 +133,9 @@ Watch :: struct {
 	latency_item:     Rect,
 	raids_item:       Rect,
 	stats_item:       Rect,
+	// "All settings", opening the settings window (settings_window.odin).
+	settings_item:    Rect,
+	settings_window:  Settings_Window,
 	// When this channel's watch began (Assets.now_ms), for the stats.
 	watching_since:   int,
 	// Ping to Twitch, measured while the stats show (ping_tick), and the latency
@@ -258,6 +261,7 @@ watch_stop :: proc(app: ^App) {
 	user_card_close(app)
 	message_menu_close(&w.message_menu)
 	box_unfocus(app)
+	settings_window_close(app)
 	for p in w.panes {
 		pane_destroy(app, p)
 	}
@@ -424,6 +428,9 @@ controls_wait :: proc(app: ^App) -> int {
 // dragging the window.
 on_controls :: proc(app: ^App, x, y: f32) -> bool {
 	w := &app.watch
+	if on_settings_window(app, x, y) {
+		return true
+	}
 	if w.quality_button.w > 0 && in_rect(w.quality_button, x, y) {
 		return true
 	}
@@ -456,7 +463,7 @@ on_controls :: proc(app: ^App, x, y: f32) -> bool {
 				return true
 			}
 		}
-		if in_rect(w.latency_item, x, y) || in_rect(w.raids_item, x, y) || in_rect(w.stats_item, x, y) {
+		if in_rect(w.latency_item, x, y) || in_rect(w.raids_item, x, y) || in_rect(w.stats_item, x, y) || in_rect(w.settings_item, x, y) {
 			return true
 		}
 	}
@@ -506,6 +513,10 @@ controls_click :: proc(app: ^App, x, y: f32) -> bool {
 			watch_toggle_stats(app)
 			return true
 		}
+		if in_rect(w.settings_item, x, y) {
+			settings_window_open(app)
+			return true
+		}
 	}
 	if w.quality_button.w > 0 && in_rect(w.quality_button, x, y) {
 		w.quality_menu = !w.quality_menu
@@ -535,6 +546,7 @@ draw_controls :: proc(app: ^App) {
 	w.latency_item = {}
 	w.raids_item = {}
 	w.stats_item = {}
+	w.settings_item = {}
 	if !controls_visible(app) {
 		return
 	}
@@ -567,7 +579,8 @@ draw_controls :: proc(app: ^App) {
 		return
 	}
 
-	// The qualities, a divider, then the low latency, raid and stats switches.
+	// The qualities, a divider, then the low latency, raid and stats switches,
+	// and all the settings when signed in.
 	// Grows with the text size, to fit its labels.
 	item_h := MENU_ITEM_HEIGHT * scale * r.text_scale
 	divider := 9 * scale
@@ -585,7 +598,8 @@ draw_controls :: proc(app: ^App) {
 		lh_regular := line_height(r, .Regular, size)
 		menu_w = max(menu_w, text_width(r, .Bold, size, labels[i]) + 2 * pad + lh_regular * 0.55 + 8 * scale)
 	}
-	menu_h := item_h * f32(items + 3) + divider
+	extras := 4 if app.signed_in else 3
+	menu_h := item_h * f32(items + extras) + divider
 	menu := Rect{w.quality_button.x + w.quality_button.w - menu_w, w.quality_button.y - 6 * scale - menu_h, menu_w, menu_h}
 	hidden := menu_hover_begin(app, menu)
 	defer menu_hover_end(app, hidden)
@@ -597,12 +611,17 @@ draw_controls :: proc(app: ^App) {
 	}
 	line_y := menu.y + item_h * f32(items) + divider / 2
 	draw_rect(r, {menu.x + pad, line_y, menu.w - 2 * pad, scale}, USER_CARD_BORDER)
-	w.latency_item = {menu.x, menu.y + menu_h - 3 * item_h, menu.w, item_h}
+	below := menu.y + item_h * f32(items) + divider
+	w.latency_item = {menu.x, below, menu.w, item_h}
 	draw_menu_item(app, w.latency_item, "Low latency", app.layout.low_latency)
-	w.raids_item = {menu.x, menu.y + menu_h - 2 * item_h, menu.w, item_h}
+	w.raids_item = {menu.x, below + item_h, menu.w, item_h}
 	draw_menu_item(app, w.raids_item, "Follow raids", !app.layout.raids_off)
-	w.stats_item = {menu.x, menu.y + menu_h - item_h, menu.w, item_h}
+	w.stats_item = {menu.x, below + 2 * item_h, menu.w, item_h}
 	draw_menu_item(app, w.stats_item, "Stream stats", app.layout.stats)
+	if app.signed_in {
+		w.settings_item = {menu.x, below + 3 * item_h, menu.w, item_h}
+		draw_menu_item(app, w.settings_item, "All settings…", false)
+	}
 }
 
 draw_menu_item :: proc(app: ^App, item: Rect, label: string, checked: bool, color := BROWSE_TEXT) {
@@ -776,6 +795,8 @@ watch_key :: proc(app: ^App, key: sdl.KeyboardEvent) -> bool {
 			watch_add_pane(app)
 		case sdl.K_W:
 			watch_close_pane(app, focused)
+		case sdl.K_COMMA:
+			settings_window_toggle(app)
 		case sdl.K_C:
 			for p in w.panes {
 				if p.view.selection.shown {
@@ -790,6 +811,10 @@ watch_key :: proc(app: ^App, key: sdl.KeyboardEvent) -> bool {
 	switch key.key {
 	case sdl.K_ESCAPE:
 		switch {
+		case w.settings_window.open && app.browse.language_menu.open:
+			app.browse.language_menu.open = false
+		case w.settings_window.open:
+			settings_window_close(app)
 		case w.quality_menu:
 			w.quality_menu = false
 		case w.chapter_menu:
@@ -938,6 +963,10 @@ pane_at :: proc(app: ^App, x, y: f32) -> (p: ^Chat_Pane, index: int) {
 
 watch_click :: proc(app: ^App, x, y: f32) {
 	w := &app.watch
+	// Over everything.
+	if settings_window_click(app, x, y) {
+		return
+	}
 	if message_menu_click(app, x, y) {
 		return
 	}
@@ -983,6 +1012,9 @@ watch_click :: proc(app: ^App, x, y: f32) {
 // A right-click: on a chat message, its menu.
 watch_right_click :: proc(app: ^App, x, y: f32) {
 	message_menu_close(&app.watch.message_menu)
+	if on_settings_window(app, x, y) {
+		return
+	}
 	if user_card_right_click(app, x, y) {
 		return
 	}
@@ -1007,6 +1039,9 @@ watch_open_videos :: proc(app: ^App, login, name: string) {
 
 // The wheel scrolls a chat, or over the video, changes the volume as in mpv.
 watch_scroll :: proc(app: ^App, x, y, wheel_y: f32) {
+	if settings_window_scroll(app, x, y, wheel_y) {
+		return
+	}
 	if user_card_scroll(app, x, y, wheel_y) {
 		return
 	}

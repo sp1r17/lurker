@@ -28,7 +28,7 @@ SHORTCUTS :: [?]Shortcut {
 	{"R", "Refresh (or start a frozen stream again)"},
 	{"Enter", "Chat in the focused split, or play an offline channel's last broadcast"},
 	{"Ctrl+T / Ctrl+W", "Open / close a chat split"},
-	{"Ctrl+,", "Settings (when browsing)"},
+	{"Ctrl+,", "Settings, over the stream while watching"},
 	{"Ctrl+F", "Search the chat, or channels when browsing"},
 	{"Ctrl+C", "Copy chat text selected by dragging over it"},
 	{"/", "Search channels"},

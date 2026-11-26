@@ -453,11 +453,17 @@ setting_next :: proc(app: ^App, c: Setting_Choice) {
 	case .Latency_Buffer:
 		buffers := LOW_LATENCY_BUFFERS
 		l.latency_buffer_ms = next(buffers[:], l.latency_buffer_ms)
+		// Only low latency keeps a buffer.
+		if l.low_latency {
+			settings_stream_changed(app)
+		}
 	case .Max_Quality:
 		heights := MAX_HEIGHTS
 		l.max_height = next(heights[:], l.max_height)
+		settings_stream_changed(app)
 	case .Video_Enhancement:
 		l.video_enhancement = Video_Enhancement((int(l.video_enhancement) + 1) % len(Video_Enhancement))
+		settings_stream_changed(app)
 	case .Audio_Device:
 		// The system's choice, then each output; one no longer there goes back to
 		// the system's.
@@ -506,7 +512,8 @@ setting_next :: proc(app: ^App, c: Setting_Choice) {
 		}
 		l.start_view = views[(at + 1) % len(views)]
 	}
-	// Nothing is playing while browsing: the next stream picks it up.
+	// The stream settings start a stream playing again (settings_stream_changed);
+	// otherwise the next stream picks them up.
 	layout_save(l)
 }
 
@@ -518,9 +525,9 @@ setting_toggle :: proc(app: ^App, s: Setting_Switch) {
 	case .Update_Checks:
 		update_checks_toggle(app)
 	case .Low_Latency:
-		// Nothing is playing while browsing: the next stream picks it up.
 		app.layout.low_latency = !app.layout.low_latency
 		layout_save(&app.layout)
+		settings_stream_changed(app)
 	case .Follow_Raids:
 		app.layout.raids_off = !app.layout.raids_off
 		layout_save(&app.layout)
@@ -572,8 +579,13 @@ setting_toggle :: proc(app: ^App, s: Setting_Switch) {
 		app.layout.chat.poll_off = !app.layout.chat.poll_off
 		layout_save(&app.layout)
 	case .Chat_Overlay:
-		app.layout.chat_overlay = !app.layout.chat_overlay
-		layout_save(&app.layout)
+		if app.screen == .Watch {
+			// As O does, showing the chats again when they come back beside it.
+			watch_toggle_overlay(app)
+		} else {
+			app.layout.chat_overlay = !app.layout.chat_overlay
+			layout_save(&app.layout)
+		}
 	case .Chat_Sync:
 		app.layout.chat_sync = !app.layout.chat_sync
 		layout_save(&app.layout)
@@ -671,7 +683,10 @@ language_setting_label :: proc(app: ^App) -> string {
 	return fmt.tprintf("%s, %s", language_name(app.layout.language), others)
 }
 
-draw_settings :: proc(app: ^App, content: Rect) {
+// The Settings page in `content`: the browse screen's, or `floating` in the
+// settings window over a stream (settings_window.odin), with a close button
+// rather than a back button and no account row. Returns its heading's strip.
+draw_settings :: proc(app: ^App, content: Rect, floating := false) -> (heading: Rect) {
 	r := &app.assets.renderer
 	b := &app.browse
 	p := &b.settings
@@ -683,13 +698,21 @@ draw_settings :: proc(app: ^App, content: Rect) {
 	lh := line_height(r, .Bold, tab_size)
 	heading_h := lh + pad
 
-	// A back button and the heading, like a category's.
-	b.back_button = {content.x + pad / 2, content.y + pad / 2, 36 * scale * r.text_scale, heading_h}
+	// A back button and the heading, like a category's; floating, the heading
+	// and a close button at the right.
+	heading = {content.x, content.y, content.w, pad / 2 + heading_h}
+	button_w := 36 * scale * r.text_scale
+	if floating {
+		b.back_button = {content.x + content.w - pad / 2 - button_w, content.y + pad / 2, button_w, heading_h}
+	} else {
+		b.back_button = {content.x + pad / 2, content.y + pad / 2, button_w, heading_h}
+	}
 	if in_rect(b.back_button, app.mouse.x, app.mouse.y) {
 		draw_rect(r, b.back_button, BROWSE_CARD_HOVER)
 	}
-	draw_centered(r, .Bold, tab_size * 1.6, b.back_button, "‹", BROWSE_TEXT)
-	draw_text(r, .Bold, tab_size, b.back_button.x + b.back_button.w + 8 * scale, content.y + pad / 2 + (heading_h - lh) / 2, "Settings", BROWSE_TEXT)
+	draw_centered(r, .Bold, tab_size * (1.2 if floating else 1.6), b.back_button, "×" if floating else "‹", BROWSE_TEXT)
+	title_x := content.x + pad if floating else b.back_button.x + b.back_button.w + 8 * scale
+	draw_text(r, .Bold, tab_size, title_x, content.y + pad / 2 + (heading_h - lh) / 2, "Settings", BROWSE_TEXT)
 	top := content.y + pad / 2 + heading_h
 	rest := Rect{content.x, top, content.w, content.y + content.h - top}
 
@@ -828,7 +851,8 @@ draw_settings :: proc(app: ^App, content: Rect) {
 	}
 	sections := make([dynamic]Section, context.temp_allocator)
 	for s in all_sections {
-		if NOTIFICATIONS_SUPPORTED || !s.notifications {
+		// Signing out mid-stream is left to the browse screen's page.
+		if (NOTIFICATIONS_SUPPORTED || !s.notifications) && !(floating && s.account) {
 			append(&sections, s)
 		}
 	}
@@ -1047,6 +1071,7 @@ draw_settings :: proc(app: ^App, content: Rect) {
 		tip = ""
 	}
 	draw_setting_tip(app, tip, tip_row, rest, text_size)
+	return
 }
 
 // What the hovered setting does, below its row (above it without room there),
