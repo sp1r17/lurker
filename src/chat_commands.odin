@@ -115,6 +115,17 @@ chat_unignore :: proc(app: ^App, login: string) -> bool {
 	return true
 }
 
+// Hides messages with `phrase` in every chat, from now on and those showing, or
+// puts other words in its place in new ones (chat_ignores.odin). `phrase` is
+// normalized (normalize_ignore).
+chat_ignore_phrase :: proc(app: ^App, phrase: string) {
+	rule_add(&app.layout.chat.ignored_phrases, phrase)
+	layout_save(&app.layout)
+	for p in app.watch.panes {
+		chat_view_remove_phrases(&p.view)
+	}
+}
+
 chat_ignored :: proc(app: ^App, login: string) -> bool {
 	return slice.contains(app.layout.chat.ignored[:], login)
 }

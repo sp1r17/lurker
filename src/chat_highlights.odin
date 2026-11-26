@@ -170,65 +170,79 @@ normalize_phrase :: proc(typed: string) -> string {
 
 // A phrase made ready to match: a compiled expression, or the words as they are.
 Compiled_Phrase :: struct {
-	// The phrase it was made from. Owned.
-	phrase:  string,
-	pattern: regex.Regular_Expression,
+	// The entry it was made from. Owned.
+	entry:    string,
+	// What to look for: a /regular expression/, or lowercase words. Points into
+	// `entry`.
+	phrase:   string,
+	pattern:  regex.Regular_Expression,
 	is_regex: bool,
+	// For an ignored phrase (chat_ignores.odin): the words put in its place, when
+	// it `replaces` rather than hides the message. Points into `entry`.
+	replacement: string,
+	replaces:    bool,
 }
 
-// Keeps `rules.compiled` in step with `rules.highlights`, compiling only when
-// they've changed.
-@(private = "file")
-compile_phrases :: proc(rules: ^Chat_Rules) {
-	same := len(rules.compiled) == len(rules.highlights)
-	for c, i in rules.compiled {
+// Keeps `compiled` in step with `entries`, compiling only when they've changed.
+// Ignored phrases may have a replacement after them (split_ignore).
+compile_phrases :: proc(compiled: ^[dynamic]Compiled_Phrase, entries: []string, ignores := false) {
+	same := len(compiled) == len(entries)
+	for c, i in compiled {
 		if !same {
 			break
 		}
-		same = c.phrase == rules.highlights[i]
+		same = c.entry == entries[i]
 	}
 	if same {
 		return
 	}
-	compiled_phrases_destroy(rules)
-	for phrase in rules.highlights {
-		c := Compiled_Phrase{phrase = strings.clone(phrase)}
-		if len(phrase) >= 3 && phrase[0] == '/' {
-			if r, err := regex.create_by_user(phrase); err == nil {
+	compiled_phrases_destroy(compiled)
+	for entry in entries {
+		c := Compiled_Phrase{entry = strings.clone(entry)}
+		c.phrase = c.entry
+		if ignores {
+			c.phrase, c.replacement, c.replaces = split_ignore(c.entry)
+		}
+		if len(c.phrase) >= 3 && c.phrase[0] == '/' {
+			if r, err := regex.create_by_user(c.phrase); err == nil {
 				c.pattern, c.is_regex = r, true
 			}
 		}
-		append(&rules.compiled, c)
+		append(compiled, c)
 	}
 }
 
-compiled_phrases_destroy :: proc(rules: ^Chat_Rules) {
-	for c in rules.compiled {
-		delete(c.phrase)
+compiled_phrases_destroy :: proc(compiled: ^[dynamic]Compiled_Phrase) {
+	for c in compiled {
+		delete(c.entry)
 		if c.is_regex {
 			regex.destroy(c.pattern)
 		}
 	}
-	clear(&rules.compiled)
+	clear(compiled)
 }
 
-// Whether the message's text has one of the user's highlight phrases: as whole
-// words ignoring case, or matching one as a regular expression.
+// Whether `text` (and `lower`, it in lowercase) has the phrase in it: as whole
+// words ignoring case, or matching it as a regular expression.
+phrase_matches :: proc(c: ^Compiled_Phrase, text, lower: string) -> bool {
+	if c.is_regex {
+		capture, found := regex.match(c.pattern, text, context.temp_allocator, context.temp_allocator)
+		regex.destroy(capture, context.temp_allocator)
+		return found
+	}
+	return contains_words(lower, c.phrase)
+}
+
+// Whether the message's text has one of the user's highlight phrases.
 highlighted :: proc(m: ^Chat_Message, rules: ^Chat_Rules) -> bool {
 	if rules == nil || len(rules.highlights) == 0 || m.kind == .System {
 		return false
 	}
-	compile_phrases(rules)
+	compile_phrases(&rules.compiled, rules.highlights[:])
 	text := message_plain_text(m)
 	lower := strings.to_lower(text, context.temp_allocator)
 	for &c in rules.compiled {
-		if c.is_regex {
-			capture, found := regex.match(c.pattern, text, context.temp_allocator, context.temp_allocator)
-			regex.destroy(capture, context.temp_allocator)
-			if found {
-				return true
-			}
-		} else if contains_words(lower, c.phrase) {
+		if phrase_matches(&c, text, lower) {
 			return true
 		}
 	}

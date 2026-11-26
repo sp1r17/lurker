@@ -58,6 +58,8 @@ Setting_List :: enum {
 	Highlight_People,
 	Highlight_Badges,
 	Ignored,
+	// Phrases that hide messages, or are replaced (chat_ignores.odin).
+	Ignored_Phrases,
 	Blocked_Channels,
 	Blocked_Categories,
 	// The channels muted, or chosen, for live notifications (Layout.notify_only).
@@ -201,6 +203,8 @@ settings_entries :: proc(app: ^App, list: Setting_List) -> []string {
 		return highlight_entry_names(app.layout.chat.badges[:])
 	case .Ignored:
 		return app.layout.chat.ignored[:]
+	case .Ignored_Phrases:
+		return app.layout.chat.ignored_phrases[:]
 	case .Blocked_Channels:
 		return blocked_list(&app.blocked, .Channel)[:]
 	case .Blocked_Categories:
@@ -248,6 +252,13 @@ settings_add :: proc(app: ^App, list: Setting_List, typed: string) -> bool {
 		}
 		chat_ignore(app, login)
 		return true
+	case .Ignored_Phrases:
+		phrase := normalize_ignore(text)
+		if phrase == "" {
+			return false
+		}
+		chat_ignore_phrase(app, phrase)
+		return true
 	case .Blocked_Channels:
 		return block(app, .Channel, text)
 	case .Blocked_Categories:
@@ -284,6 +295,9 @@ settings_remove :: proc(app: ^App, list: Setting_List, i: int) {
 		layout_save(&app.layout)
 	case .Ignored:
 		chat_unignore(app, strings.clone(entries[i], context.temp_allocator))
+	case .Ignored_Phrases:
+		rule_remove(&app.layout.chat.ignored_phrases, strings.clone(entries[i], context.temp_allocator))
+		layout_save(&app.layout)
 	case .Blocked_Channels:
 		unblock(app, .Channel, i)
 	case .Blocked_Categories:
@@ -768,6 +782,7 @@ draw_settings :: proc(app: ^App, content: Rect) {
 		.Highlight_People   = {"Highlighted people", "Add a login", "No one is highlighted.", "Everyone's messages from these people stand out, each in its own colour. Click a colour to change it."},
 		.Highlight_Badges   = {"Highlighted badges", "vip, sub, mod, founder...", "No badges are highlighted.", "Messages from everyone with one of these badges stand out, each in its own colour. Click a colour to change it."},
 		.Ignored            = {"Ignored users", "Add a login", "No one is ignored.", "Messages from these people are hidden in every chat."},
+		.Ignored_Phrases    = {"Ignored phrases", "Add a phrase, or phrase -> words", "No phrases are ignored.", "Chat messages with any of these in them are hidden. Write phrase -> other words to show those words in its place instead, or phrase -> to take it out. Phrases are as highlight phrases are: whole words ignoring case, or /a regular expression/."},
 		.Blocked_Channels   = {"Channels", "Block a channel by its login", "No channels blocked.", "Left out of the stream lists, search, your offline follows and live notifications."},
 		.Blocked_Categories = {"Categories", "Block a category by its name", "No categories blocked.", "Left out of the categories, and streams in them out of the stream lists and search."},
 		.Notify_Channels    = {"Muted channels", "Mute a channel by its login", "No channels muted.", "Followed channels that don't notify when they go live."},
@@ -790,7 +805,7 @@ draw_settings :: proc(app: ^App, content: Rect) {
 		{title = "General", switches = general_switches, choices = {.Start_View}, text_size = true},
 		{title = "Streams", switches = {.Low_Latency, .Auto_Quality, .Normalize_Audio, .Follow_Raids, .Next_Clip, .Watch_Points, .Claim_Bonus, .Claim_Drops}, choices = {.Latency_Buffer, .Max_Quality, .Video_Enhancement, .Audio_Device, .Audio_Delay}, language = true},
 		{title = "Live notifications", switches = {.Notify_Changes}, choices = {.Notify_For}, lists = {.Notify_Channels}, notifications = true},
-		{title = "Chat", switches = {.Chat_Sync, .Chat_Timestamps, .Chat_Highlight_Staff, .Chat_Highlight_Own, .Chat_Hide_Bots, .Chat_Hide_Badges, .Chat_Alternate_Lines, .Chat_Separators, .Chat_Still_Emotes, .Chat_Chatter_Count, .Chat_Mention_Sound, .Chat_Mention_Flash, .Chat_Pinned, .Chat_Prediction, .Chat_Poll, .Chat_Overlay}, choices = {.Chat_Overlay_Position, .Chat_Overlay_Size, .Chat_Overlay_Background}, lists = {.Highlights, .Highlight_People, .Highlight_Badges, .Ignored}},
+		{title = "Chat", switches = {.Chat_Sync, .Chat_Timestamps, .Chat_Highlight_Staff, .Chat_Highlight_Own, .Chat_Hide_Bots, .Chat_Hide_Badges, .Chat_Alternate_Lines, .Chat_Separators, .Chat_Still_Emotes, .Chat_Chatter_Count, .Chat_Mention_Sound, .Chat_Mention_Flash, .Chat_Pinned, .Chat_Prediction, .Chat_Poll, .Chat_Overlay}, choices = {.Chat_Overlay_Position, .Chat_Overlay_Size, .Chat_Overlay_Background}, lists = {.Highlights, .Highlight_People, .Highlight_Badges, .Ignored, .Ignored_Phrases}},
 		{title = "Blocked", lists = {.Blocked_Channels, .Blocked_Categories}},
 		{title = "Account", account = true},
 		{title = "Bug reports", log = true},
