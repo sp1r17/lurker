@@ -96,8 +96,13 @@ Chat_Rules :: struct {
 	// in each one's colour (chat_highlights.odin).
 	people:          [dynamic]Highlight_Entry,
 	badges:          [dynamic]Highlight_Entry,
-	// The highlights made ready to match, kept in step with them.
-	compiled:        [dynamic]Compiled_Phrase,
+	// Phrases whose messages are hidden, or replaced with other words
+	// (chat_ignores.odin): "phrase", or "phrase -> words".
+	ignored_phrases: [dynamic]string,
+	// The highlights and ignored phrases made ready to match, kept in step with
+	// them.
+	compiled:         [dynamic]Compiled_Phrase,
+	compiled_ignores: [dynamic]Compiled_Phrase,
 	// The time each was sent, before it.
 	timestamps:      bool,
 	// The streamer's and moderators' messages, marked out.
@@ -216,8 +221,14 @@ chat_rules_destroy :: proc(r: ^Chat_Rules) {
 	delete(r.ignored)
 	highlight_entries_destroy(&r.people)
 	highlight_entries_destroy(&r.badges)
-	compiled_phrases_destroy(r)
+	for s in r.ignored_phrases {
+		delete(s)
+	}
+	delete(r.ignored_phrases)
+	compiled_phrases_destroy(&r.compiled)
 	delete(r.compiled)
+	compiled_phrases_destroy(&r.compiled_ignores)
+	delete(r.compiled_ignores)
 }
 
 // The scrolling list of chat messages. `scroll` is how far the view is above the
@@ -290,13 +301,14 @@ chat_view_destroy :: proc(v: ^Chat_View) {
 
 // Adds messages that have just arrived, taking ownership. Moderation messages fade
 // what they remove; messages mentioning `self_login`, or a highlight phrase, are
-// highlighted, and ignored people's are dropped. When the view
+// highlighted, and ignored people's are dropped, as are messages with an
+// ignored phrase; others have replaced phrases' words put in. When the view
 // is scrolled up, it moves by the new messages' height so the messages being read
 // stay put. Returns how many of them mention `self_login` (or have a highlight
 // phrase), and how many of those were said just now rather than before the chat
 // joined, to alert about.
 chat_view_add :: proc(v: ^Chat_View, a: ^Assets, scale, width: f32, new_messages: []Chat_Message, self_login := "") -> (mentions_added, alerts: int) {
-	for m in new_messages {
+	for &m in new_messages {
 		if v.rules != nil && m.kind != .System && slice.contains(v.rules.ignored[:], m.login) {
 			destroy_chat_message(m)
 			continue
@@ -309,15 +321,22 @@ chat_view_add :: proc(v: ^Chat_View, a: ^Assets, scale, width: f32, new_messages
 				continue
 			}
 		}
+		mine := self_login != "" && m.login == self_login
+		if !mine && m.clear == .None && ignored_by_phrase(&m, v.rules) {
+			destroy_chat_message(m)
+			continue
+		}
 		append(&v.messages, m)
 		added := &v.messages[len(v.messages) - 1]
 		number_line(v, len(v.messages) - 1)
+		if !mine {
+			apply_replacements(added, v.rules)
+		}
 		// Our own messages are the only ones without an ID.
-		own := added.id == "" && added.kind != .System && self_login != "" && added.login == self_login
+		own := added.id == "" && added.kind != .System && mine
 		apply_third_party_emotes(added, v.emotes, &a.emotes, &a.user_emotes if own else nil)
 		apply_emoji(added, &a.emoji)
 		apply_reward_label(v.rewards, added)
-		mine := self_login != "" && added.login == self_login
 		added.own = mine && added.kind != .System
 		added.mention = mentions(added, self_login) || (!mine && highlighted(added, v.rules))
 		if added.mention {
@@ -417,25 +436,31 @@ chat_view_remove_user :: proc(v: ^Chat_View, login: string) {
 
 // Whether `phrase` is in `text` with no letter or digit right before or after it.
 contains_words :: proc(text, phrase: string) -> bool {
+	return find_words(text, phrase) >= 0
+}
+
+// Where `phrase` is in `text`, from `from` on, with no letter or digit right
+// before or after it; -1 if it isn't.
+find_words :: proc(text, phrase: string, from := 0) -> int {
 	if phrase == "" {
-		return false
+		return -1
 	}
 	word_byte :: proc(c: u8) -> bool {
 		return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c >= 0x80
 	}
-	for start := 0; start < len(text); {
+	for start := from; start < len(text); {
 		i := strings.index(text[start:], phrase)
 		if i < 0 {
-			return false
+			return -1
 		}
 		i += start
 		end := i + len(phrase)
 		if (i == 0 || !word_byte(text[i - 1]) || !word_byte(phrase[0])) && (end == len(text) || !word_byte(text[end]) || !word_byte(phrase[len(phrase) - 1])) {
-			return true
+			return i
 		}
 		start = i + 1
 	}
-	return false
+	return -1
 }
 
 // Keeps the newest CHAT_MAX_MESSAGES, dropping the oldest once there are

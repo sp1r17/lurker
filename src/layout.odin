@@ -177,6 +177,7 @@ parse_layout :: proc(data: []byte, l: ^Layout) -> bool {
 		notify_chosen:     []string,
 		highlights:  []string,
 		ignored:     []string,
+		ignored_phrases: []string,
 		chat_highlight_people: []Saved_Highlight,
 		chat_highlight_badges: []Saved_Highlight,
 		chat_timestamps:      bool,
@@ -324,6 +325,9 @@ parse_layout :: proc(data: []byte, l: ^Layout) -> bool {
 			rule_add(&l.chat.ignored, login)
 		}
 	}
+	for phrase in saved.ignored_phrases {
+		rule_add(&l.chat.ignored_phrases, normalize_ignore(phrase))
+	}
 	// A file from before the text size was saved has none (0): keep the default.
 	if saved.text_size != 0 {
 		l.text_size = clamp(saved.text_size, MIN_TEXT_SIZE, MAX_TEXT_SIZE)
@@ -381,6 +385,7 @@ layout_save :: proc(l: ^Layout) {
 		notify_chosen:     []string,
 		highlights:  []string,
 		ignored:     []string,
+		ignored_phrases: []string,
 		chat_highlight_people: []Saved_Highlight,
 		chat_highlight_badges: []Saved_Highlight,
 		chat_timestamps:      bool,
@@ -406,7 +411,7 @@ layout_save :: proc(l: ^Layout) {
 		skipped_version:   string,
 		language:          string,
 		language_hide:     bool,
-	}{LAYOUT_VERSION, l.splits, l.volume, l.muted, quality_name(l.quality), l.low_latency, l.raids_off, l.stats, l.chat_sync, l.latency_buffer_ms, l.max_height, fmt.tprint(l.video_enhancement), l.next_clip_off, l.points_off, l.normalize_audio, l.auto_quality_off, l.bonus_off, l.drops_off, l.audio_device, l.audio_delay_ms, l.stream_sort, l.start_view, l.hide_chat, l.text_size, l.notifications_off, l.notify_only, l.notify_changes, l.notify_muted[:], l.notify_chosen[:], l.chat.highlights[:], l.chat.ignored[:], saved_highlights(l.chat.people[:]), saved_highlights(l.chat.badges[:]), l.chat.timestamps, l.chat.highlight_staff, l.chat.hide_bots, l.chat.alternate_lines, l.chat.hide_badges, l.chat.highlight_own, l.chat.separators, l.chat.still_emotes, l.chat.chatter_count, l.chat.mention_sound, l.chat.mention_flash, l.chat.pinned_off, l.chat.prediction_off, l.chat.poll_off, l.chat_overlay, fmt.tprint(l.chat_overlay_position), fmt.tprint(l.chat_overlay_size), fmt.tprint(l.chat_overlay_background), l.chat_overlay_box, l.update_checks_off, l.skipped_version, l.language, l.language_hide}
+	}{LAYOUT_VERSION, l.splits, l.volume, l.muted, quality_name(l.quality), l.low_latency, l.raids_off, l.stats, l.chat_sync, l.latency_buffer_ms, l.max_height, fmt.tprint(l.video_enhancement), l.next_clip_off, l.points_off, l.normalize_audio, l.auto_quality_off, l.bonus_off, l.drops_off, l.audio_device, l.audio_delay_ms, l.stream_sort, l.start_view, l.hide_chat, l.text_size, l.notifications_off, l.notify_only, l.notify_changes, l.notify_muted[:], l.notify_chosen[:], l.chat.highlights[:], l.chat.ignored[:], l.chat.ignored_phrases[:], saved_highlights(l.chat.people[:]), saved_highlights(l.chat.badges[:]), l.chat.timestamps, l.chat.highlight_staff, l.chat.hide_bots, l.chat.alternate_lines, l.chat.hide_badges, l.chat.highlight_own, l.chat.separators, l.chat.still_emotes, l.chat.chatter_count, l.chat.mention_sound, l.chat.mention_flash, l.chat.pinned_off, l.chat.prediction_off, l.chat.poll_off, l.chat_overlay, fmt.tprint(l.chat_overlay_position), fmt.tprint(l.chat_overlay_size), fmt.tprint(l.chat_overlay_background), l.chat_overlay_box, l.update_checks_off, l.skipped_version, l.language, l.language_hide}
 	data, err := json.marshal(saved, {pretty = true, use_enum_names = true}, context.temp_allocator)
 	if err != nil {
 		return
